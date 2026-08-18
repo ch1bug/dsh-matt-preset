@@ -21,7 +21,7 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具、定时任务
 
 | 组件 | 说明 |
 | --- | --- |
-| `matt-workflow.mjs` + `.md` | 完整 ask-matt 工作流地图，注册为独立 `matt:workflow` prompt section（紧跟 persona 之后）；`{{model}}`/`{{cwd}}` 插值。 |
+| persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图（含 INITIALIZATION 段）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
 | `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。 |
 | `scheduled-jobs.mjs` | cron 定时任务（`cron-parser`）：`jobs_list`/`jobs_run`/`jobs_pause`；失败可选通知显式配置的会话（`notifySessionId`，空 = 仅记日志）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建骨架 + 空 `docs/adr/`。 |
@@ -59,6 +59,7 @@ mkdir -p tests/node_modules
 ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@deepseek-ai" tests/node_modules/@deepseek-ai
 node tests/verify.mjs          # 17 项：handoff 子会话 + 文档首条提示词 + model 路由 + /clear 已移除 + jobs 全套 + workspace attach
 node tests/verify-notify.mjs   # 失败通知端到端（live followup）
+node tests/verify-persona.mjs  # persona 即系统提示词：{{model}}/{{cwd}} 渲染插值
 # 其它机器部署路径不同时：
 DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
 ```
@@ -68,12 +69,11 @@ DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
 ```
 dsh-matt-preset/
 ├── preset.yml            # roster 元数据（name/description/order）
-├── agent.cordis.yml      # cordis 组合（persona + matt-workflow + 全量工具 + handoff-tool + scheduled-jobs）
-├── *.mjs                 # preset 内 cordis 插件（matt-workflow / handoff-tool / scheduled-jobs）
-├── matt-workflow.md      # 完整 ask-matt 人设文本
-├── CONTEXT.md            # 术语表 + 决策（D1–D17）
+├── agent.cordis.yml      # cordis 组合（persona=完整工作流人设 + 全量工具 + handoff-tool + scheduled-jobs）
+├── *.mjs                 # preset 内 cordis 插件（handoff-tool / scheduled-jobs）
+├── CONTEXT.md            # 术语表 + 决策（D1–D18）
 ├── docs/adr/             # 架构决策记录
-└── tests/                # 挂载验证（verify.mjs / verify-notify.mjs）
+└── tests/                # 挂载验证（verify / verify-notify / verify-persona）
 ```
 
 ## License
