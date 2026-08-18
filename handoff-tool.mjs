@@ -15,8 +15,7 @@
  *      first turn starts immediately via `agent.followup()` (the same
  *      admission path the prompt RPC uses), so the child becomes a real,
  *      sidebar-visible session on its own and starts working the handoff
- *      right away (under the preset's two-phase bootstrap, that first turn
- *      runs on the Minimal surface and promotes after the first tool call),
+ *      right away,
  *   4. returns the file path + child session id; the agent must then STOP and
  *      tell the human to switch in the sidebar.
  *

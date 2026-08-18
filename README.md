@@ -2,7 +2,7 @@
 
 按 [Matt Pocock 的 AI 编码工作流](https://github.com/mattpocock)（ask-matt）运转的
 DSH agent preset：**grill 打磨想法 → 原型判定 → to-spec / to-tickets 拆票 →
-implement（内嵌 tdd）→ code-review**，配两阶段 bootstrap、handoff 工具、定时任务
+implement（内嵌 tdd）→ code-review**，配 handoff 工具、定时任务
 与工作区自主初始化。
 
 ## 这是什么规范
@@ -21,11 +21,13 @@ implement（内嵌 tdd）→ code-review**，配两阶段 bootstrap、handoff �
 
 | 组件 | 说明 |
 | --- | --- |
-| `tool-bootstrap.mjs` | 两阶段 bootstrap：phase 1 = minimal 表面（单行 persona + `bash` + `str_replace_editor`、无 runtime 上下文、输出封顶 1024），首个持久化工具调用 / 首轮结束后 promote 全量（Code Mode 呈现）。 |
-| `matt-workflow.mjs` + `.md` | 完整 ask-matt 工作流地图，注册为独立 `matt:workflow` prompt section（phase 1 剥、promote 恢复）；`{{model}}`/`{{cwd}}` 插值。 |
+| `matt-workflow.mjs` + `.md` | 完整 ask-matt 工作流地图，注册为独立 `matt:workflow` prompt section（紧跟 persona 之后）；`{{model}}`/`{{cwd}}` 插值。 |
 | `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。 |
 | `scheduled-jobs.mjs` | cron 定时任务（`cron-parser`）：`jobs_list`/`jobs_run`/`jobs_pause`；失败可选通知显式配置的会话（`notifySessionId`，空 = 仅记日志）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建骨架 + 空 `docs/adr/`。 |
+
+> 曾试验两阶段 bootstrap（梁神模式，`tool-bootstrap.mjs`）：实测仅对 DeepSeek V4 Pro
+> 有效，对其他模型（含 V4 Flash）是副作用，已取消（见 `CONTEXT.md` D17），恢复全量表面。
 
 ## 安装
 
@@ -66,16 +68,16 @@ DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
 ```
 dsh-matt-preset/
 ├── preset.yml            # roster 元数据（name/description/order）
-├── agent.cordis.yml      # cordis 组合（persona + matt-workflow + tool-bootstrap + 全量工具 + handoff-tool + scheduled-jobs）
-├── *.mjs                 # preset 内 cordis 插件（tool-bootstrap / matt-workflow / handoff-tool / scheduled-jobs）
+├── agent.cordis.yml      # cordis 组合（persona + matt-workflow + 全量工具 + handoff-tool + scheduled-jobs）
+├── *.mjs                 # preset 内 cordis 插件（matt-workflow / handoff-tool / scheduled-jobs）
 ├── matt-workflow.md      # 完整 ask-matt 人设文本
-├── CONTEXT.md            # 术语表 + 决策（D1–D16）
+├── CONTEXT.md            # 术语表 + 决策（D1–D17）
 ├── docs/adr/             # 架构决策记录
 └── tests/                # 挂载验证（verify.mjs / verify-notify.mjs）
 ```
 
 ## License
 
-MIT。`tool-bootstrap.mjs` 与组合改编自 DeepSeek Harness 内置 preset 与
-[xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard)
-（均 MIT），详见 [NOTICE](NOTICE.md)。
+MIT。组合改编自 DeepSeek Harness 内置 preset（MIT，DeepSeek）；曾含的
+`tool-bootstrap.mjs`（来自 [xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard)，
+MIT）已于 D17 移除，详见 [NOTICE](NOTICE.md)。
