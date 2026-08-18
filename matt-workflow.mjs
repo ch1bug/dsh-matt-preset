@@ -2,12 +2,10 @@
  * matt-workflow — the full ask-matt workflow text as a NON-persona prompt
  * section.
  *
- * Two-phase bootstrap (see tool-bootstrap.mjs) keeps only the persona section
- * during phase 1 — the one-line Minimal anchor — so the full Matt workflow
- * map must live in a differently-named section: `tool-bootstrap` strips every
- * section that is not `deployment:persona`/`persona` in phase 1 and restores
- * them after promotion, which is exactly what makes the two-phase surface
- * work. `{{model}}`/`{{cwd}}` stay as prompt variables — renderPrompt
+ * The complete Matt workflow map is registered as its own section
+ * (`matt:workflow`) right after the persona slot, so the flow map reads
+ * first and stays editable separately from the one-line persona.
+ * `{{model}}`/`{{cwd}}` stay as prompt variables — renderPrompt
  * interpolates them per assembly like any other section.
  *
  * This plugin CONSUMES host services only and publishes nothing, so it needs
