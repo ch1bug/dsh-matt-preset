@@ -10,7 +10,7 @@
 - **job-runner 插件** — 拟在 matt preset 挂载的定时任务执行器（形态待访谈确定）。
 - **standing mount** — preset 的常驻挂载，随 DSH 进程存活（首个会话加入时创建）；它存续期间插件可在进程内跑定时器。
 - **~~两阶段 bootstrap（two-phase bootstrap）~~（已废弃，见 D17）** — 曾试验：会话首轮按内置 minimal 预设裁剪（单行 persona + bash + str_replace_editor、输出封顶 1024），首个持久化工具调用后 promote 到全量。理据（上游 dsh-anchored-standard 系）不适用于本部署的模型面，2026-08-18 实测后取消。
-- **单行 persona** — 会话 persona 即单行（You are a helpful software engineer assistant.）；完整 ask-matt 工作流文本在独立 matt:workflow section（当初为 phase 1 剥离而拆分，D17 后结构保留）。
+- **完整人设 persona** — persona（系统提示词）直接承载完整 ask-matt 工作流文本（{{model}}/{{cwd}} 渲染时插值）；不再有独立 workflow section（D18）。
 - **handoff 首条提示词** — handoff 文档作为子会话的**第一个 user 消息**投递（`followup()` 立即触发首轮）；子会话随即非 blank、侧边栏立即可见。与旧"文档注入（inbox 合成上下文）"是两种机制。
 - **工作区初始化（workspace initialization）** — 会话早期对无 CONTEXT.md 的 cwd 做自主探测（git/docs/语言信号），建 CONTEXT.md 骨架（"未初始化"标记 + 已核实事实）与空 docs/adr/；只做本地非破坏性步骤，领域决策与外部系统（issue tracker）仍问人。
 - **进度快照（progress snapshot）** — 强制 setup 打断流程前写往 `.scratch/progress.md` 的当前进度摘要（状态/决策/指针），防压缩丢失。
@@ -36,11 +36,12 @@
 - **D10（2026-08-18，访谈 R3）** — 首个任务：每天 **09:00** 跑 `sync-skills.sh`，开失败通知。
 - **D11（2026-08-18，访谈 R4）** — 同步任务 **`runOnMount: true`**：新挂载时先跑一次。
 - **D12（2026-08-18，访谈 R5）** — ~~matt preset 挂**两阶段 bootstrap**（照梁神配置）~~ —— **已被 D17 取代**。
-- **D13（2026-08-18，访谈 R5）** — **persona 拆分**：行内 = 单行 persona；完整 ask-matt 文本 = 独立 matt:workflow section（结构在 D17 后保留，理由不再依赖 phase 1 剥离）。
+- **D13（2026-08-18，访谈 R5）** — ~~**persona 拆分**：行内 = 单行 persona；完整 ask-matt 文本 = 独立 matt:workflow section~~ —— **已被 D18 取代**。
 - **D14（2026-08-18，访谈 R5）** — handoff_tool 改造：mode 收敛 **`fork`（带历史）| `fresh`（无历史）**，默认 `fork`；文档 = 子会话**首条 user 提示词**（followup 立即触发首轮，替代 inbox 注入）。
 - **D15（2026-08-18，访谈 R5）** — **删除 `/clear`** 命令及其插件；"全新会话"走 GUI New Session（hero-chip 可选手动选 preset）。
 - **D16（2026-08-18，访谈 R6）** — **工作区自主初始化**：会话早期无 CONTEXT.md 时自主探测并建骨架（Q1A/Q2A/Q3A）；实现载体 = 人设 INITIALIZATION 段（Q4A）；issue-tracker 缺失只顺带提一次，需用到 tracker 技能时**先存 .scratch/progress.md 进度快照再强制 setup**（Q5/Q6A）。
-- **D17（2026-08-18，实测后）** — **取消两阶段 bootstrap**：梁神模式（tool-bootstrap.mjs）仅对 DeepSeek V4 Pro 有效，对其他模型（含 V4 Flash）是副作用；恢复全量输入表面（全部工具、全部 prompt section、默认呈现）。实现：删除 agent.cordis.yml 的 tool-bootstrap 行与 tool-bootstrap.mjs 文件；persona 拆分结构（单行 persona + matt:workflow）保留。
+- **D17（2026-08-18，实测后）** — **取消两阶段 bootstrap**：梁神模式（tool-bootstrap.mjs）仅对 DeepSeek V4 Pro 有效，对其他模型（含 V4 Flash）是副作用；恢复全量输入表面（全部工具、全部 prompt section、默认呈现）。实现：删除 agent.cordis.yml 的 tool-bootstrap 行与 tool-bootstrap.mjs 文件。
+- **D18（2026-08-18）** — **完整 ask-matt 人设并入 persona（系统提示词）**：既然无 phase 1 特判，persona 拆分失去理由——删除 matt-workflow 插件与 md，工作流全文（含 INITIALIZATION 段）直接作为 persona text（{{model}}/{{cwd}} 插值已用渲染冒烟验证）。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
@@ -53,4 +54,5 @@
 - ✅ 17/17 全套验证重跑全绿（track A handoff 子会话 + 文档首条提示词 + model 路由；track B 全量失败不归咎自定义行；track C jobs 全套；track D workspace attach）。
 - ✅ 文案一致性修复：preset.yml 描述去除已删的 `/clear`（对齐 D15）；`notifySessionId` 已填真实会话 id（对齐 D9/D10；仓库版本默认留空 = 仅记日志，安装后自行填写）。
 - ✅ 已按 D17 取消两阶段 bootstrap：删除 tool-bootstrap 行与文件，persona / matt-workflow / handoff-tool / README / NOTICE / verify 同步清理；验证 17/17 仍绿。
+- ✅ 已按 D18 把完整人设并入 persona（删除 matt-workflow 插件与 md）；新增 tests/verify-persona.mjs（{{model}}/{{cwd}} 渲染插值冒烟）全绿。
 - ⏳ 待人工步骤（GUI 实测）：触发 `handoff_tool`，确认子会话首轮自动开始、无 `{{model}}` 报错、侧边栏立即可见（host 已于 21:18 重启，web 200 可达）。
