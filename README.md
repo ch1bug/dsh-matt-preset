@@ -29,13 +29,23 @@ implement（内嵌 tdd）→ code-review**，配两阶段 bootstrap、handoff �
 
 ## 安装
 
+DSH 的 preset 没有包管理器：`dsh plugin` 只管 profile 的 **npm 插件**，GUI 设置里的
+"复制 preset" 也只能复制 roster 上已有的 preset。preset 的官方安装位就是 user root 的
+一个目录——**放进去 dsh 启动时自动发现**（`$DSH_HOME/.agent-presets/<id>/`，id 匹配
+`/^[a-z0-9][a-z0-9-]*$/`），不需要任何注册或配置。所以"安装"= 把本仓库放进那个位：
+
 ```bash
 git clone https://github.com/ch1bug/dsh-matt-preset.git ~/.dsh/.agent-presets/dsh-matt-preset
-# scheduled-jobs 的 cron-parser 依赖（用户自有目录，不碰部署包）：
-npm install --prefix ~/.dsh cron-parser luxon
+npm install --prefix ~/.dsh cron-parser luxon   # scheduled-jobs 的依赖（用户自有目录，不碰部署包）
 ```
 
-重启 `dsh web`（或新开会话），在 hero-chip 选择 "Matt 工作流模式"。
+或一键（等价，含依赖）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install.sh | bash
+```
+
+然后重启 `dsh web`（或新开会话），hero-chip 选择 "Matt 工作流模式"（没有就刷新一下页面）。
 
 > `notifySessionId` 仓库版本默认 `""`（失败仅记日志）；需要通知就填一个真实会话 id。
 
