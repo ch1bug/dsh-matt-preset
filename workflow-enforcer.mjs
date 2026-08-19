@@ -62,7 +62,13 @@ const lastCall = new WeakMap()
 const foldIntent = new WeakMap()
 
 /** Keywords that mark a fold-in claim (lowercased match). */
-const FOLD_KEYWORDS = ['并入', '关联票', '一并', '顺带', '同时处理', '合并', '连带', 'merge', 'fold in']
+/** Keywords that arm context evidence: fold-in claims (agent) or
+ * context-capacity assessments (user asking how much window is left). */
+export const FOLD_KEYWORDS = [
+  '并入', '关联票', '一并', '顺带', '同时处理', '合并', '连带', 'merge', 'fold in',
+  '评估', '容量', '还能装', '够不够', '可并入', '能不能继续', '上下文', '窗口',
+  'assess', 'context capacity', 'window left', 'how much context',
+]
 
 /** Parse a tool call's arguments (JSON string or object). */
 function callArgs(value) {
@@ -212,10 +218,11 @@ export function apply(ctx, config = {}) {
     lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
   })
 
-  // Fold-in intent: assistant text mentioning merging/attaching a related
-  // ticket arms the next assembly with measured context evidence.
+  // Arm context evidence: assistant fold-in claims AND user assessments of
+  // context capacity ("上下文容量怎么样", "评估能否并入") both arm the next
+  // assembly, so the measured numbers are present while the model estimates.
   ctx.on('session/event', (session, event) => {
-    if (event?.type !== 'text-chunks' && event?.type !== 'assistant/message') return
+    if (!['text-chunks', 'assistant/message', 'user/message'].includes(event?.type)) return
     const data = event.data ?? {}
     const texts = data.texts ?? []
     const text = (Array.isArray(texts) ? texts.join(' ') : JSON.stringify(data)).toLowerCase()

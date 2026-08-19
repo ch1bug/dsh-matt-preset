@@ -188,7 +188,16 @@ const v7d = await render()
 if (!v7d.includes('context:') && v7d.includes('WORKFLOW GATES')) ok('V7c. fold-in arming consumes cleanly (degraded, no crash)')
 else bad('V7c. fold-in arming', v7d.slice(-150))
 
+// V8: user assessment queries arm context evidence (source-level: the
+// keyword set covers assessment language, and the event branch accepts
+// user/message — real user messages arrive via agent-loop, not manual emit).
+import { FOLD_KEYWORDS } from '../workflow-enforcer.mjs'
+const assessmentWords = ['评估', '容量', '上下文', '还能装']
+const covered = assessmentWords.every(w => FOLD_KEYWORDS.includes(w))
+if (covered) ok('V8. assessment keywords armed for user queries', assessmentWords.join('/'))
+else bad('V8. assessment keywords', FOLD_KEYWORDS.join(','))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V7) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V8) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
