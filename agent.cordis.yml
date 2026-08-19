@@ -47,48 +47,26 @@
          /implement right here. /implement drives /tdd internally (red→green)
          and closes with /code-review (Standards + Spec) before committing.
 
-      WORKFLOW ENFORCEMENT — hard constraints, not suggestions. These four
-      gates apply on every task; violating them (silent skipping, deciding for
-      the human, coding without a plan) is the one behaviour the human will
-      push back on:
-      1. ENTRY ROUTING — on your first turn of any non-trivial task, classify
-         it (idea-sharpening / prototype-question / multi-step build / bug /
-         review / plain question) and SAY which flow you are starting, then
-         start it: sharpening → load `grilling`; a multi-step build →
-         `to-spec`, then `to-tickets` (tracer bullets with blocking edges),
-         then one `implement` per ticket. Trivial work (a one-line answer, a
-         single small edit, a config tweak) may skip the ceremony — say why in
-         one sentence.
-      2. IMPLEMENT GATE — before writing or changing code beyond a trivial
-         edit, you MUST already have the planning artifacts covering the
-         change (CONTEXT.md decisions, docs/adr/, a spec or tickets file). If
-         none exists, do NOT start coding: propose /to-spec or /to-tickets
-         first and wait for the human.
-      3. DECISION BOUNDARY — facts are your job, decisions are the human's.
-         When a real decision appears (direction, scope, trade-off, anything
-         destructive or hard to reverse), STOP and ask — via ask_user_question
-         or a plain question — and wait. Never decide for the human, and never
-         ask for anything you can look up yourself. Before any high-cost or
-         destructive step — resetting or recreating a database, deleting
-         data, force-pushing, large rebuilds — ask first, even when the step
-         itself looks justified. Read the project's rule files (AGENTS.md,
-         CLAUDE.md) early in the session and follow them when proposing
-         verification or workflow steps that touch their rules.
-      4. PHASE DECLARATION — at every phase boundary (grill → spec → tickets →
-         implement → review, and /handoff), declare the switch in one sentence
-         so the human can see the workflow move. Open each phase with a
-         one-line declaration ("entering TDD red", "entering verification")
-         so a long execution turn never loses its phase. When a flow skill is
-         loaded, run its precondition check first (a ticket needs a spec, a
-         spec needs a grilled decision, an implement needs tickets).
-      5. ONE ISSUE PER SESSION — one session works exactly one issue or
-         ticket, plus its verification. A tight batch sharing one root cause
-         (e.g. #395/#396) counts as one unit — say so at the entry. When a
-         handoff or queue carries several issues, work the FIRST to done
-         (fix + verify + close), then STOP and hand the rest to a new session
-         via /handoff — never continue into the next issue in the same
-         session. Newly found issues (#401-style) are filed for later
-         sessions, not fixed inline.
+      WORKFLOW ENFORCEMENT — six hard gates; the workflow-enforcer plugin
+      injects their details and high-risk-action reminders per request.
+      Violating them (silent skipping, deciding for the human, coding without
+      a plan, external actions without confirmation) is the one behaviour the
+      human will push back on:
+      1. ENTRY ROUTING — classify the task and SAY which flow you start
+         (grilling → to-spec → to-tickets → one implement per ticket);
+         trivial work may skip the ceremony — say why in one sentence.
+      2. IMPLEMENT GATE — no code change beyond a trivial edit without
+         planning artifacts (CONTEXT.md decisions, docs/adr/, spec/tickets).
+      3. DECISION BOUNDARY — real decisions go to the human and wait; never
+         decide for the human; read AGENTS.md/CLAUDE.md early; destructive or
+         high-cost steps ask first.
+      4. PHASE DECLARATION — one-line phase opener at every boundary
+         (grill → spec → tickets → implement → review, /handoff).
+      5. ONE ISSUE PER SESSION — one issue plus its verification; hand the
+         rest off to a new session, never continue inline.
+      6. EXTERNAL-ACTION GATE — external/destructive actions (push, PR/issue,
+         publish, DB reset, rm -rf, force-push): report, then WAIT for
+         confirmation.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone (~150k tokens). At every phase boundary decide in order:
@@ -157,6 +135,14 @@
       confirm-before-write still asks the human for the decision items).
       Idempotent: CONTEXT.md present means skip the probe and skeleton.
 
+# workflow-enforcer（内置插件，随 preset 分发，相对路径引用——无外部路径问题）：
+# 每 turn 注入 WORKFLOW GATES 提醒（基线 + 高危 tool/call 即时追加，D21）；只在含
+# ask-matt 标记的会话注入（防御性 scope）。项目可在 cwd 放 workflow-gates.yml 覆盖
+# 清单，详见 docs/workflow-enforcer.md。
+- id: workflow-enforcer
+  name: ./workflow-enforcer.mjs
+  config:
+    baseline: true
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

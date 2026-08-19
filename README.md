@@ -24,6 +24,7 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具、定时任务
 | persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图（含 INITIALIZATION 段与 **WORKFLOW ENFORCEMENT 四门**：入口路由 / implement 前置 / 决策边界 / 阶段声明，见 `CONTEXT.md` D19）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
 | `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。 |
 | `scheduled-jobs.mjs` | cron 定时任务（`cron-parser`）：`jobs_list`/`jobs_run`/`jobs_pause`；失败可选通知显式配置的会话（`notifySessionId`，空 = 仅记日志）。 |
+| `workflow-enforcer.mjs` | WORKFLOW GATES 提醒注入（D21 外部动作门）：每 turn 基线 + 高危 tool/call 后一次性 ⚠ 追加；项目可放 `workflow-gates.yml` 覆盖清单（见 `docs/workflow-enforcer.md`）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建骨架 + 空 `docs/adr/`。 |
 
 > 曾试验两阶段 bootstrap（梁神模式，`tool-bootstrap.mjs`）：实测仅对 DeepSeek V4 Pro
@@ -70,7 +71,7 @@ DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
 dsh-matt-preset/
 ├── preset.yml            # roster 元数据（name/description/order）
 ├── agent.cordis.yml      # cordis 组合（persona=完整工作流人设 + 全量工具 + handoff-tool + scheduled-jobs）
-├── *.mjs                 # preset 内 cordis 插件（handoff-tool / scheduled-jobs）
+├── *.mjs                 # preset 内 cordis 插件（handoff-tool / scheduled-jobs / workflow-enforcer）
 ├── CONTEXT.md            # 术语表 + 决策（D1–D18）
 ├── docs/adr/             # 架构决策记录
 └── tests/                # 挂载验证（verify / verify-notify / verify-persona）
