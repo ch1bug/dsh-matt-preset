@@ -28,6 +28,7 @@ import AgentPresets from '@deepseek-ai/dsh-agent-presets'
 import Commands from '@deepseek-ai/dsh-commands'
 import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 
 const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? '/home/bh4gxf/.npm-global/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
 const PLUGIN = fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))
@@ -50,6 +51,7 @@ await ctx.plugin(SubprocessLocal)
 await ctx.plugin(AgentRegistry)
 await ctx.plugin(AgentLoop, { agents: [] })
 await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
+await ctx.plugin(TokenMeter)
 
 // V1: smoke preset with only the workflow-enforcer row, inside a temp root.
 const root = await mkdtemp(join(tmpdir(), 'dsh-enforcer-'))
@@ -160,7 +162,33 @@ try {
 if (v6ok && v6text.includes('High-risk action detected')) ok('V6. {{…}} in a matched command does not break rendering (braces neutralized)')
 else bad('V6. template-brace injection', v6text.slice(0, 300))
 
+// V7: contextEvidence pure-function — real numbers shape a verifiable line;
+// unmeasurable sessions degrade to null (no line, no noise).
+import { contextEvidence } from '../workflow-enforcer.mjs'
+const fakeCtx = (total, input, cached, window) => ({
+  get: () => ({ measure: () => ({
+    totalTokens: total,
+    baseline: { kind: 'usage', usage: { inputTokens: input, cacheReadTokens: cached } },
+  }) }),
+})
+const fakeAgent = (window) => ({ session: { requestContext: () => ({ contextWindow: window }) } })
+const line = contextEvidence(fakeAgent(1000000), fakeCtx(62000, 40000, 24000))
+const expected = 'context: 62k used / 1000k (6%) · cache-read 38%'
+if (line === expected) ok('V7. contextEvidence shapes used/capacity/cache-read', line)
+else bad('V7. contextEvidence', `got: ${line} | want: ${expected}`)
+if (contextEvidence(fakeAgent(1000000), fakeCtx(0, 0, 0)) === null) ok('V7b. unmeasurable → null (no noise)')
+else bad('V7b. null degradation')
+// fold-intent arming: harness event arms, assemble consumes (no crash, scope intact)
+await ctx.emit('session/event', agent.session, {
+  type: 'text-chunks',
+  data: { texts: ['确认存量清理范围，#408 独立票一并处理，窗口健康可并入'] },
+})
+const v7c = await render()
+const v7d = await render()
+if (!v7d.includes('context:') && v7d.includes('WORKFLOW GATES')) ok('V7c. fold-in arming consumes cleanly (degraded, no crash)')
+else bad('V7c. fold-in arming', v7d.slice(-150))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V6) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V7) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
