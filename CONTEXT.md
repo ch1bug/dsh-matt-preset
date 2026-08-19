@@ -66,6 +66,7 @@
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
 ## 构建状态
+- ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
 - 🛑 已按 D29 收敛：量化仪表盘降级为定性参考，停止机制堆叠；规则类（D20/21/22/24/26/27）保留。
 - 📝 2026-08-19 晚 grill：会话边界与成本模型讨论记录（D24–D27 + 断点清单）→ docs/workflow-session-boundaries.md。
 
