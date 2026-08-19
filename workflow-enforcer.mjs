@@ -123,6 +123,14 @@ function baselineText() {
   ].join('\n')
 }
 
+/** renderPrompt treats `{{…}}` as prompt-variable references; tool-call text
+ * may legitimately contain template syntax (issue bodies, shell snippets).
+ * Neutralize braces at the single choke point so an injected command can
+ * never break prompt rendering (malformed variable reference). */
+function sanitizePrompt(text) {
+  return String(text).replace(/\{\{/g, '[[').replace(/\}\}/g, ']]')
+}
+
 /** The reminder section text for one request, or null when nothing applies. */
 async function reminderText(agent, config, assembled) {
   // Scope: by default inject only where the ask-matt workflow persona is
@@ -147,7 +155,7 @@ async function reminderText(agent, config, assembled) {
       parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
     }
   }
-  return parts.length > 0 ? parts.join('\n\n') : null
+  return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
 /** Register the hooks once per standing mount. */

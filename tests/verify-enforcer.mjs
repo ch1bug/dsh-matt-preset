@@ -142,7 +142,25 @@ if (!noScopeText.includes('WORKFLOW GATES')) ok('V5. sessions without the ask-ma
 else bad('V5. scope', noScopeText.slice(0, 200))
 await handleNoScope.dispose()
 
+// V6: a high-risk command containing template braces ({{.Name}}) must not
+// break prompt rendering — the injected reminder neutralizes them.
+await ctx.emit('session/event', agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 3, name: 'bash', arguments: JSON.stringify({ command: 'gh issue create --body "{{.Name}} template"' }) },
+})
+let v6ok = true
+let v6text = ''
+try {
+  v6text = await render()
+  if (v6text.includes('{{') || v6text.includes('}}')) v6ok = false
+} catch (error) {
+  v6ok = false
+  v6text = String(error?.message ?? error)
+}
+if (v6ok && v6text.includes('High-risk action detected')) ok('V6. {{…}} in a matched command does not break rendering (braces neutralized)')
+else bad('V6. template-brace injection', v6text.slice(0, 300))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V5) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V6) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
