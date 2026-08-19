@@ -19,6 +19,11 @@
 - **纠正沉淀（correction sedimentation）** — 收到用户纠正时当场提出写入点（事实/偏好 → 项目 CONTEXT.md/AGENTS.md；流程 → matt 决策），用户点头才写，防止同类错误反复（D22）。
 - **workflow-enforcer（提醒注入插件）** — 独立 repo 的 cordis 插件：每 turn 经 system-prompt/assemble 注入基线提醒，监听 tool/call 对高危动作即时追加提醒；不硬拦截（human in the loop）（D23）。
 - **workflow-gates.yml** — 项目根的高危动作清单文件（external/destructive 两组），存在时替代插件默认清单；插件 config 可增删默认项。
+- **票据出口（TICKET EXIT）** — 元规则：任何技能会话结束前，把产出物中可执行但不属于当前会话范围的工作转成票（gh issue create）写入待办；当前会话只做一件事，绝不顺手吞额外工作（D24）。
+- **会话成本模型** — 每会话成本 = 系统提示词（全局缓存≈1/10 价，拆票不受影响）+ 会话内增量（前缀缓存，越走越便宜）+ 冷启动 prefill（零缓存）+ 事实核查（handoff 精简导致的重查）+ 交接读写；最优拆票粒度 = 总成本最小（D25）。
+- **缓存感知拆票** — 拆票判据加一条：与相邻票共享的知识越多越倾向合（省冷启动与核查），独立面越大越倾向拆；尺子 = 一个窗口（wayfinder 100K 先例）。（D25）
+- **handoff 快照化** — 交接文档固定带"环境事实快照"段（分支/工作树/关键文件状态/已确认决策/下一步），新会话一条命令验证快照而非重建上下文（D26）。
+- **persona 低频变更** — persona 每改一次 = 全部会话系统提示词缓存失效；工作流规则改动攒批、低频落地（D27）。
 ## 已核实的环境事实
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
@@ -50,11 +55,19 @@
 - **D20（2026-08-19）** — **一轮会话一个 issue（ONE ISSUE PER SESSION）**：persona WORKFLOW ENFORCEMENT 加第 5 门——一个会话只做一个 issue/票 + 其验证；同根因紧密批次（如 #395/#396）算一个单元但需入口声明；handoff/队列带多个时只做第一个，完成后把其余 handoff 到新会话，禁止同会话连续处理下一 issue；新发现 issue 只建票留给后续会话，不内联修。依据：IRIS 11:39 会话单会话处理 #400→#397→triage→#401→#402→#398→#399，违反 MAIN FLOW 3 的 one ticket per fresh session。
 - **D21（2026-08-19，grill）** — **外部动作门（WORKFLOW ENFORCEMENT 第 6 门）**：外部/破坏性动作执行前必须"验证完 → 报告 → 等确认"。触发条件 = 动作的可逆成本与外部可见性（不列穷举清单）。依据：mimo-agent-tools 收录未经确认直接 push 公开仓库 + 提第三方 PR/issue（skill-fuzzy #1863/#1864、mimo #1865/#1866 全部关闭）。
 - **D22（2026-08-19，grill）** — **纠正沉淀**：收到用户纠正 → 当场提出写入点（事实/偏好 → 项目 CONTEXT.md 或 AGENTS.md；流程类 → matt 决策记录），用户点头才写；不做自动大改文档。依据：IRIS 两次纠正（重置数据库成本、tickflow 降级链）无沉淀、反复再犯。
-- **D23（2026-08-19，grill）** — **workflow-enforcer 插件**：独立 repo（ch1bug/dsh-workflow-enforcer），提醒注入（不硬拦截）；repo 自带 cordis.patch.yml（可 dsh plugin add 装全局）+ matt preset 行引用同一文件（单源）；persona 的 WORKFLOW ENFORCEMENT 精简为每门一句话锚点，细节（高危清单等）进插件；注入 = 每 turn 基线 + 高危 tool/call 后即时追加；状态机 B 登记 issue 待分析。节奏：本地实现 → 挂载 matt → dsh-src 测试环境（3090）验证 V1–V4 全过 → 报告确认 → 上生产 + 推 GitHub → 稳定后收录 awesome。
+- **D23（2026-08-19，grill）** — **workflow-enforcer 插件**：独立 repo（ch1bug/dsh-workflow-enforcer），提醒注入（不硬拦截）；repo 自带 cordis.patch.yml（可 dsh plugin add 装全局）+ matt preset 行引用同一文件（单源）；persona 的 WORKFLOW ENFORCEMENT 精简为每门一句话锚点，细节（高危清单等）进插件；注入 = 每 turn 基线 + 高危 tool/call 后即时追加；状态机 B 登记 issue 待分析。节奏：本地实现 → 挂载 matt → dsh-src 测试环境（3090）验证 V1–V4 全过 → 报告确认 → 上生产 + 推 GitHub → 稳定后收录 awesome。 **（2026-08-19 晚修订：应用户要求并回 preset 仓库——dsh-matt-preset 内置 workflow-enforcer.mjs 相对路径引用，独立 repo 由用户删除；plugin add 全局安装方案弃用，scope 过滤保留为防御。）**
+- **D24（2026-08-19，grill）** — **票据出口（TICKET EXIT）**：任何技能会话结束前，把产出物中可执行、但不属于当前会话范围的工作转成票（gh issue create）写入待办；当前会话只做一件事，绝不顺手吞额外工作。依据：18 个工作流技能审计——仅 wayfinder/prototype 有专属产出规则，code-review（findings 报完即止）、research、improve-codebase-architecture、triage、tdd、grilling 等 14 个断点靠人设 D20 兜底效果差；一条元规则统一覆盖。
+- **D25（2026-08-19，grill）** — **会话成本模型与缓存感知拆票**：每会话成本 = 系统提示词（全局缓存，拆票不受影响）+ 会话内增量（前缀缓存）+ 冷启动 prefill（零缓存，拆票 = N 次）+ 事实核查 + 交接读写；最优拆票粒度 = 总成本最小——拆太细 = N×(冷启动+核查+交接)，拆太粗 = compact/handoff lossy + 前缀缓存全失效。规则：尺子 = 一个窗口（wayfinder 100K 先例，扩展到执行类票）；缓存感知（与相邻票共享知识越多越倾向合）；执行期水位（tokenMeter 黄/红线）语义 = 规划失败检测信号 + 复盘输入，不是兜底（handoff = lossy 不可常态化）。依据：IRIS 会话 40k 事件/1400 steps/2-4 次 compaction 的大票 + 新会话起手式重查环境（事实核查成本）。 **（2026-08-19 晚修订：黄/红线比例定为 70%/90%——按物理 contextWindow 计算，config 可调；质量退化点 smart zone 靠方向 2 工作量分析提前兜底。）** **（2026-08-19 收敛注记：成本模型保留为定性认知——会话成本来自冷启动/事实核查/lossy，用于理解"边界处该问什么"；70/90 水位、缓存感知公式、100K 尺子降级为参考，不实现传感器，见 D29。）**
+- **D26（2026-08-19，grill）** — **handoff 快照化 + 起手式标准化**：交接文档固定带"环境事实快照"段（分支 / 工作树残留 / 关键文件状态 / 已确认决策 / 下一步），新会话一条命令（git log+status+branch+快照对照）验证而非重建上下文；起手式命令集写入交接模板。治"handoff 精简 → 新会话事实核查成本"。
+- **D27（2026-08-19，grill）** — **persona 低频变更**：persona 每改一次 = 所有会话系统提示词缓存失效（全量重 prefill）；工作流规则改动攒批、低频落地，避免一天改 N 次。依据：08-19 连续 5 次 persona 改动（D18/D19/D20/D21-23/精简）。
+- **D28（2026-08-19，grill）** — **起手式工作量分析与阻碍 bug 处理**：① 方向 2——会话入口（起手式）对任务清单做**工作面分类**（problem class，如"封口函数的外部调用点"算一类统一完成），≥2 个不同工作面 → 提醒用户拆票（不自动拆）；按命中计数（≥2 条）判据被否。② 方向 3——发现阻碍 bug：自动立阻碍票（TICKET EXIT 一致性）；按阻塞程度决定优先（完全阻塞→停下处理；可绕行→记录+继续）；按深度决定修法（小 bug 本会话 inline 修+立票记录；深 bug 新会话修，当前任务快照暂停）；修完**回本会话**继续（快照恢复，不重复付交接成本）；代码快照默认 **git WIP（不丢）**，丢弃是用户决策。 **（2026-08-19 收敛注记：保留为定性规则——入口问一句"这活一个窗口装得下吗"、发现阻碍 bug 立票并按深度处理；判据阈值（≥2 类/steps 数）降级不量化，见 D29。）**
+- **D29（2026-08-19，收敛）** — **停止机制堆叠，量化降级为定性**：matt 的 PHASE-BOUNDARIES 明言边界判断是 judgement call，价值在"按顺序问"，不在精确测量。收敛：① **保留行为规则**——D20 一会话一 issue、D21 外部动作门、D22 纠正沉淀、D24 票据出口、D26 交接快照、D27 低频变更；② **量化项降级为定性参考（不实现传感器）**——D25 的 70/90 水位 / 缓存公式 / 100K 尺子、D28 的工作面判据阈值，一律回到"边界处问一句：够不够下个 phase 装（~150k）"；③ workflow-enforcer 保持现状（基线 + 高危即时提醒），方向 1/2/3 的自动化实现**不做**，除非实测 IRIS 真实出问题再针对补一条规则；④ persona 不再加第七门（TICKET EXIT 作为规则保留在 CONTEXT，需要时一句话并入）。依据：两阶段 bootstrap 教训（机制堆叠→实测→删除）+ 本日连续 5 次 persona 改动（D27 自我警示）。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
 ## 构建状态
+- 🛑 已按 D29 收敛：量化仪表盘降级为定性参考，停止机制堆叠；规则类（D20/21/22/24/26/27）保留。
+- 📝 2026-08-19 晚 grill：会话边界与成本模型讨论记录（D24–D27 + 断点清单）→ docs/workflow-session-boundaries.md。
 
 - ✅ `scheduled-jobs.mjs` 已实现并挂载（`job-sync-skills` 行）；cron-parser 装在 `~/.dsh/node_modules`（用户自有，含 luxon）。
 - ✅ 挂载验证全绿（真实 rc.7 运行时，15 项）：`standingKeyFor`、三工具注册、`runOnMount` + tick 实际触发、`jobs_pause` 停火、`jobs_run` 暂停中可跑、恢复。
