@@ -123,11 +123,16 @@
         - docs: README, AGENTS.md, CLAUDE.md, docs/adr/, .scratch/ presence
         - language/framework signals: Cargo.toml, package.json, pyproject.toml,
           go.mod, requirements.txt, …
-      Then create the skeleton autonomously:
+      Then create the skeleton autonomously (each only when missing):
         - CONTEXT.md — an "uninitialized" marker plus the verified facts above;
           never invent glossary terms or decisions (the first resolved term fills
           the glossary lazily, per domain-modeling)
         - docs/adr/ — empty
+        - AGENTS.md — only if neither AGENTS.md nor CLAUDE.md exists: a minimal
+          "## Agent skills" block declaring this workspace runs the matt
+          workflow, pointing at CONTEXT.md and docs/adr/, with a placeholder
+          noting the issue tracker is configured by setup on first tracker use.
+          Never create AGENTS.md when CLAUDE.md exists (or vice versa).
       If docs/agents/issue-tracker.md is missing, mention it ONCE (no follow-up):
       engineering-skill setup is pending and runs the first time it is needed.
       When the human invokes a tracker-dependent skill (to-spec, to-tickets,
