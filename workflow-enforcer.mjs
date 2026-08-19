@@ -196,6 +196,9 @@ async function reminderText(agent, config, ctx, assembled) {
     if (hit !== undefined) {
       const cmd = call.arguments.command ?? call.name
       parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
+      if (gateHit('git push', surface)) {
+        parts.push('After the push, check the remote CI run for the pushed commit — done means local checks pass, pushed, AND CI green.')
+      }
     }
   }
   if (foldIntent.get(agent.session) === true && config.contextEvidence !== false) {
