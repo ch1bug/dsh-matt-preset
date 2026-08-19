@@ -415,3 +415,13 @@
     runOnMount: true
     notifyOnFailure: true
     notifySessionId: "matt-session-7a5993c2-f65c-453c-896c-042d90f5b658"
+    # 上游有变更（sync 写 .has-changes）→ 在工作区建"待跟进"分析会话（未读即提醒）。
+    # 本机配置：dir/flagFile/messageFile 按你的环境填；dir 留空 = 禁用。
+    # 示例：
+    #   dir: ~/code
+    #   title: 上游技能更新待跟进
+    #   flagFile: ~/.agents/upstreams/.has-changes
+    #   messageFile: ~/.agents/upstreams/CHANGELOG.md
+    advisory:
+      dir: ""
+      title: 上游技能更新待跟进"
