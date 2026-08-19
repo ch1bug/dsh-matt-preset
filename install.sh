@@ -17,7 +17,9 @@ fi
 
 mkdir -p "$HOME_DIR/.agent-presets"
 git clone "$REPO_URL" "$TARGET"
-npm install --prefix "$HOME_DIR" cron-parser luxon
+# 内置插件依赖（用户自有目录，不碰部署包）：
+#   cron-parser/luxon — scheduled-jobs；yaml — workflow-enforcer
+npm install --prefix "$HOME_DIR" cron-parser luxon yaml
 
 echo
 echo "已安装到 $TARGET"
