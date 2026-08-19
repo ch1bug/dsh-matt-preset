@@ -50,7 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install
 
 然后重启 `dsh web`（或新开会话），hero-chip 选择 "Matt 工作流模式"（没有就刷新一下页面）。
 
-> `notifySessionId` 仓库版本默认 `""`（失败仅记日志）；需要通知就填一个真实会话 id。
+> 两个本机配置位（仓库版留空 = 关闭，安装后按你的环境填）：
+> - `notifySessionId` — 失败通知目标会话 id；
+> - `job-sync-skills.advisory.dir` — 上游技能有更新时，在该工作区创建"待跟进"分析会话（未读即提醒）。
 
 ## 验证
 

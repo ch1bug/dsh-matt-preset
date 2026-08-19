@@ -98,6 +98,7 @@ async function runJob(job) {
     const output = [stdout, stderr].filter(part => part.length > 0).join('\n').slice(0, MAX_OUTPUT_CHARS)
     job.lastRun = { at: started, ok: exitCode === 0, exitCode, output }
     if (!job.lastRun.ok && job.config.notifyOnFailure) await notifyFailure(job)
+    if (job.lastRun.ok && job.config.advisory) await maybeCreateAdvisory(job)
   } finally {
     job.running = false
     job.nextRun = computeNext(job.config.schedule)
@@ -153,6 +154,72 @@ const idParam = {
   additionalProperties: false,
   properties: { id: { type: 'string', description: 'Job id (config.id).' } },
   required: ['id'],
+}
+
+/** Best-effort: attach a session to the workspace registered for `cwd`. */
+async function attachToWorkspace(ctx, sessionId, cwd) {
+  const registry = ctx.get('workspaceRegistry')
+  if (registry === undefined || cwd === undefined) return
+  try {
+    const workspace = await registry.resolveByPath(cwd)
+    if (workspace === undefined) return
+    await workspace.attachSession(sessionId)
+  } catch { /* sidebar visibility is best-effort */ }
+}
+
+/**
+ * Advisory sessions (config.advisory): when the job succeeded and its flag
+ * file exists, spawn a matt session in `dir` whose first prompt is the
+ * upstream change summary — the human sees an unread session as the reminder,
+ * and works the "how to follow up" analysis together with the agent.
+ * The flag is consumed so each change set triggers exactly one session.
+ */
+async function maybeCreateAdvisory(job) {
+  const { dir, flagFile, messageFile, title = '上游技能更新待跟进', preset = 'matt' } = job.config.advisory
+  if (typeof dir !== 'string' || dir.length === 0) return
+  const { readFile, rm } = await import('node:fs/promises')
+  const { randomUUID } = await import('node:crypto')
+  const ctx = job.ctx
+  const { isAbsolute, join } = await import('node:path')
+  const flagPath = flagFile === undefined ? join(dir, '.has-changes') : (isAbsolute(flagFile) ? flagFile : join(dir, flagFile))
+  try { await import('node:fs/promises').then(m => m.access(flagPath)) } catch { return }
+  let body = ''
+  if (typeof messageFile === 'string') {
+    const mf = isAbsolute(messageFile) ? messageFile : join(dir, messageFile)
+    try { body = await readFile(mf, 'utf8') } catch { /* fall through to default */ }
+  }
+  const summary = (body ?? '').trim() || '上游仓库有更新，见 ~/.agents/upstreams/CHANGELOG.md'
+  const text = [
+    `# ${title}`,
+    '',
+    summary.slice(0, 4000),
+    '',
+    '请与用户一起分析如何**按我们的情况**跟进这些变更——对照本工作流的 persona /',
+    '七门约束 / 边界体系（docs/workflow-session-boundaries.md），决定吸收、调整还是忽略。',
+  ].join('\n')
+  const agentPresets = ctx.get('agentPresets')
+  const defaults = ctx.get('agentDefaultModel')
+  const agentOptions = defaults === undefined ? undefined
+    : { provider: defaults.currentSelection().provider, model: defaults.currentSelection().model }
+  try {
+    const handle = await ctx.agents.create({
+      sessionId: `${preset}-session-${randomUUID()}`,
+      meta: { cwd: dir, agentPreset: preset, source: 'advisory' },
+      ...(agentOptions !== undefined ? { agentOptions } : {}),
+      setup: async (agentCtx) => void await agentPresets.mount(agentCtx, preset),
+    })
+    await attachToWorkspace(ctx, handle.agent.session.id, dir)
+    handle.agent.followup({
+      id: randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text }],
+      source: { kind: 'plugin', plugin: 'scheduled-jobs' },
+    })
+    await rm(flagPath, { force: true })
+    job.lastRun = { ...job.lastRun, advisory: `session ${handle.agent.session.id} created (${title})` }
+  } catch (error) {
+    ctx.logger('scheduled-jobs').warn(`advisory session failed: ${String(error?.message ?? error)}`)
+  }
 }
 
 /** Register the three model-facing tools once per standing mount. */
