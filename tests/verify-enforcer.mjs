@@ -197,7 +197,16 @@ const covered = assessmentWords.every(w => FOLD_KEYWORDS.includes(w))
 if (covered) ok('V8. assessment keywords armed for user queries', assessmentWords.join('/'))
 else bad('V8. assessment keywords', FOLD_KEYWORDS.join(','))
 
+// V9: a matched git push carries the remote-CI follow-up ("done means CI green").
+await ctx.emit('session/event', agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 9, name: 'bash', arguments: JSON.stringify({ command: 'git push origin develop' }) },
+})
+const v9 = await render()
+if (v9.includes('remote CI run') && v9.includes('CI green')) ok('V9. git push → remote-CI reminder (done means CI green)')
+else bad('V9. push CI reminder', v9.slice(-220))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V8) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V9) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

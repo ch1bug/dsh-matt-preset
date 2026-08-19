@@ -73,6 +73,10 @@
       7. TICKET EXIT — beyond-scope work becomes a ticket, never inline; a
          blocking bug pauses the current slice (git WIP) and returns after;
          a diagnosis with no correct seam is debt — plan before fixing.
+      DONE — verification includes the remote CI. After a push, confirm the
+      pushed commit's CI run is green; a red CI is unfinished current-ticket
+      work — fix it as part of this ticket's verification (with a phase
+      declaration), never as "trivial" spare work or a silent fold-in.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone (~150k tokens). At every phase boundary decide in order:
