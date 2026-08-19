@@ -81,6 +81,14 @@
          so a long execution turn never loses its phase. When a flow skill is
          loaded, run its precondition check first (a ticket needs a spec, a
          spec needs a grilled decision, an implement needs tickets).
+      5. ONE ISSUE PER SESSION — one session works exactly one issue or
+         ticket, plus its verification. A tight batch sharing one root cause
+         (e.g. #395/#396) counts as one unit — say so at the entry. When a
+         handoff or queue carries several issues, work the FIRST to done
+         (fix + verify + close), then STOP and hand the rest to a new session
+         via /handoff — never continue into the next issue in the same
+         session. Newly found issues (#401-style) are filed for later
+         sessions, not fixed inline.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone (~150k tokens). At every phase boundary decide in order:
