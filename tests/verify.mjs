@@ -49,7 +49,7 @@ const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 // Custom preset-owned rows only: a full-matt mount failure must never blame
 // these. Shipped rows (tool-bash, str-replace-editor, …) fail on
 // harness-missing host services and are expected.
-const MY_ROWS = ['handoff-tool', 'scheduled-jobs']
+const MY_ROWS = ['handoff-tool', 'scheduled-jobs', 'workflow-enforcer']
 
 const results = []
 const ok = (name, detail = '') => { results.push(`  ✓ ${name}${detail ? ` — ${detail}` : ''}`) }
