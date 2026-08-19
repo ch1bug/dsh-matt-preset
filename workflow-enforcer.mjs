@@ -55,6 +55,15 @@ export const DEFAULT_GATES = {
 /** Latest raw tool call per session, consumed by the next assemble. */
 const lastCall = new WeakMap()
 
+/** Sessions whose latest assistant text shows intent to fold in a related
+ * ticket (并入/关联/一并/顺带…). Armed by the event hook, consumed by the
+ * next assemble, which then attaches the measured context evidence so the
+ * human can verify the claim. */
+const foldIntent = new WeakMap()
+
+/** Keywords that mark a fold-in claim (lowercased match). */
+const FOLD_KEYWORDS = ['并入', '关联票', '一并', '顺带', '同时处理', '合并', '连带', 'merge', 'fold in']
+
 /** Parse a tool call's arguments (JSON string or object). */
 function callArgs(value) {
   if (typeof value === 'string') {
@@ -112,6 +121,34 @@ async function resolveGates(agent, config) {
   return effectiveGates(config)
 }
 
+/** Measured context evidence for a fold-in decision: used / capacity /
+ * cache-read share, from tokenMeter + session.requestContext(). Null when
+ * nothing measurable — degrade to no line, never break rendering. */
+export function contextEvidence(agent, ctx) {
+  let used
+  let cachePct
+  try {
+    const meter = ctx.get('tokenMeter')
+    const m = meter?.measure(agent.session)
+    used = m?.totalTokens
+    const base = m?.baseline
+    if (base?.kind === 'usage' && base.usage) {
+      const input = base.usage.inputTokens ?? 0
+      const cached = base.usage.cacheReadTokens ?? 0
+      const denom = input + cached
+      if (denom > 0) cachePct = Math.round((cached / denom) * 100)
+    }
+  } catch { /* measurement is best-effort */ }
+  if (used === undefined || used <= 0) return null
+  const capacity = agent.session.requestContext?.()?.contextWindow
+  const parts = [`context: ${Math.round(used / 1000)}k used`]
+  if (typeof capacity === 'number' && capacity > 0) {
+    parts.push(`/ ${Math.round(capacity / 1000)}k (${Math.round((used / capacity) * 100)}%)`)
+  }
+  if (cachePct !== undefined) parts.push(`· cache-read ${cachePct}%`)
+  return parts.join(' ')
+}
+
 /** Baseline reminder text (short — never dominates a request). */
 function baselineText() {
   return [
@@ -132,7 +169,7 @@ function sanitizePrompt(text) {
 }
 
 /** The reminder section text for one request, or null when nothing applies. */
-async function reminderText(agent, config, assembled) {
+async function reminderText(agent, config, ctx, assembled) {
   // Scope: by default inject only where the ask-matt workflow persona is
   // present (the marker is found in the assembled sections). The bundle is
   // installed globally via `dsh plugin add`, so this keeps minimal/code/…
@@ -155,6 +192,11 @@ async function reminderText(agent, config, assembled) {
       parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
     }
   }
+  if (foldIntent.get(agent.session) === true && config.contextEvidence !== false) {
+    foldIntent.delete(agent.session) // consume: one evidence line per claim
+    const evidence = contextEvidence(agent, ctx)
+    if (evidence !== null) parts.push(evidence)
+  }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
@@ -170,13 +212,23 @@ export function apply(ctx, config = {}) {
     lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
   })
 
+  // Fold-in intent: assistant text mentioning merging/attaching a related
+  // ticket arms the next assembly with measured context evidence.
+  ctx.on('session/event', (session, event) => {
+    if (event?.type !== 'text-chunks' && event?.type !== 'assistant/message') return
+    const data = event.data ?? {}
+    const texts = data.texts ?? []
+    const text = (Array.isArray(texts) ? texts.join(' ') : JSON.stringify(data)).toLowerCase()
+    if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
+  })
+
   // Inject the reminder section on every prompt assembly.
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next() // downstream errors propagate untouched
     const agent = context.agent
     if (agent === undefined || agent.session === undefined) return assembled
     try {
-      const text = await reminderText(agent, cfg, assembled)
+      const text = await reminderText(agent, cfg, ctx, assembled)
       if (text === null) return assembled
       const sections = Array.isArray(assembled.sections) ? assembled.sections : []
       return {
