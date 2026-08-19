@@ -31,6 +31,7 @@
 - `dsh-schedule` 已作为包存在但当前部署未挂载（本会话无 `schedule_*` 工具）。
 - 宿主组成（base/web.cordis.yml）不可改：任何新能力只能进 preset 层。
 
+- `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。
 ## 决策
 
 - **D1（2026-08-18，访谈 R1）** — 做**通用 job-runner**：配置驱动的定时任务列表，每任务 = 时间表 + shell 命令；技能同步是第一个消费者。
@@ -51,8 +52,8 @@
 - **D16（2026-08-18，访谈 R6）** — **工作区自主初始化**：会话早期无 CONTEXT.md 时自主探测并建骨架（Q1A/Q2A/Q3A）；实现载体 = 人设 INITIALIZATION 段（Q4A）；issue-tracker 缺失只顺带提一次，需用到 tracker 技能时**先存 .scratch/progress.md 进度快照再强制 setup**（Q5/Q6A）。
 - **D17（2026-08-18，实测后）** — **取消两阶段 bootstrap**：梁神模式（tool-bootstrap.mjs）仅对 DeepSeek V4 Pro 有效，对其他模型（含 V4 Flash）是副作用；恢复全量输入表面（全部工具、全部 prompt section、默认呈现）。实现：删除 agent.cordis.yml 的 tool-bootstrap 行与 tool-bootstrap.mjs 文件。
 - **D18（2026-08-18）** — **完整 ask-matt 人设并入 persona（系统提示词）**：既然无 phase 1 特判，persona 拆分失去理由——删除 matt-workflow 插件与 md，工作流全文（含 INITIALIZATION 段）直接作为 persona text（{{model}}/{{cwd}} 插值已用渲染冒烟验证）。
-- **D19（2026-08-19，访谈）** — **工作流强制约束（WORKFLOW ENFORCEMENT）**：persona 加四个硬 gate——① 任务入口路由（非琐碎任务首轮先分类并声明/启动对应流程）；② implement 前置（无 CONTEXT.md 决策/docs/adr/spec/tickets 产物不写大改代码，先提议 to-spec/to-tickets 并等确认）；③ 决策边界（真决策必须停下问人，不许替人决定）；④ 阶段声明（跨阶段一句话声明 + 流程技能加载先跑前置检查）。实现载体 = persona 文本（档位 1）；技能本体不改——sync-skills.sh 每次全量重拷会覆盖本地改动，前置检查以 persona 形式声明（档位 2 等效）；档位 3（插件级 gate）留作后手。**（2026-08-19 下午修订，依据 IRIS 会话复盘：250 次工具调用 0 次 ask_user_question、验证重置数据库未先确认、AGENTS.md 冷启动规则事后才查——③ 补"破坏性/高成本操作（重置数据库/删数据/强制 push）执行前必问 + 会话早期必读并遵守 AGENTS.md/CLAUDE.md"；④ 补"每阶段一句话开场"。）**
-- **D20（2026-08-19）** — **一轮会话一个 issue（ONE ISSUE PER SESSION）**：persona WORKFLOW ENFORCEMENT 加第 5 门——一个会话只做一个 issue/票 + 其验证；同根因紧密批次（如 #395/#396）算一个单元但需入口声明；handoff/队列带多个时只做第一个，完成后把其余 handoff 到新会话，禁止同会话连续处理下一 issue；新发现 issue 只建票留给后续会话，不内联修。依据：IRIS 11:39 会话单会话处理 #400→#397→triage→#401→#402→#398→#399，违反 MAIN FLOW 3 的 one ticket per fresh session。
+- **D19（2026-08-19，访谈）** — **工作流强制约束（WORKFLOW ENFORCEMENT）**：persona 加四个硬 gate——① 任务入口路由（非琐碎任务首轮先分类并声明/启动对应流程）；② implement 前置（无 CONTEXT.md 决策/docs/adr/spec/tickets 产物不写大改代码，先提议 to-spec/to-tickets 并等确认）；③ 决策边界（真决策必须停下问人，不许替人决定）；④ 阶段声明（跨阶段一句话声明 + 流程技能加载先跑前置检查）。实现载体 = persona 文本（档位 1）；技能本体不改——`sync-skills.sh` 每次全量重拷会覆盖本地改动，前置检查以 persona 形式声明（档位 2 等效）；档位 3（插件级 gate）留作后手。**（2026-08-19 下午修订，依据 IRIS 会话复盘：250 次工具调用 0 次 ask_user_question、验证重置数据库未先确认、AGENTS.md 冷启动规则事后才查——③ 补"破坏性/高成本操作（重置数据库/删数据/强制 push）执行前必问 + 会话早期必读并遵守 AGENTS.md/CLAUDE.md"；④ 补"每阶段一句话开场"。）**
+- **D20（2026-08-19）** — **一轮会话一个 issue（ONE ISSUE PER SESSION）**：persona WORKFLOW ENFORCEMENT 加第 5 门——一个会话只做一个 issue/票 + 其验证；同根因紧密批次（如 #395/#396）算一个单元但需入口声明；handoff/队列带多个时只做第一个，完成后把其余 handoff 到新会话，禁止同会话连续处理下一 issue；新发现 issue 只建票留给后续会话，不内联修。依据：IRIS 11:39 会话单会话处理 #400→#397→triage→#401→#402→#398→#399，违反 MAIN FLOW 3 的 one ticket per fresh session。 **（2026-08-19 晚修订：单票 + 可核验并入三条件——当前票完成 / 关联声明 / 实测窗口健康（context evidence）；Continue 仅限 phase 内，不跨任务。依据观察 O2。）**
 - **D21（2026-08-19，grill）** — **外部动作门（WORKFLOW ENFORCEMENT 第 6 门）**：外部/破坏性动作执行前必须"验证完 → 报告 → 等确认"。触发条件 = 动作的可逆成本与外部可见性（不列穷举清单）。依据：mimo-agent-tools 收录未经确认直接 push 公开仓库 + 提第三方 PR/issue（skill-fuzzy #1863/#1864、mimo #1865/#1866 全部关闭）。
 - **D22（2026-08-19，grill）** — **纠正沉淀**：收到用户纠正 → 当场提出写入点（事实/偏好 → 项目 CONTEXT.md 或 AGENTS.md；流程类 → matt 决策记录），用户点头才写；不做自动大改文档。依据：IRIS 两次纠正（重置数据库成本、tickflow 降级链）无沉淀、反复再犯。
 - **D23（2026-08-19，grill）** — **workflow-enforcer 插件**：独立 repo（ch1bug/dsh-workflow-enforcer），提醒注入（不硬拦截）；repo 自带 cordis.patch.yml（可 dsh plugin add 装全局）+ matt preset 行引用同一文件（单源）；persona 的 WORKFLOW ENFORCEMENT 精简为每门一句话锚点，细节（高危清单等）进插件；注入 = 每 turn 基线 + 高危 tool/call 后即时追加；状态机 B 登记 issue 待分析。节奏：本地实现 → 挂载 matt → dsh-src 测试环境（3090）验证 V1–V4 全过 → 报告确认 → 上生产 + 推 GitHub → 稳定后收录 awesome。 **（2026-08-19 晚修订：应用户要求并回 preset 仓库——dsh-matt-preset 内置 workflow-enforcer.mjs 相对路径引用，独立 repo 由用户删除；plugin add 全局安装方案弃用，scope 过滤保留为防御。）**
@@ -66,6 +67,11 @@
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
+## 观察记录（2026-08-19，IRIS ef2ef0b5 会话复盘）
+
+- **O1 — D21 口头豁免倾向**：用户预先授权（"完成提交推送"）被 agent 当作对**连带动作**（push 含跨会话遗留 #415/ADR-0022 的 4 commits）的永久授权——D21 的"报告→等确认→执行"压缩为"授权依据→执行→报告"。⚠ 提醒真实注入（机制 ✓），但 agent 跳过"等确认"。
+- **O2 — 无实测时的跨任务继续倾向**：会话在**无上下文实测（纯估算 70-90k）**时，建议列表默认倾向 Continue **做下一票 #418**（任务边界），仅把 /handoff 标为"推荐"。两层问题：① 估算代替实测（context evidence 未覆盖"用户主动问评估"场景，机制晚一拍）；② **Continue 偏好侵蚀任务边界**——PHASE-BOUNDARIES 的"Continue 优先"是 phase 内规则，被误用为"跨任务继续"（D20 边界）。
+
 ## 构建状态
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
 - 🛑 已按 D29 收敛：量化仪表盘降级为定性参考，停止机制堆叠；规则类（D20/21/22/24/26/27）保留。
@@ -76,10 +82,12 @@
 - ✅ 两阶段 bootstrap + handoff 首条提示词改造已实现并验证（15/15）：handoff 子会话创建 + 文档作为首条 user 消息 + workspace attach + `/clear` 已移除。
 - ✅ 工作区自主初始化（INITIALIZATION 段）已写入 matt-workflow.md；handoff child 的 model 路由修复已实现并验证（16/16，含 `child carries the model route` 断言）。
 - ✅ 17/17 全套验证重跑全绿（track A handoff 子会话 + 文档首条提示词 + model 路由；track B 全量失败不归咎自定义行；track C jobs 全套；track D workspace attach）。
-- ✅ 文案一致性修复：preset.yml 描述去除已删的 `/clear`（对齐 D15）；`notifySessionId` 已填真实会话 id（对齐 D9/D10；仓库版本默认留空 = 仅记日志，安装后自行填写）。
+- ✅ 文案一致性修复：preset.yml 描述去除已删的 `/clear`（对齐 D15）；`notifySessionId` 已填真实会话 id（matt-session-7a5993c2-f65c-453c-896c-042d90f5b658，对齐 D9/D10）。
+- ✅ 已发布为 GitHub 公开仓库 ch1bug/dsh-matt-preset（preset.yml + agent.cordis.yml + 插件 + tests/，按 dsh-agent-presets 规范；notifySessionId 仓库版留空，会话 id 不外泄；tests 改为仓库相对路径并全绿）。
+- ✅ 测试服务器已部署：http://127.0.0.1:3090（DSH_HOME=/home/bh4gxf/dsh-src/.dsh-test，隔离数据根 + 符号链接同一 ~/.dsh/.agent-presets，读取全部修复后的文件；生产 3080 未动）。
 - ✅ 已按 D17 取消两阶段 bootstrap：删除 tool-bootstrap 行与文件，persona / matt-workflow / handoff-tool / README / NOTICE / verify 同步清理；验证 17/17 仍绿。
 - ✅ 已按 D18 把完整人设并入 persona（删除 matt-workflow 插件与 md）；新增 tests/verify-persona.mjs（{{model}}/{{cwd}} 渲染插值冒烟）全绿。
 - ✅ 已按 D19 在 persona 加 WORKFLOW ENFORCEMENT 四个硬 gate（入口路由 / implement 前置 / 决策边界 / 阶段声明）；技能本体未改（sync 覆盖），前置检查以 persona 形式声明。
 - ✅ workflow-enforcer 已并回 preset 仓库（原独立 repo 由用户删除）；挂载行改相对路径 ./workflow-enforcer.mjs；源码环境验证全绿（verify-production 5/5 + V1-V5 6/6 + matt track B/C）。
 - ✅ 已按 D20 加 ONE ISSUE PER SESSION（第 5 门）：一轮会话一个 issue，多任务由 handoff 链推进。
-- ⏳ 待人工步骤（GUI 实测）：触发 `handoff_tool`，确认子会话首轮自动开始、无 `{{model}}` 报错、侧边栏立即可见（host 已于 21:18 重启，web 200 可达）；新开会话感受 WORKFLOW ENFORCEMENT 生效。
+- ⏳ 待人工步骤（GUI 实测，可在 3090 测试实例上做）：触发 handoff_tool，确认子会话首轮自动开始、无 {{model}} 报错、侧边栏立即可见；新开会话感受 WORKFLOW ENFORCEMENT 生效。
