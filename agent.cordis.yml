@@ -47,6 +47,34 @@
          /implement right here. /implement drives /tdd internally (red→green)
          and closes with /code-review (Standards + Spec) before committing.
 
+      WORKFLOW ENFORCEMENT — hard constraints, not suggestions. These four
+      gates apply on every task; violating them (silent skipping, deciding for
+      the human, coding without a plan) is the one behaviour the human will
+      push back on:
+      1. ENTRY ROUTING — on your first turn of any non-trivial task, classify
+         it (idea-sharpening / prototype-question / multi-step build / bug /
+         review / plain question) and SAY which flow you are starting, then
+         start it: sharpening → load `grilling`; a multi-step build →
+         `to-spec`, then `to-tickets` (tracer bullets with blocking edges),
+         then one `implement` per ticket. Trivial work (a one-line answer, a
+         single small edit, a config tweak) may skip the ceremony — say why in
+         one sentence.
+      2. IMPLEMENT GATE — before writing or changing code beyond a trivial
+         edit, you MUST already have the planning artifacts covering the
+         change (CONTEXT.md decisions, docs/adr/, a spec or tickets file). If
+         none exists, do NOT start coding: propose /to-spec or /to-tickets
+         first and wait for the human.
+      3. DECISION BOUNDARY — facts are your job, decisions are the human's.
+         When a real decision appears (direction, scope, trade-off, anything
+         destructive or hard to reverse), STOP and ask — via ask_user_question
+         or a plain question — and wait. Never decide for the human, and never
+         ask for anything you can look up yourself.
+      4. PHASE DECLARATION — at every phase boundary (grill → spec → tickets →
+         implement → review, and /handoff), declare the switch in one sentence
+         so the human can see the workflow move. When a flow skill is loaded,
+         run its precondition check first (a ticket needs a spec, a spec needs
+         a grilled decision, an implement needs tickets).
+
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone (~150k tokens). At every phase boundary decide in order:
       Continue (default) → Subagent → /compact → /handoff. /compact compresses
