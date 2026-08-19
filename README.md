@@ -21,7 +21,7 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具、定时任务
 
 | 组件 | 说明 |
 | --- | --- |
-| persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图（含 INITIALIZATION 段）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
+| persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图（含 INITIALIZATION 段与 **WORKFLOW ENFORCEMENT 四门**：入口路由 / implement 前置 / 决策边界 / 阶段声明，见 `CONTEXT.md` D19）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
 | `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。 |
 | `scheduled-jobs.mjs` | cron 定时任务（`cron-parser`）：`jobs_list`/`jobs_run`/`jobs_pause`；失败可选通知显式配置的会话（`notifySessionId`，空 = 仅记日志）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建骨架 + 空 `docs/adr/`。 |

@@ -42,6 +42,7 @@
 - **D16（2026-08-18，访谈 R6）** — **工作区自主初始化**：会话早期无 CONTEXT.md 时自主探测并建骨架（Q1A/Q2A/Q3A）；实现载体 = 人设 INITIALIZATION 段（Q4A）；issue-tracker 缺失只顺带提一次，需用到 tracker 技能时**先存 .scratch/progress.md 进度快照再强制 setup**（Q5/Q6A）。
 - **D17（2026-08-18，实测后）** — **取消两阶段 bootstrap**：梁神模式（tool-bootstrap.mjs）仅对 DeepSeek V4 Pro 有效，对其他模型（含 V4 Flash）是副作用；恢复全量输入表面（全部工具、全部 prompt section、默认呈现）。实现：删除 agent.cordis.yml 的 tool-bootstrap 行与 tool-bootstrap.mjs 文件。
 - **D18（2026-08-18）** — **完整 ask-matt 人设并入 persona（系统提示词）**：既然无 phase 1 特判，persona 拆分失去理由——删除 matt-workflow 插件与 md，工作流全文（含 INITIALIZATION 段）直接作为 persona text（{{model}}/{{cwd}} 插值已用渲染冒烟验证）。
+- **D19（2026-08-19，访谈）** — **工作流强制约束（WORKFLOW ENFORCEMENT）**：persona 加四个硬 gate——① 任务入口路由（非琐碎任务首轮先分类并声明/启动对应流程）；② implement 前置（无 CONTEXT.md 决策/docs/adr/spec/tickets 产物不写大改代码，先提议 to-spec/to-tickets 并等确认）；③ 决策边界（真决策必须停下问人，不许替人决定）；④ 阶段声明（跨阶段一句话声明 + 流程技能加载先跑前置检查）。实现载体 = persona 文本（档位 1）；技能本体不改——sync-skills.sh 每次全量重拷会覆盖本地改动，前置检查以 persona 形式声明（档位 2 等效）；档位 3（插件级 gate）留作后手。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
@@ -55,4 +56,5 @@
 - ✅ 文案一致性修复：preset.yml 描述去除已删的 `/clear`（对齐 D15）；`notifySessionId` 已填真实会话 id（对齐 D9/D10；仓库版本默认留空 = 仅记日志，安装后自行填写）。
 - ✅ 已按 D17 取消两阶段 bootstrap：删除 tool-bootstrap 行与文件，persona / matt-workflow / handoff-tool / README / NOTICE / verify 同步清理；验证 17/17 仍绿。
 - ✅ 已按 D18 把完整人设并入 persona（删除 matt-workflow 插件与 md）；新增 tests/verify-persona.mjs（{{model}}/{{cwd}} 渲染插值冒烟）全绿。
-- ⏳ 待人工步骤（GUI 实测）：触发 `handoff_tool`，确认子会话首轮自动开始、无 `{{model}}` 报错、侧边栏立即可见（host 已于 21:18 重启，web 200 可达）。
+- ✅ 已按 D19 在 persona 加 WORKFLOW ENFORCEMENT 四个硬 gate（入口路由 / implement 前置 / 决策边界 / 阶段声明）；技能本体未改（sync 覆盖），前置检查以 persona 形式声明。
+- ⏳ 待人工步骤（GUI 实测）：触发 `handoff_tool`，确认子会话首轮自动开始、无 `{{model}}` 报错、侧边栏立即可见（host 已于 21:18 重启，web 200 可达）；新开会话感受 WORKFLOW ENFORCEMENT 生效。
