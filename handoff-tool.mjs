@@ -127,7 +127,19 @@ async function executeHandoff(ctx, args, exec) {
   const prefix = `# Handoff${focusSuffix}`
   let body = doc
   if (body.startsWith(prefix)) body = body.slice(prefix.length).replace(/^\s*\n/, '')
-  const documentText = [prefix, '', body, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
+  // D26: environment snapshot template — the child's起手式 verifies this
+  // (git log/status) instead of rebuilding context; the handoff author fills
+  // the values. Kept as a template so structure is stable, content is theirs.
+  const snapshot = [
+    '## 环境快照（起手式验证）',
+    '<!-- 新会话起手式：git log/status 对照以下快照，不一致以实际为准 -->',
+    '- 分支/HEAD: ',
+    '- 工作树: ',
+    '- 关键文件状态: ',
+    '- 已确认决策: ',
+    '- 下一步: ',
+  ].join('\n')
+  const documentText = [prefix, '', body, '', snapshot, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')

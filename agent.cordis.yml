@@ -67,6 +67,9 @@
       6. EXTERNAL-ACTION GATE — external/destructive actions (push, PR/issue,
          publish, DB reset, rm -rf, force-push): report, then WAIT for
          confirmation.
+      7. TICKET EXIT — beyond-scope work becomes a ticket, never inline; a
+         blocking bug pauses the current slice (git WIP) and returns after;
+         a diagnosis with no correct seam is debt — plan before fixing.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone (~150k tokens). At every phase boundary decide in order:
@@ -406,4 +409,4 @@
     command: "~/.agents/upstreams/sync-skills.sh"
     runOnMount: true
     notifyOnFailure: true
-    notifySessionId: ""
+    notifySessionId: "matt-session-7a5993c2-f65c-453c-896c-042d90f5b658"
