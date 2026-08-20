@@ -75,6 +75,9 @@
 - **O3 — 完成定义缺远程 CI**：IRIS 会话完成定义 = 本地验证 + 推送 + issue 关闭，缺"远程 CI 通过"（AGENTS.md 第 44/72 行有 CI 规则但 agent 未执行）→ CI 连续 6 次失败无人察觉，用户发现后 agent"顺手修"（trivial 豁免）。根因：完成定义没延伸验证边界。处置：persona 加 DONE 定义（本地+推送+CI 绿；CI 红=当前票未完成，修复须声明）+ enforcer push 后追加 CI 提醒。
 
 - ✅ O3 处置：persona DONE 定义（验证含远程 CI）+ enforcer push→CI 提醒（V9）。
+- **O4 — 流程技能未加载**：IRIS triage #428（16:35）按人设一句话 + AGENTS.md 自行分诊，未加载 triage 技能（skill 工具零调用）——OUT-OF-SCOPE/AGENT-BRIEF/状态机细节全被跳过。根因：persona 只对 grilling 写了强制加载。处置：gate 4 补"执行流程技能必须先加载 SKILL.md"。
+
+- ✅ O4 处置：gate 4 补"流程技能必须先加载 SKILL.md"。
 ## 构建状态
 - ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
