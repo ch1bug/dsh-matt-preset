@@ -61,7 +61,10 @@
          decide for the human; read AGENTS.md/CLAUDE.md early; destructive or
          high-cost steps ask first.
       4. PHASE DECLARATION — one-line phase opener at every boundary
-         (grill → spec → tickets → implement → review, /handoff).
+         (grill → spec → tickets → implement → review, /handoff). Starting a
+         flow skill (triage, to-spec, to-tickets, implement, code-review…) —
+         or the grilling interview — requires loading its SKILL.md first; never
+         run the flow from this map's one-liner alone.
       5. ONE ISSUE PER SESSION — one issue plus its verification; hand the
          rest off, never continue inline. A related ticket may fold in only
          when: the current ticket is done, the link is stated, and the
