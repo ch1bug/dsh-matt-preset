@@ -172,12 +172,24 @@ const fakeCtx = (total, input, cached, window) => ({
   }) }),
 })
 const fakeAgent = (window) => ({ session: { requestContext: () => ({ contextWindow: window }) } })
+// V7a: fake agent WITHOUT usage events falls back to latest-request baseline.
 const line = contextEvidence(fakeAgent(1000000), fakeCtx(62000, 40000, 24000))
-const expected = 'context: 62k used / 1000k (6%) · cache-read 38%'
-if (line === expected) ok('V7. contextEvidence shapes used/capacity/cache-read', line)
+const expected = 'context: 62k used / 1000k (6%) · cache-read 38% (latest-request)'
+if (line === expected) ok('V7. contextEvidence fallback baseline', line)
 else bad('V7. contextEvidence', `got: ${line} | want: ${expected}`)
-if (contextEvidence(fakeAgent(1000000), fakeCtx(0, 0, 0)) === null) ok('V7b. unmeasurable → null (no noise)')
-else bad('V7b. null degradation')
+// V7b: fake agent WITH usage events → cumulative share (105k cached / 120k
+// billed = 87.5 → rounds to 88), replacing per step (never double-counts).
+const fakeWithEvents = { session: { requestContext: () => ({ contextWindow: 1000000 }), events: [
+  { type: 'assistant/message', data: { turn: 1, step: 1, usage: { inputTokens: 10000, cacheReadTokens: 90000 } } },
+  { type: 'assistant/message', data: { turn: 1, step: 2, usage: { inputTokens: 5000, cacheReadTokens: 15000 } } },
+  { type: 'assistant/message', data: { turn: 1, step: 2, usage: { inputTokens: 5000, cacheReadTokens: 15000 } } },
+] } }
+const line2 = contextEvidence(fakeWithEvents, fakeCtx(1000, 0, 0))
+const expect2 = 'context: 1k used / 1000k (0%) · cache-read 88% (cumulative)'
+if (line2 === expect2) ok('V7b. contextEvidence cumulative share (per-step replace)', line2)
+else bad('V7b. contextEvidence', `got: ${line2} | want: ${expect2}`)
+if (contextEvidence(fakeAgent(1000000), fakeCtx(0, 0, 0)) === null) ok('V7c. unmeasurable → null (no noise)')
+else bad('V7c. null degradation')
 // fold-intent arming: harness event arms, assemble consumes (no crash, scope intact)
 await ctx.emit('session/event', agent.session, {
   type: 'text-chunks',

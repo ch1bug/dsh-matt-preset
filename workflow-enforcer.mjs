@@ -133,16 +133,49 @@ async function resolveGates(agent, config) {
 export function contextEvidence(agent, ctx) {
   let used
   let cachePct
+  let cacheKind
   try {
     const meter = ctx.get('tokenMeter')
     const m = meter?.measure(agent.session)
     used = m?.totalTokens
-    const base = m?.baseline
-    if (base?.kind === 'usage' && base.usage) {
-      const input = base.usage.inputTokens ?? 0
-      const cached = base.usage.cacheReadTokens ?? 0
-      const denom = input + cached
-      if (denom > 0) cachePct = Math.round((cached / denom) * 100)
+    // Cumulative cache-read share across the whole session: fold the usage
+    // reported on each assistant/message event, replacing per turn/step (a
+    // step's later sample supersedes its earlier one, never double-counts —
+    // the same semantics as token-meter's tokenUsage projection). Answers
+    // "how much of what we've consumed was served from cache". Fall back to
+    // the latest-request baseline and label the anchor so the caller can
+    // tell the two apart.
+    let inputTotal = 0
+    let cachedTotal = 0
+    try {
+      const perStep = new Map()
+      for (const ev of agent.session.events ?? []) {
+        if (ev?.type !== 'assistant/message') continue
+        const u = ev?.data?.usage ?? ev?.usage
+        if (!u) continue
+        const key = `${ev.data?.turn}:${ev.data?.step}`
+        perStep.set(key, u)
+      }
+      for (const u of perStep.values()) {
+        inputTotal += u.inputTokens ?? 0
+        cachedTotal += u.cacheReadTokens ?? 0
+      }
+    } catch { /* event iteration is best-effort */ }
+    const denom = inputTotal + cachedTotal
+    if (denom > 0) {
+      cachePct = Math.round((cachedTotal / denom) * 100)
+      cacheKind = 'cumulative'
+    } else {
+      const base = m?.baseline
+      if (base?.kind === 'usage' && base.usage) {
+        const input = base.usage.inputTokens ?? 0
+        const cached = base.usage.cacheReadTokens ?? 0
+        const bdenom = input + cached
+        if (bdenom > 0) {
+          cachePct = Math.round((cached / bdenom) * 100)
+          cacheKind = 'latest-request'
+        }
+      }
     }
   } catch { /* measurement is best-effort */ }
   if (used === undefined || used <= 0) return null
@@ -152,7 +185,7 @@ export function contextEvidence(agent, ctx) {
   if (typeof capacity === 'number' && capacity > 0) {
     parts.push(`/ ${Math.round(capacity / 1000)}k (${Math.round((used / capacity) * 100)}%)`)
   }
-  if (cachePct !== undefined) parts.push(`· cache-read ${cachePct}%`)
+  if (cachePct !== undefined) parts.push(`· cache-read ${cachePct}% (${cacheKind})`)
   return parts.join(' ')
 }
 
