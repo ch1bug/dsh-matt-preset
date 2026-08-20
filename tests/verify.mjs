@@ -168,11 +168,47 @@ try {
       const parts = Array.isArray(firstUser.data?.content) ? firstUser.data.content : []
       const text = parts.map(p => p?.text ?? '').join('')
       ok('A. handoff child got the document as its first user message', JSON.stringify(text.slice(0, 60)))
+      // O6 boundary: the tool must append the 交接边界 section, so a fresh
+      // child never misreads pending items as its assignment.
+      if (text.includes('交接边界') && text.includes('不是本会话的任务指令')) {
+        ok('A. handoff document carries the boundary section (pending items ≠ assignment)')
+      } else {
+        bad('A. handoff boundary section', '交接边界/不是本会话的任务指令 missing from document')
+      }
     } else {
       bad('A. handoff child first user message', `events=${childEvents.map(ev => ev.type).join(',')}`)
     }
   } else {
     bad('A. handoff_tool', out ? `isError=${out.isError} sessions ${beforeH}->${afterH}` : 'no result')
+  }
+
+  // A2: DEFAULT mode is fresh — calling without `mode` spawns a child with
+  // ZERO inherited history (O6: forking a long session resurrects the whole
+  // compacted history). The child's only user message must be the document.
+  {
+    const beforeDef = ctxA.sessions.list().length
+    const defOut = await ctxA.tools.execute({
+      callId: CallId('verify-handoff-2'),
+      name: 'handoff_tool',
+      arguments: { document: doc },
+      agent: agentA,
+      signal: new AbortController().signal,
+    })
+    if (defOut && defOut.isError === false && ctxA.sessions.list().length === beforeDef + 1) {
+      const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => id !== String(agentA.session.id))
+      const child = ctxA.agents.get(childId)
+      await new Promise(r => setTimeout(r, 500))
+      const childEvents = child.session.events
+      const userMsgs = childEvents.filter(ev => ev.type === 'user/message')
+      const inherited = userMsgs.filter(ev => !/Handoff/i.test(JSON.stringify(ev.data?.content ?? '')))
+      if (userMsgs.length === 1 && inherited.length === 0) {
+        ok('A2. default handoff mode is fresh (child has zero inherited history)', `events=${childEvents.length} userMsgs=${userMsgs.length}`)
+      } else {
+        bad('A2. default handoff mode is fresh', `events=${childEvents.length} userMsgs=${userMsgs.length} inherited=${inherited.length}`)
+      }
+    } else {
+      bad('A2. default handoff mode is fresh', defOut ? `isError=${defOut.isError}` : 'no result')
+    }
   }
   await handleA.dispose()
 
