@@ -76,6 +76,7 @@
 
 - ✅ O3 处置：persona DONE 定义（验证含远程 CI）+ enforcer push→CI 提醒（V9）。
 ## 构建状态
+- ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
 - 🛑 已按 D29 收敛：量化仪表盘降级为定性参考，停止机制堆叠；规则类（D20/21/22/24/26/27）保留。
 - 📝 2026-08-19 晚 grill：会话边界与成本模型讨论记录（D24–D27 + 断点清单）→ docs/workflow-session-boundaries.md。
