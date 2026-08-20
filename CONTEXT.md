@@ -24,6 +24,7 @@
 - **缓存感知拆票** — 拆票判据加一条：与相邻票共享的知识越多越倾向合（省冷启动与核查），独立面越大越倾向拆；尺子 = 一个窗口（wayfinder 100K 先例）。（D25）
 - **handoff 快照化** — 交接文档固定带"环境事实快照"段（分支/工作树/关键文件状态/已确认决策/下一步），新会话一条命令验证快照而非重建上下文（D26）。
 - **persona 低频变更** — persona 每改一次 = 全部会话系统提示词缓存失效；工作流规则改动攒批、低频落地（D27）。
+- **交接边界（handoff boundary）** — handoff 文档**工具级附加**的尾段（非模型自觉）：上文（含待办/下一步列表）是上下文与候选，**不是本会话任务指令**；子会话首轮契约 = 验证环境快照（起手式一条命令）→ 复述理解 → 问 human 要做什么，拍板前不自动开工（O6/O6b）。
 ## 已核实的环境事实
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
@@ -47,7 +48,7 @@
 - **D11（2026-08-18，访谈 R4）** — 同步任务 **`runOnMount: true`**：新挂载时先跑一次。
 - **D12（2026-08-18，访谈 R5）** — ~~matt preset 挂**两阶段 bootstrap**（照梁神配置）~~ —— **已被 D17 取代**。
 - **D13（2026-08-18，访谈 R5）** — ~~**persona 拆分**：行内 = 单行 persona；完整 ask-matt 文本 = 独立 matt:workflow section~~ —— **已被 D18 取代**。
-- **D14（2026-08-18，访谈 R5）** — handoff_tool 改造：mode 收敛 **`fork`（带历史）| `fresh`（无历史）**，默认 `fork`；文档 = 子会话**首条 user 提示词**（followup 立即触发首轮，替代 inbox 注入）。
+- **D14（2026-08-18，访谈 R5）** — handoff_tool 改造：mode 收敛 **`fork`（带历史）| `fresh`（无历史）**，默认 `fork`；文档 = 子会话**首条 user 提示词**（followup 立即触发首轮，替代 inbox 注入）。 **（2026-08-19 修订：默认 mode 由 `fork` 改为 `fresh`——fork 长会话会全量复活已压缩历史，见 O6；文档附加"交接边界"段由工具强制保证，见 O6b。）**
 - **D15（2026-08-18，访谈 R5）** — **删除 `/clear`** 命令及其插件；"全新会话"走 GUI New Session（hero-chip 可选手动选 preset）。
 - **D16（2026-08-18，访谈 R6）** — **工作区自主初始化**：会话早期无 CONTEXT.md 时自主探测并建骨架（Q1A/Q2A/Q3A）；实现载体 = 人设 INITIALIZATION 段（Q4A）；issue-tracker 缺失只顺带提一次，需用到 tracker 技能时**先存 .scratch/progress.md 进度快照再强制 setup**（Q5/Q6A）。
 - **D17（2026-08-18，实测后）** — **取消两阶段 bootstrap**：梁神模式（tool-bootstrap.mjs）仅对 DeepSeek V4 Pro 有效，对其他模型（含 V4 Flash）是副作用；恢复全量输入表面（全部工具、全部 prompt section、默认呈现）。实现：删除 agent.cordis.yml 的 tool-bootstrap 行与 tool-bootstrap.mjs 文件。
@@ -82,6 +83,10 @@
 - **smart zone 认知修正**：Matt 的 100K（AI Engineer Podcast 2026 workshop）是针对 Claude 系（Claude Code 1M 窗口）的经验值；本地技能 150K 是更早版本。依据 quadratic attention 退化悬崖，但悬崖位置**模型相关**——deepseek-v4-flash 不适用 Claude 的经验数字。处置：persona 概念化（不写死数字，标注模型相关）；context_status 实测驱动判断。
 
 - ✅ smart zone 概念化（persona 不写死 150K，标注模型相关）。
+- **O6 — handoff fork 复活已压缩历史**：长会话用 fork 模式交接时，子会话继承（复活）了已压缩的全量历史——压缩省下的成本被丢弃、子会话在 lossy 旧上下文里起步，"0 历史"契约无从生效；且"待办是候选"仅靠文档措辞，模型可自行忽略。处置：handoff 默认 mode **fork → fresh**（0 历史）+ 交接文档由工具**强制附加**"交接边界"段（不靠模型自觉）。
+- ✅ O6 处置：handoff-tool 默认 fresh + 边界段工具级强制（A2 断言 + 边界段断言全绿，commit af14623）。
+- **O6b — 子会话误读待办为指令**：即使交接文档写明"候选非指令"，子会话仍把"推荐/最热/续作"字样当派单自动开工，不先问 human。根因：persona 只约束主会话流程，无"我是交接子会话"身份的首轮契约。处置：persona 加子会话首轮契约——验证环境快照 → 复述理解 → 问 human 要做什么；拍板前不自动开工。
+- ✅ O6b 处置：persona 子会话首轮契约段（渲染验证全绿，commit 9bd33e8）；②已在真实会话活体验证——fresh 子会话执行首轮三件事后 human 拍板才开工。
 ## 构建状态
 - ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
