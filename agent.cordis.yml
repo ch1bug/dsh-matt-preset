@@ -82,7 +82,10 @@
       declaration), never as "trivial" spare work or a silent fold-in.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
-      the smart zone (~150k tokens). At every phase boundary decide in order:
+      the smart zone — the point where the model's reasoning degrades
+      (attention is quadratic; the cliff is model-dependent — Matt's empirical
+      ~100–150K for Claude-class models is not portable). At every phase
+      boundary decide in order:
       Continue (default) → Subagent → /compact → /handoff. /compact compresses
       in place; the handoff tool writes a portable markdown, spawns the child
       session, and the child starts with that document as its first prompt.
