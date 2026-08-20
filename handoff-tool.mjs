@@ -8,9 +8,12 @@
  *
  *   1. writes the portable handoff markdown to the OS temp dir (the artifact
  *      that travels — a new harness, a new directory, a colleague),
- *   2. spawns the child session joined to THIS preset: a fork of the current
- *      history up to the last completed turn (mode 'fork'), or a fresh
- *      session (mode 'fresh'),
+ *   2. spawns the child session joined to THIS preset: a FRESH session with
+ *      ZERO inherited history (default, mode 'fresh') — the handoff document
+ *      alone carries the context across the boundary (O6: forking a long
+ *      session resurrects the whole compacted history; fresh + document is
+ *      the correct handoff shape). mode 'fork' remains for the narrow case
+ *      of continuing the SAME ticket mid-work when the window ran out,
  *   3. feeds the document to the child as its FIRST USER PROMPT — the child's
  *      first turn starts immediately via `agent.followup()` (the same
  *      admission path the prompt RPC uses), so the child becomes a real,
@@ -62,7 +65,7 @@ const handoffSchema = {
       type: 'string',
       enum: ['fork', 'fresh'],
       description:
-        "fork (default) = child session continues this conversation's history up to the last completed turn; fresh = empty child session. The handoff document is the child's first prompt either way.",
+        "fresh (default) = empty child session, zero inherited history — the handoff document carries the context; fork = child continues this conversation's history up to the last completed turn (only for continuing the same ticket mid-work when the window ran out). The handoff document is the child's first prompt either way.",
     },
   },
   required: ['document'],
@@ -114,7 +117,11 @@ async function executeHandoff(ctx, args, exec) {
   const presetId = ctx.agentPresets.composedPreset(agent.ctx) ?? ctx.agentPresets.defaultId
   const session = agent.session
   const header = session?.header
-  const mode = typeof args.mode === 'string' && MODES.includes(args.mode) ? args.mode : 'fork'
+  // Default is FRESH: the handoff document alone carries the context (O6).
+  // Forking a long session resurrects its whole compacted history — the
+  // opposite of a clean ticket boundary. fork is an explicit opt-in for
+  // continuing the same ticket mid-work.
+  const mode = typeof args.mode === 'string' && MODES.includes(args.mode) ? args.mode : 'fresh'
 
   // 1. The portable artifact — the OS temp dir, never the workspace.
   const stamped = new Date().toISOString().replace(/[:.]/g, '-')
@@ -139,7 +146,19 @@ async function executeHandoff(ctx, args, exec) {
     '- 已确认决策: ',
     '- 下一步: ',
   ].join('\n')
-  const documentText = [prefix, '', body, '', snapshot, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
+  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. The
+  // document may list pending work ("待办/下一步"), but those are CANDIDATES
+  // for the human to pick, not instructions to execute. The child's first
+  // duty is to verify the snapshot and ASK the human what this session does —
+  // never to auto-start a listed item (O6: a fresh child misreads a hot
+  // pending item as its assignment and barrels into another ticket's work).
+  const boundary = [
+    '## 交接边界（首轮必读）',
+    '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
+    '- 本会话首轮：验证环境快照（起手式一条命令）→ 向 human 报告理解 → **问清本会话要做什么**。',
+    '- 在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
+  ].join('\n')
+  const documentText = [prefix, '', body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')
@@ -209,7 +228,7 @@ export function apply(ctx) {
     description: [
       "Execute the /handoff phase boundary: write a portable handoff markdown to the OS temp dir and spawn the child session (same mode) that continues the work; the document becomes the child's first prompt and its first turn starts immediately.",
       'Call this when the phase-boundary decision is /handoff — swapping harness, moving to a new directory, sending work to a colleague, or forking a side task mid-phase.',
-      'mode "fork" (default) carries this session\'s history up to the last completed turn; mode "fresh" starts from nothing.',
+      'mode "fresh" (default) = empty child session, zero inherited history (the document carries the context); mode "fork" = child continues this session\'s history up to the last completed turn (same-ticket continuation only).',
       'You compose the `document` yourself (summary + suggested skills + artifact references, redacted); this tool only writes and spawns.',
       'After it returns, STOP and tell the human to switch to the child session in the sidebar — you cannot switch the main session yourself.',
     ].join('\n'),
