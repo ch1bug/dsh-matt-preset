@@ -229,7 +229,20 @@ const csText = cs.isError === false ? (cs.value?.text ?? '') : `error ${cs.error
 if (csText.includes('context:') && csText.includes('used')) ok('V10. context_status tool returns measured context', csText.slice(0, 60))
 else bad('V10. context_status', csText.slice(0, 120))
 
+// V11: closing a ticket arms ONE fresh-subagent quality spot check on the
+// next assembly (self-assessment cannot see its own degradation, O5).
+await ctx.emit('session/event', agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 11, name: 'bash', arguments: JSON.stringify({ command: 'gh issue close 429 --comment "done"' }) },
+})
+const v11 = await render()
+if (v11.includes('fresh-subagent quality') && v11.includes('O5')) ok('V11. issue close → fresh-subagent spot check nudge (one-shot)')
+else bad('V11. close spot-check nudge', v11.slice(-240))
+const v11b = await render()
+if (!v11b.includes('fresh-subagent quality')) ok('V11b. close nudge consumed after firing (no repeat)')
+else bad('V11b. close nudge consumed', v11b.slice(-160))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V10) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V11) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

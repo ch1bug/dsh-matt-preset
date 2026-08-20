@@ -84,7 +84,15 @@
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone — the point where the model's reasoning degrades
       (attention is quadratic; the cliff is model-dependent — Matt's empirical
-      ~100–150K for Claude-class models is not portable). At every phase
+      ~100–150K for Claude-class models is not portable). Cache-read % is a
+      COST metric, not a quality signal: it only says prefix reuse saved
+      money — long contexts still attend the full history, so attention
+      dilution is undiminished. Judge window health by BEHAVIORAL SIGNALS
+      (repeated file re-reads, circling steps with no new info, gate
+      violations, shrinking replies, decision drift) and by hard thresholds —
+      and when in doubt, run ONE fresh-subagent spot check comparing an early
+      vs a late reasoning sample (self-assessment runs in the same context it
+      would be judging, so it cannot see its own degradation). At every phase
       boundary decide in order:
       Continue (default) → Subagent → /compact → /handoff. /compact compresses
       in place; the handoff tool writes a portable markdown, spawns the child

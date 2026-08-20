@@ -78,6 +78,7 @@
 - **O4 — 流程技能未加载**：IRIS triage #428（16:35）按人设一句话 + AGENTS.md 自行分诊，未加载 triage 技能（skill 工具零调用）——OUT-OF-SCOPE/AGENT-BRIEF/状态机细节全被跳过。根因：persona 只对 grilling 写了强制加载。处置：gate 4 补"执行流程技能必须先加载 SKILL.md"。
 
 - ✅ O4 处置：gate 4 补"流程技能必须先加载 SKILL.md"。
+- **O5 — cache-read 被误当质量信号 + 会话自评盲区实证**：IRIS a14f178c 会话（#418+#429 双闭环，261k/26%）以"95% cache-read → 推理质量无实质影响"论证窗口健康——错误：cache-read 是成本指标（前缀复用省钱），attention 稀释与缓存命中无关。且该会话在 ~208k→261k 区间发生**真实质量信号事件**：在 #429 中钻进"调度双跑"诊断反复绕圈（多轮读 scheduler 代码、无新信息），违反 ONE ISSUE PER SESSION，靠 human 介入（"核心 + 调度另建票"）才收住——95% cache-read 时质量信号照样亮红。根因：会话自评 = 自我指涉（退化的上下文里"评估自己是否退化"同样退化）。处置：① persona CONTEXT HYGIENE 写明 cache-read ≠ 质量信号、窗口健康看行为信号 + 硬阈值 + fresh-subagent 抽查；② enforcer 在 ticket 闭环（issue close）后提示一次 fresh 抽查。
 - **smart zone 认知修正**：Matt 的 100K（AI Engineer Podcast 2026 workshop）是针对 Claude 系（Claude Code 1M 窗口）的经验值；本地技能 150K 是更早版本。依据 quadratic attention 退化悬崖，但悬崖位置**模型相关**——deepseek-v4-flash 不适用 Claude 的经验数字。处置：persona 概念化（不写死数字，标注模型相关）；context_status 实测驱动判断。
 
 - ✅ smart zone 概念化（persona 不写死 150K，标注模型相关）。

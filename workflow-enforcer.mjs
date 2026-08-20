@@ -61,6 +61,21 @@ const lastCall = new WeakMap()
  * human can verify the claim. */
 const foldIntent = new WeakMap()
 
+/** Sessions that just closed a ticket (`gh issue close` / state=closed).
+ * Armed by the tool/call event hook, consumed by the next assemble, which
+ * then nudges ONE fresh-subagent quality spot check: self-assessment runs
+ * in the same context it would be judging, so it cannot see its own
+ * degradation (O5). */
+const ticketClosed = new WeakMap()
+
+/** Matches an issue-close tool call: `gh issue close N` or a PATCH that
+ * sets state=closed on issues/N. */
+const CLOSE_PATTERNS = [
+  /\bgh\s+issue\s+close\b/,
+  /issues\/\d+[^"]*state[=:]["']?closed["']?/i,
+  /["']state["']\s*[:=]\s*["']closed["']/i,
+]
+
 /** Keywords that mark a fold-in claim (lowercased match). */
 /** Keywords that arm context evidence: fold-in claims (agent) or
  * context-capacity assessments (user asking how much window is left). */
@@ -240,6 +255,15 @@ async function reminderText(agent, config, ctx, assembled) {
     const evidence = contextEvidence(agent, ctx)
     if (evidence !== null) parts.push(evidence)
   }
+  if (ticketClosed.get(agent.session) === true && config.ticketClosedCheck !== false) {
+    ticketClosed.delete(agent.session) // consume: one nudge per close
+    parts.push([
+      'Ticket closed — before reporting done, run ONE fresh-subagent quality',
+      'spot check: compare an early vs a late reasoning sample (depth,',
+      'constraint adherence, drift). Self-assessment cannot see its own',
+      'degradation — the fresh view can (O5).',
+    ].join(' '))
+  }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
@@ -253,6 +277,8 @@ export function apply(ctx, config = {}) {
     if (event?.type !== 'tool/call') return
     const data = event.data ?? {}
     lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
+    const surface = JSON.stringify(data)
+    if (CLOSE_PATTERNS.some(re => re.test(surface))) ticketClosed.set(session, true)
   })
 
   // Arm context evidence: assistant fold-in claims AND user assessments of
