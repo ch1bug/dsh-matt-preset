@@ -18,7 +18,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -206,7 +206,18 @@ const v9 = await render()
 if (v9.includes('remote CI run') && v9.includes('CI green')) ok('V9. git push → remote-CI reminder (done means CI green)')
 else bad('V9. push CI reminder', v9.slice(-220))
 
+// V10: context_status tool (model-driven) returns measured numbers.
+agent.session.append('turn/start', { turn: 9 })
+agent.session.append('step/start', { turn: 9, step: 1 })
+agent.session.append('assistant/message', { turn: 9, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'some measurable context content for the meter' }] } }, { surfaceOp: 'append' })
+const cs = await ctx.tools.execute({
+  callId: CallId('v10-cs'), name: 'context_status', arguments: {}, agent, signal: new AbortController().signal,
+})
+const csText = cs.isError === false ? (cs.value?.text ?? '') : `error ${cs.error}`
+if (csText.includes('context:') && csText.includes('used')) ok('V10. context_status tool returns measured context', csText.slice(0, 60))
+else bad('V10. context_status', csText.slice(0, 120))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V9) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V10) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

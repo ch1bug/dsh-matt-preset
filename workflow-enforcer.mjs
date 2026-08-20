@@ -37,7 +37,7 @@ import { parse as parseYaml } from 'yaml'
 export const name = 'workflow-enforcer'
 
 /** The prompt registry this plugin contributes to. */
-export const inject = ['systemPrompt']
+export const inject = ['systemPrompt', 'tools']
 
 /** Default gate list. Match = case-insensitive substring over the call. */
 export const DEFAULT_GATES = {
@@ -147,7 +147,8 @@ export function contextEvidence(agent, ctx) {
   } catch { /* measurement is best-effort */ }
   if (used === undefined || used <= 0) return null
   const capacity = agent.session.requestContext?.()?.contextWindow
-  const parts = [`context: ${Math.round(used / 1000)}k used`]
+  const shown = used >= 1000 ? `${Math.round(used / 1000)}k` : String(used)
+  const parts = [`context: ${shown} used`]
   if (typeof capacity === 'number' && capacity > 0) {
     parts.push(`/ ${Math.round(capacity / 1000)}k (${Math.round((used / capacity) * 100)}%)`)
   }
@@ -230,6 +231,31 @@ export function apply(ctx, config = {}) {
     const texts = data.texts ?? []
     const text = (Array.isArray(texts) ? texts.join(' ') : JSON.stringify(data)).toLowerCase()
     if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
+  })
+
+  // Model-driven context query: the agent calls this when the user asks about
+  // context/window/capacity (or before folding in a related ticket). This
+  // bypasses the arm-timing dead end where user/message events land after the
+  // first assembly of the turn.
+  ctx.tools.register({
+    name: 'context_status',
+    description: [
+      'Query the current session context usage: tokens used, capacity, and',
+      'cache-read share. Call this when the user asks about context, window,',
+      'capacity, or token usage — answer with the measured numbers, not an',
+      'estimate. Also call it before deciding whether to fold in a related ticket.',
+    ].join(' '),
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: { text: { type: 'string' } }, required: ['text'] },
+      render: (_args, value) => [{ type: 'text', text: value.text }],
+    },
+    async execute(_args, exec) {
+      const agent = exec?.agent
+      if (agent === undefined || agent.session === undefined) return { text: 'context status unavailable: no agent' }
+      const evidence = contextEvidence(agent, ctx)
+      return { text: evidence ?? 'context usage not measurable (tokenMeter unavailable)' }
+    },
   })
 
   // Inject the reminder section on every prompt assembly.
