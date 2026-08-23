@@ -88,7 +88,16 @@
 - **O6b — 子会话误读待办为指令**：即使交接文档写明"候选非指令"，子会话仍把"推荐/最热/续作"字样当派单自动开工，不先问 human。根因：persona 只约束主会话流程，无"我是交接子会话"身份的首轮契约。处置：persona 加子会话首轮契约——验证环境快照 → 复述理解 → 问 human 要做什么；拍板前不自动开工。
 - ✅ O6b 处置：persona 子会话首轮契约段（渲染验证全绿，commit 9bd33e8）；②已在真实会话活体验证——fresh 子会话执行首轮三件事后 human 拍板才开工。
 - **O8 — grill 被当作多阶段票的默认入口（#214，2026-08-23）**：IRIS 会话 `matt-session-d14513c3` 对已 spec 化、阶段已推进的重构票 #214 跑了完整 grill 仪式（3 轮 13 问）：Q1 问票面状态注已写的事实（剩余 = P1+P4）、Q2 问已拍板的 #419 决策、Round 2 在审计子代理未回报时问依赖审计结果的拆票粒度问题（引用"不阻塞"误读 frontier 规则）致 Round 3 被迫重问——29.5k 事件仍停在 Round 3，零实施票产出。根因链：① persona MAIN FLOW 第 1 步无条件"Run the grilling interview"，无"已 spec 票跳过 grill"边界；② **分类 mislabel（源头，8/22 ad1e736b 盘点）**：把"spec 待拆票"（#193/#214）归入"需要 grill"——拆票方向/阶段粒度/边界是 to-tickets 的活，不是 grill 的；③ 上一会话 handoff 候选**预标流程**（"grill #214"）传染给子会话；④ frontier"只问已解锁问题"被误读为"可并行查事实即可先问"。**规则（分类判据）：① 真·形状未定（有未拍板的决策）→ grill（如 #215 迁移基线策略、#414 规则冲突）；② spec 已定、待拆票 → to-spec → to-tickets（审计事实修 spec 漂移 + 拆垂直切片票、声明阻塞边），拆票边界真正未决的点用定向问题确认；③ 形状已定 → 直接 implement。**
-- ✅ O8 处置：CONTEXT.md 观察记录（本行）；persona 批改项（D27 攒批，随下批 persona 变更落地——MAIN FLOW 1 + ENTRY ROUTING 补 grill 边界与"依赖进行中事实的问题不进当前轮"）；handoff 候选段约定"只标工作不预标流程"（待落地）。
+- ✅ O8 处置：CONTEXT.md 观察记录（本行）；persona 批改项（见下方批改队列）；handoff 候选段约定"只标工作不预标流程"（handoff-tool.mjs 改动，另行落地）。
+- **O9 — 默认 human 啥都知道，发言不给前因后果（2026-08-23，实证）**：IRIS 会话 `matt-session-c0b8f6c0`（grill #215，对照 think 与实际发言）——think 始终完整（推理含全部背景），但**发言默认稠密**：Turn 2 直接抛 `pg_dump --schema-only`/`schema_init`/`IF NOT EXISTS`/`WARN 降级语义`/`ADR-0019`，零因果链；human 同一会话**两次困惑**（Turn 3 触发 `/wait-what`、Turn 6 追问"基线迁移到底迁移什么"），agent 被迫才展开解释（被迫解释时讲得很好：类比 + SQL 例子 + 前后对比表）。根因：无显式沟通规则要求"发言带因果链"，解释是反应式而非主动式。**规则：对 human 的输出默认不假设其已知背景——提问/决策前先给 2–3 句因果链（这票是啥、为什么走到这个问题、术语一句话背景）；跨会话引用（票号/决策号/ADR/术语）至少附一句话背景；human 触发 `/wait-what` 或追问 = 默认发言过密的信号，当场自检"我假设了什么"并沉淀（D22 扩展：困惑也是纠正）。**（与"human is the index"兼容：指针照给，每个指针带一句话背景，不是零背景。）
+- ✅ O9 处置：CONTEXT.md 观察记录（本行）；persona 批改项（见下方批改队列）。
+
+## Persona 批改队列（D27 攒批，攒够一批改一次）
+- [ ] **O8 · 入口路由判据**：MAIN FLOW 1 + ENTRY ROUTING 补边界——grill 仅用于"真·形状未定"的票（有未拍板决策）；spec 已定待拆票走 to-spec/to-tickets；形状已定直接 implement
+- [ ] **O8 · frontier 澄清**：依赖进行中事实/子代理未回报的问题**不属于当前轮**（防 Round 2→3 重问）
+- [ ] **O9 · 沟通规范**：对 human 输出默认带因果链（2–3 句前因后果 + 跨会话引用一句话背景）；`/wait-what`/追问 = 默认发言过密信号，自检假设并沉淀
+- 注：handoff 候选"只标工作不预标流程"是 handoff-tool.mjs 模板改动（非 persona），另行落地并重验 A2/边界段断言。
+
 ## 构建状态
 - ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
