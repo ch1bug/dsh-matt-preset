@@ -87,6 +87,8 @@
 - ✅ O6 处置：handoff-tool 默认 fresh + 边界段工具级强制（A2 断言 + 边界段断言全绿，commit af14623）。
 - **O6b — 子会话误读待办为指令**：即使交接文档写明"候选非指令"，子会话仍把"推荐/最热/续作"字样当派单自动开工，不先问 human。根因：persona 只约束主会话流程，无"我是交接子会话"身份的首轮契约。处置：persona 加子会话首轮契约——验证环境快照 → 复述理解 → 问 human 要做什么；拍板前不自动开工。
 - ✅ O6b 处置：persona 子会话首轮契约段（渲染验证全绿，commit 9bd33e8）；②已在真实会话活体验证——fresh 子会话执行首轮三件事后 human 拍板才开工。
+- **O8 — grill 被当作多阶段票的默认入口（#214，2026-08-23）**：IRIS 会话 `matt-session-d14513c3` 对已 spec 化、阶段已推进的重构票 #214 跑了完整 grill 仪式（3 轮 13 问）：Q1 问票面状态注已写的事实（剩余 = P1+P4）、Q2 问已拍板的 #419 决策、Round 2 在审计子代理未回报时问依赖审计结果的拆票粒度问题（引用"不阻塞"误读 frontier 规则）致 Round 3 被迫重问——29.5k 事件仍停在 Round 3，零实施票产出。根因链：① persona MAIN FLOW 第 1 步无条件"Run the grilling interview"，无"已 spec 票跳过 grill"边界；② 上一会话 handoff 候选**预标流程**（"grill #214"）传染给子会话；③ frontier"只问已解锁问题"被误读为"可并行查事实即可先问"。**规则：grill 仅用于打磨模糊想法/未决设计决策（frontier：只问未决未锁问题）；已 spec 化、阶段已推进的多会话票不上 grill，走 to-spec → to-tickets（审计事实修 spec 漂移 + 拆垂直切片票、声明阻塞边），拆票边界真正未决的点用定向问题确认。**
+- ✅ O8 处置：CONTEXT.md 观察记录（本行）；persona 批改项（D27 攒批，随下批 persona 变更落地——MAIN FLOW 1 + ENTRY ROUTING 补 grill 边界与"依赖进行中事实的问题不进当前轮"）；handoff 候选段约定"只标工作不预标流程"（待落地）。
 ## 构建状态
 - ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
