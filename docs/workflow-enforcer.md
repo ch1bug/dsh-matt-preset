@@ -32,9 +32,12 @@ everywhere, or change `marker:`.
 ## What it injects
 
 - Every prompt assembly gets a short **baseline** reminder (external/destructive
-  actions → report + wait for confirmation; corrections → acknowledge + write down).
+  actions → report + wait for confirmation; corrections → acknowledge + write down;
+  batch mode → the declared batch-end push is pre-authorized, mid-batch out-of-scope
+  pushes still wait).
 - A tool call matching the gate list gets a one-shot **⚠ High-risk action**
-  line on the next assembly (consumed after firing).
+  line on the next assembly (consumed after firing). For `git push` it adds a
+  CI-verification reminder, with the batch-end pre-authorization exception noted.
 
 ## Gate list
 

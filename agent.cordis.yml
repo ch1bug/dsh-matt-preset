@@ -72,14 +72,51 @@
          phase-internal rule — it never extends to the next ticket.
       6. EXTERNAL-ACTION GATE — external/destructive actions (push, PR/issue,
          publish, DB reset, rm -rf, force-push): report, then WAIT for
-         confirmation.
+         confirmation. One standing exception: the batch-end push that BATCH
+         MODE (below) pre-authorizes — still report and verify CI after it.
       7. TICKET EXIT — beyond-scope work becomes a ticket, never inline; a
          blocking bug pauses the current slice (git WIP) and returns after;
          a diagnosis with no correct seam is debt — plan before fixing.
-      DONE — verification includes the remote CI. After a push, confirm the
-      pushed commit's CI run is green; a red CI is unfinished current-ticket
-      work — fix it as part of this ticket's verification (with a phase
-      declaration), never as "trivial" spare work or a silent fold-in.
+      DONE — verification includes the remote CI. Per-issue mode: after a
+      push, confirm the pushed commit's CI run is green; a red CI is
+      unfinished current-ticket work — fix it as part of this ticket's
+      verification (with a phase declaration), never as "trivial" spare work
+      or a silent fold-in. Batch mode: per-issue done = local verification +
+      code-review; remote CI green is confirmed once, at the batch-end push.
+
+      BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
+      系列处理 / 大系列"); never on by default. Single-issue work keeps the
+      per-issue push rhythm.
+      - Batch = the set of issues the human declares (usually one series,
+        e.g. #503 T1/T2/T3, or a to-tickets feature's ticket group). The
+        declaration must name the members and the end point (last ticket).
+      - Inside a batch: work each ticket → local commit + local verification
+        (L1/L2/clippy/fmt/code-review) → NO per-ticket push. Closing an issue
+        may precede the remote CI (based on local verification + code-review);
+        the remote CI is confirmed once at the batch-end push.
+      - Batch end: push all commits in one go (pre-authorized by the batch
+        declaration), then remote CI all-green is the completion gate — red
+        means unfinished batch work, fix and re-verify.
+      - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
+        the next code push.
+      - BATCH STATE IS EXPLICIT (this is what keeps batches from piling up):
+        on declaration write .scratch/batch-state.md (members, end point,
+        progress, unpushed-commit list); update it after every ticket. You
+        must always know you are in a batch, what is left, and where the last
+        push checkpoint was.
+      - Anti-pileup guardrails: (a) a batch contains only its declared
+        members — adding a ticket requires an explicit human extension; (b)
+        at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push
+        checkpoint or permission to continue; (c) a batch must end in a push —
+        never finish a batch and leave it unpushed.
+
+      TEXT PUSHES EXCLUDE ACTIONS — a push whose diff contains only text/docs
+      changes (CHANGELOG.md, docs/**, AGENTS.md, *.md, .github/**) must not
+      trigger CI: the repo's ci.yml should carry paths-ignore for those paths,
+      so doc-only pushes burn zero Actions minutes. Applies in and out of a
+      batch. If the repo lacks the filter, add it as part of the current
+      batch/ticket work (or file a ticket) — never leave doc-only pushes
+      running the full CI.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone — the point where the model's reasoning degrades
