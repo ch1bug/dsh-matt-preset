@@ -146,17 +146,20 @@ async function executeHandoff(ctx, args, exec) {
     '- 已确认决策: ',
     '- 下一步: ',
   ].join('\n')
-  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. The
-  // document may list pending work ("待办/下一步"), but those are CANDIDATES
-  // for the human to pick, not instructions to execute. The child's first
-  // duty is to verify the snapshot and ASK the human what this session does —
-  // never to auto-start a listed item (O6: a fresh child misreads a hot
+  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. A
+  // document that carries a "## 本会话任务（human 已定向）" section is an
+  // ASSIGNMENT — the child verifies the snapshot, restates understanding, and
+  // declares start without a confirmation round-trip (D35). A document
+  // without that section lists CANDIDATES ("待办/下一步") for the human to
+  // pick, not instructions to execute; the child must verify, restate, and
+  // ASK — never auto-start a listed item (O6: a fresh child misreads a hot
   // pending item as its assignment and barrels into another ticket's work).
   const boundary = [
     '## 交接边界（首轮必读）',
     '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
-    '- 本会话首轮：验证环境快照（起手式一条命令）→ 向 human 报告理解 → **问清本会话要做什么**。',
-    '- 在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
+    '- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（"按交接开工 X，如需改道请打断"），不再逐会话确认任务。',
+    '- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
+    '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
   ].join('\n')
   const documentText = [prefix, '', body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
   let writeError
