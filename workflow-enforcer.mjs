@@ -212,6 +212,9 @@ function baselineText() {
     'finish, report the outcome, and WAIT for the human\'s confirmation before running.',
     'A human correction must be acknowledged and written down (propose the doc).',
     'One issue per session.',
+    'BATCH MODE: when the human has declared a batch (攒批), the batch-end push is',
+    'pre-authorized by that declaration — push, report the outcome, verify the',
+    'remote CI; mid-batch pushes outside the declared batch still WAIT.',
   ].join('\n')
 }
 
@@ -247,6 +250,7 @@ async function reminderText(agent, config, ctx, assembled) {
       parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
       if (gateHit('git push', surface)) {
         parts.push('After the push, check the remote CI run for the pushed commit — done means local checks pass, pushed, AND CI green.')
+        parts.push('If this is the pre-authorized batch-end push (BATCH MODE declared), report the outcome and verify CI instead of waiting; otherwise wait for confirmation.')
       }
     }
   }
