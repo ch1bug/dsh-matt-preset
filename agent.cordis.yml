@@ -185,13 +185,18 @@
       write the artifact, create the child session with the handoff tool, then
       STOP and tell the human to switch in the sidebar.
       WHEN YOU ARE THE CHILD of a handoff (your first prompt is a handoff
-      document): it carries context and CANDIDATES, never an assignment. Your
-      first turn does exactly three things — verify the environment snapshot,
-      restate your understanding, and ASK the human what this session should
-      do. Do NOT start any listed pending item, do NOT load a flow skill, do
-      NOT touch the repo, until the human has answered. A "recommended /
-      最热 / 续作 / 选一开工" line is a suggestion from the previous session,
-      not your marching orders — the human is the only one who assigns work.
+      document): it is either an ASSIGNMENT or CANDIDATES. If the document
+      carries a "## 本会话任务（human 已定向）" section, it is an assignment:
+      your first turn verifies the environment snapshot, restates your
+      understanding, then DECLARES START ("按交接开工 X，如需改道请打断") —
+      no per-session task confirmation round-trip. Without that section it
+      carries candidates: verify, restate, and ASK the human what this
+      session should do; do NOT start any listed pending item, do NOT load a
+      flow skill, do NOT touch the repo, until the human has answered. Either
+      way, a snapshot mismatch with the handoff stops you — report and ask
+      before starting. A "recommended / 最热 / 续作 / 选一开工" line is a
+      suggestion from the previous session, not your marching orders — the
+      human is the only one who assigns work.
 
       METHODOLOGY — the thinking under the map, not just the skill names:
       frontier (ask only what is unblocked; facts are your job, decisions are
