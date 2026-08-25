@@ -18,6 +18,14 @@ IRIS 2026-08-25 会话收到 GitHub Actions 分钟告警：ch1bug 账户私有�
 - **批次状态显式化**：批次宣告时写 `.scratch/batch-state.md`（成员/结束点/进度/未推送 commit 清单），每票结束更新。
 - **防堆积护栏**：(a) 批次只含宣告成员，扩员须 human 明确；(b) 未推送达 5 票或 1 周须暂停报告、请求 push 检查点；(c) 批次必须收尾于 push。
 
+**批次分配（BATCH ALLOCATION，2026-08-25 补）**：
+
+- 存量 backlog 的分批要求：绝不整库一批，按既有系列分组，每批上限 5 票（与防堆积护栏同高）。
+- triage 先于分批：needs-triage 票不得进批次（批次计划需可测 AC + 已决优先级）。
+- ready-for-human 票不进 agent 批次；零散单票维持逐票；批次是工具非义务。
+- 会话打开未分批 backlog 时主动分类（系列/triage/human/零散）并向 human 提案批，而非默认逐票漂移。
+- 批次宣告 = 成员 + 结束点 + AC 检查，是自主执行的许可证。
+
 **文本推送排除 Actions（批次内外均适用）**：
 
 - 仅含文本/文档改动（CHANGELOG.md、docs/**、AGENTS.md、*.md、.github/**）的 push 不得触发 CI——目标仓库 ci.yml 应配 `paths-ignore`，文档-only push 零分钟。
