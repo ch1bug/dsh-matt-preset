@@ -12,7 +12,8 @@ IRIS 2026-08-25 会话收到 GitHub Actions 分钟告警：ch1bug 账户私有�
 
 - human 宣告"这批攒批 / 系列处理 / 大系列"时进入批次模式；单票任务维持逐票 push 节奏。
 - 批次内：逐票实施 → 本地 commit + 本地验证（L1/L2/clippy/fmt/code-review）→ 不单独 push；关票可先于远程 CI（基于本地验证 + code-review），远程 CI 在批次末一次性确认。
-- 批次末：一次性 push 全部 commit（**由批次宣告预授权**——EXTERNAL-ACTION GATE 的唯一常设例外，push 后仍报告结果并验证 CI）+ 远程 CI 全绿为收尾门禁（红 = 批次未完工作）。
+- 批次末：**批末总结确认门**——收尾前总结列出过程中所有 issue（A/B/C 全量）→ human 确认 → 才一次性 push 全部 commit（2026-08-25 晚修订：取代最初"宣告预授权"语义，批末 push 走正常 report→确认→push）+ 远程 CI 全绿为收尾门禁（红 = 批次未完工作）。
+- **批次内 issue 纪律（防偷懒）**：一切发现先落 issue（新建或更新）→ 处理 → 再更新 issue（记录修复与验证证据），绝不静默顺手修/静默忽略。三桶：A 阻塞（新建 issue + 整批暂停等 human）；B 非阻塞票外（落票→修复→更新→继续）；C 验证期 CI 红（定位→更新→修复→复验→更新）。计划/范围更改同走"更新 issue→处理→再更新 issue"闭环。
 - 文档（CHANGELOG/docs/AGENTS.md）只本地提交，随下次代码一起推送。
 - **批次状态显式化**：批次宣告时写 `.scratch/batch-state.md`（成员/结束点/进度/未推送 commit 清单），每票结束更新。
 - **防堆积护栏**：(a) 批次只含宣告成员，扩员须 human 明确；(b) 未推送达 5 票或 1 周须暂停报告、请求 push 检查点；(c) 批次必须收尾于 push。
@@ -33,7 +34,7 @@ IRIS 2026-08-25 会话收到 GitHub Actions 分钟告警：ch1bug 账户私有�
 ## Consequences
 
 - 批次模式下逐票"完成"不再含远程 CI（本地验证 + code-review 即完成），远程 CI 全绿推迟到批次末——DONE 规则双模式化；批次拖长时远程验证积压，跨 commit 追根成本上升，靠护栏 (b) 控制。
-- 批次宣告即预授权批末 push：减少逐次确认摩擦，但要求 agent 严格区分"批末 push"与"批次中途超范围 push"（后者仍等确认）；enforcer 的 push 提醒文本已补该例外说明（无状态，语义由 persona 承担）。
+- 批次宣告即预授权批末 push：~~减少逐次确认摩擦~~（**2026-08-25 晚修订：预授权语义被批末总结确认门取代**——human 拍板"用户确认之后才能推送"，每批收尾都出全量 issue 清单等确认，防止 B/C 修复偷懒未被审计）；enforcer 的 push 提醒文本已同步（无状态，语义由 persona 承担）。
 - 文本推送排除 Actions 依赖目标仓库 ci.yml 配置 `paths-ignore`；工作流只承载规范要求，实际配置需各仓库落地（IRIS ci.yml 尚无路径过滤，属待办）。
 - persona 改动对新会话生效（系统提示词缓存全量失效一次，D27 低频变更纪律——本次为单次批量落地）。
 - 与 IRIS AGENTS.md 攒批策略（`6afe4c0`）语义对齐：IRIS 仓库侧措辞可保持，preset 侧成为通用规范。
