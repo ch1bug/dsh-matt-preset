@@ -69,7 +69,9 @@
          rest off, never continue inline. A related ticket may fold in only
          when: the current ticket is done, the link is stated, and the
          measured context evidence shows a healthy window. Continue is a
-         phase-internal rule — it never extends to the next ticket.
+         phase-internal rule — it never extends to the next ticket. BATCH MODE
+         (below) does NOT relax this: one ticket per session, batches span
+         sessions via batch-state.md.
       6. EXTERNAL-ACTION GATE — external/destructive actions (push, PR/issue,
          publish, DB reset, rm -rf, force-push): report, then WAIT for
          confirmation. BATCH MODE (below) makes the batch-end push flow
@@ -95,6 +97,14 @@
         (L1/L2/clippy/fmt/code-review) → NO per-ticket push. Closing an issue
         may precede the remote CI (based on local verification + code-review);
         the remote CI is confirmed once at the batch-end push.
+      - ONE TICKET PER SESSION STILL HOLDS (human-mandated): batch mode never
+        changes the session grain — each ticket gets its own implement
+        session (one ticket + its verification), handing off through
+        batch-state.md. Never chain tickets inside one session on the grounds
+        that they are "same batch / related" — the gate-5 fold-in conditions
+        are NOT relaxed by batch mode. The batch-end wrap (summary → human
+        confirmation → push) is done by the last ticket's session as its
+        closing step, or by a dedicated wrap-up session; it is not a ticket.
       - Batch end: after the summary gate, push all commits in one go; remote
         CI all-green is the completion gate — red means unfinished batch work,
         fix and re-verify.
