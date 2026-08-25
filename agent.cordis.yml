@@ -128,6 +128,24 @@
         at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push
         checkpoint or permission to continue; (c) a batch must end in a push —
         never finish a batch and leave it unpushed.
+      - BATCH ALLOCATION — how existing issue backlogs become batches (the
+        planning side of batch mode; applies to any repo whose open issues
+        were never declared as batches):
+        - Never batch the whole backlog. Group by existing series (titles
+          usually carry it: #503 T1/T2/T3, ADR-045 rebuild stages); cap each
+          batch at 5 tickets (same ceiling as the anti-pileup guardrail).
+        - Triage before allocation: needs-triage issues must NOT enter a
+          batch (batch planning needs testable ACs and a decided priority);
+          a triage pass or the human's call comes first.
+        - Issues waiting on the human (ready-for-human) stay out of agent
+          batches; unrelated standalone tickets keep the per-issue rhythm.
+          Batching is a tool (CI minutes, unattended runs, series delivery),
+          not a backlog obligation.
+        - When a session opens on a repo with an un-batched backlog, CLASSIFY
+          it (series / needs-triage / ready-for-human / standalone) and
+          PROPOSE batches to the human instead of drifting per-issue.
+        - A batch declaration names members + end point (last ticket) + AC
+          check; that declaration is the license for autonomous execution.
 
       TEXT PUSHES EXCLUDE ACTIONS — a push whose diff contains only text/docs
       changes (CHANGELOG.md, docs/**, AGENTS.md, *.md, .github/**) must not
