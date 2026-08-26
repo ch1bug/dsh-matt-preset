@@ -242,7 +242,28 @@ const v11b = await render()
 if (!v11b.includes('fresh-subagent quality')) ok('V11b. close nudge consumed after firing (no repeat)')
 else bad('V11b. close nudge consumed', v11b.slice(-160))
 
+// V12: creating a ticket arms ONE one-issue-per-session reminder on the next
+// assembly — a new ticket is its own session's work, never chained inline
+// (observed: #498 session built+fixed+closed #517 while #498 was still open).
+await ctx.emit('session/event', agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 12, name: 'bash', arguments: JSON.stringify({ command: 'gh issue create --title "new ticket" --body "body" --label needs-triage' }) },
+})
+const v12 = await render()
+if (v12.includes('New ticket created') && v12.includes('ONE ISSUE PER SESSION')) ok('V12. issue create → one-issue-per-session reminder (one-shot)')
+else bad('V12. create nudge', v12.slice(-240))
+const v12b = await render()
+if (!v12b.includes('New ticket created')) ok('V12b. create nudge consumed after firing (no repeat)')
+else bad('V12b. create nudge consumed', v12b.slice(-160))
+
+// V13: the baseline carries the routine-actions whitelist — docker compose up,
+// cargo build, local commit, read-only queries are NOT external actions and
+// need no confirmation (observed: 容器 up 被误列导致 #501 子会话僵等 66 分钟).
+const v13 = await render()
+if (v13.includes('ROUTINE actions need NO confirmation') && v13.includes('docker compose up')) ok('V13. baseline whitelists routine actions (容器 up / cargo build / local commit)')
+else bad('V13. routine whitelist', v13.slice(-240))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V11) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V13) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
