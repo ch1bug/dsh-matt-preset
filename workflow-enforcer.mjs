@@ -68,12 +68,24 @@ const foldIntent = new WeakMap()
  * degradation (O5). */
 const ticketClosed = new WeakMap()
 
+/** Sessions that just CREATED a ticket (`gh issue create`). Armed by the
+ * tool/call event hook, consumed by the next assemble, which then reminds
+ * the agent that a new ticket is its own session's work (D20) — never
+ * chain it into the current session (observed: #498 session built+fixed+
+ * closed #517 inline while its own ticket #498 was still open). */
+const ticketCreated = new WeakMap()
+
 /** Matches an issue-close tool call: `gh issue close N` or a PATCH that
  * sets state=closed on issues/N. */
 const CLOSE_PATTERNS = [
   /\bgh\s+issue\s+close\b/,
   /issues\/\d+[^"]*state[=:]["']?closed["']?/i,
   /["']state["']\s*[:=]\s*["']closed["']/i,
+]
+
+/** Matches an issue-create tool call: `gh issue create` (bare or with args). */
+const CREATE_PATTERNS = [
+  /\bgh\s+issue\s+create\b/,
 ]
 
 /** Keywords that mark a fold-in claim (lowercased match). */
@@ -210,6 +222,9 @@ function baselineText() {
     'WORKFLOW GATES — external/destructive actions (git push, gh pr/issue/release,',
     'publish, database reset/drop, rm -rf, force-push, docker volume/system prune):',
     'finish, report the outcome, and WAIT for the human\'s confirmation before running.',
+    'ROUTINE actions need NO confirmation: docker compose up, cargo build/test,',
+    'local git commit, psql read-only queries, file edits — the gate list above',
+    'is exhaustive; do not invent extra confirmation checkpoints beyond it.',
     'A human correction must be acknowledged and written down (propose the doc).',
     'One issue per session.',
     'BATCH MODE: when the human has declared a batch (攒批), the batch-end push',
@@ -268,6 +283,15 @@ async function reminderText(agent, config, ctx, assembled) {
       'degradation — the fresh view can (O5).',
     ].join(' '))
   }
+  if (ticketCreated.get(agent.session) === true && config.ticketCreatedCheck !== false) {
+    ticketCreated.delete(agent.session) // consume: one nudge per create
+    parts.push([
+      '⚠ New ticket created in this session — ONE ISSUE PER SESSION (D20):',
+      'the new ticket is its own session\'s work. Do NOT fix, close, or fold',
+      'it into the current ticket here; leave it to a fresh session (TICKET',
+      'EXIT — create the ticket, then continue the current ticket only).',
+    ].join(' '))
+  }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
@@ -283,6 +307,7 @@ export function apply(ctx, config = {}) {
     lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
     const surface = JSON.stringify(data)
     if (CLOSE_PATTERNS.some(re => re.test(surface))) ticketClosed.set(session, true)
+    if (CREATE_PATTERNS.some(re => re.test(surface))) ticketCreated.set(session, true)
   })
 
   // Arm context evidence: assistant fold-in claims AND user assessments of
