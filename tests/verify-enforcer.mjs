@@ -263,7 +263,53 @@ const v13 = await render()
 if (v13.includes('ROUTINE actions need NO confirmation') && v13.includes('docker compose up')) ok('V13. baseline whitelists routine actions (容器 up / cargo build / local commit)')
 else bad('V13. routine whitelist', v13.slice(-240))
 
+// V14: a batch ticket close-out ("本地闭环完成/本会话收尾") arms an
+// AUTO-HANDOFF nudge on the next assembly WHEN `.scratch/batch-state.md`
+// exists and names a successor — the session must not stop and wait for
+// "开下一票" (observed: #500 closed its ticket, knew #501 was next, waited
+// 9 min for the human to say so).
+// (a) without batch-state.md in the cwd → silent.
+await ctx.emit('session/event', agent.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 14, message: { role: 'assistant', content: [{ type: 'text', text: '#500 本地闭环完成，本会话收尾。' }] } },
+})
+const v14a = await render()
+if (!v14a.includes('AUTO-HANDOFF')) ok('V14a. close-out without batch-state.md → no nudge')
+else bad('V14a. no-batch nudge leaked', v14a.slice(-200))
+
+// (b) with a batch-state.md naming a successor → nudge (one-shot).
+const batchRoot = join(root, 'batched')
+await mkdir(join(batchRoot, '.scratch'), { recursive: true })
+await writeFile(join(batchRoot, '.scratch', 'batch-state.md'), [
+  '# Batch State',
+  '| 1 | #501 | 本地闭环 |',
+  '| 2 | #499 | 待开工 |',
+  '',
+].join('\n'))
+const handle2 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-batch'),
+  meta: { cwd: batchRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+const agent2 = handle2.agent
+const render2 = async () => {
+  const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent2, signal))
+  return renderPrompt(assembly)
+}
+await ctx.emit('session/event', agent2.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 14, message: { role: 'assistant', content: [{ type: 'text', text: '本地闭环完成，本会话收尾。' }] } },
+})
+const v14b = await render2()
+if (v14b.includes('AUTO-HANDOFF') && v14b.includes('batch-state.md')) ok('V14b. close-out with batch-state.md → AUTO-HANDOFF nudge (one-shot)')
+else bad('V14b. batch nudge missing', v14b.slice(-240))
+const v14c = await render2()
+if (!v14c.includes('AUTO-HANDOFF')) ok('V14c. batch nudge consumed after firing (no repeat)')
+else bad('V14c. batch nudge repeated', v14c.slice(-160))
+await handle2.dispose()
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V13) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V14) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

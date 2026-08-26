@@ -105,6 +105,20 @@
         are NOT relaxed by batch mode. The batch-end wrap (summary → human
         confirmation → push) is done by the last ticket's session as its
         closing step, or by a dedicated wrap-up session; it is not a ticket.
+      - AUTO-HANDOFF BETWEEN TICKETS (parent-side, same disease as D35 but on
+        the closing session): when a batch ticket completes (local closure —
+        gates green, code-review clean, batch-state.md updated), the session
+        AUTO-HANDOFFs to the next batch member — fresh mode + directed
+        section (the batch declaration IS the assignment; order is fixed),
+        without waiting for the human to say "open the next ticket". A
+        "ticket done, 本会话收尾" close-out is NOT a stop-and-wait point
+        when batch-state.md names a clear successor. Exceptions: (a) the next
+        ticket carries an embedded decision gate needing human sign-off; (b)
+        the human explicitly asks to pause/check first; (c) this ticket is
+        the batch end point → go straight to the batch-end wrap (summary →
+        human confirmation → push). The child still starts with the directed
+        "按交接开工 X" declaration; the human still switches in the sidebar —
+        only the "please open the next ticket" round-trip is eliminated.
       - Batch end: after the summary gate, push all commits in one go; remote
         CI all-green is the completion gate — red means unfinished batch work,
         fix and re-verify.
