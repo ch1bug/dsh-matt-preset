@@ -21,10 +21,10 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具、定时任务
 
 | 组件 | 说明 |
 | --- | --- |
-| persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图 + **WORKFLOW ENFORCEMENT 七门**（入口路由 / implement 前置 / 决策边界 / 阶段声明 / 一会话一 issue / 外部动作门 / 票据出口，见 `CONTEXT.md` D19–D30）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
-| `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。 |
+| persona（`agent.cordis.yml`） | 系统提示词即完整 ask-matt 工作流地图 + **WORKFLOW ENFORCEMENT 七门**（入口路由 / implement 前置 / 决策边界 / 阶段声明 / 一会话一 issue / 外部动作门 / 票据出口，见 `CONTEXT.md` D19–D35）+ **BATCH MODE（攒批）**（批次宣告 / 一票一会话 / 批末总结确认门 / issue 纪律 / **批内票完成自动 handoff 下一票**）；`{{model}}`/`{{cwd}}` 渲染时插值（`tests/verify-persona.mjs` 断言）。 |
+| `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace、携带 model 路由。交接文档含工具保证的**交接边界段**：定向交接（「## 本会话任务（human 已定向）」节 → 子会话声明开工，免逐次确认，D35）/ 候选交接（无定向节 → 问 human）；外部操作定义固定对齐 enforcer 高危清单（容器 up 等常规操作不得列入「先报告等确认」）。 |
 | `scheduled-jobs.mjs` | cron 定时任务（`cron-parser`）：`jobs_list`/`jobs_run`/`jobs_pause`；失败可选通知显式配置的会话（`notifySessionId`，空 = 仅记日志）。 |
-| `workflow-enforcer.mjs` | WORKFLOW GATES 提醒注入（D21 外部动作门）：每 turn 基线 + 高危 tool/call 后一次性 ⚠ 追加；项目可放 `workflow-gates.yml` 覆盖清单（见 `docs/workflow-enforcer.md`）。 |
+| `workflow-enforcer.mjs` | WORKFLOW GATES 提醒注入（D21 外部动作门）：每 turn 基线 + 高危 tool/call 后一次性 ⚠ 追加 + **常规操作白名单**（docker compose up / cargo build / 本地 commit / 只读查询**无需确认**）；关票后 fresh-subagent 质量抽查提醒（O5）；`gh issue create` → 一会话一 issue 提醒（D20）；批内收尾文本 + `.scratch/batch-state.md` → AUTO-HANDOFF 提醒；fold-in 上下文证据（`context_status` 工具）。项目可放 `workflow-gates.yml` 覆盖清单（见 `docs/workflow-enforcer.md`）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建**双骨架**：`CONTEXT.md`（领域）+ 空 `docs/adr/` + `AGENTS.md`（行为指南，含 Agent skills 段；与 CLAUDE.md 绝不双建）；tracker 首次用时由 setup 补齐。 |
 
 > 曾试验两阶段 bootstrap（梁神模式，`tool-bootstrap.mjs`）：实测仅对 DeepSeek V4 Pro
@@ -63,7 +63,7 @@ ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@dee
 node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + jobs 全套 + workspace attach
 node tests/verify-notify.mjs       # 失败通知端到端（live followup）
 node tests/verify-persona.mjs      # persona 即系统提示词：{{model}}/{{cwd}} 渲染插值
-node tests/verify-enforcer.mjs     # workflow-enforcer V1–V5（基线/高危一次性/scope/无噪音）
+node tests/verify-enforcer.mjs     # workflow-enforcer V1–V14（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
 # 其它机器部署路径不同时：
 DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
@@ -79,7 +79,7 @@ dsh-matt-preset/
 ├── scheduled-jobs.mjs            # 定时任务（cron + 失败通知）
 ├── workflow-enforcer.mjs         # WORKFLOW GATES 提醒注入
 ├── workflow-gates.yml.example    # 项目级高危清单模板
-├── CONTEXT.md                    # 术语表 + 决策（D1–D30）
+├── CONTEXT.md                    # 术语表 + 决策（D1–D35）
 ├── docs/adr/                     # 架构决策记录
 ├── docs/workflow-enforcer.md     # enforcer 使用文档
 ├── docs/workflow-session-boundaries.md  # 会话边界与成本模型设计视图
