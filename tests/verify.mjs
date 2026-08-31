@@ -210,6 +210,36 @@ try {
       bad('A2. default handoff mode is fresh', defOut ? `isError=${defOut.isError}` : 'no result')
     }
   }
+  // A3: preauthorized chained handoff (D32/O7) — when the human explicitly
+  // approved a chained queue, the boundary must switch to the chain-authorized
+  // wording (start the assigned ticket, scoped to it) and must NOT carry the
+  // ask-first absolute any more. The default boundary stays covered by the
+  // O6 assertion above (handoff-1's child).
+  {
+    const idsBeforeP = new Set(ctxA.sessions.list().map(s => String(s.id)))
+    const pOut = await ctxA.tools.execute({
+      callId: CallId('verify-handoff-3'),
+      name: 'handoff_tool',
+      arguments: { document: doc, preauthorized: true },
+      agent: agentA,
+      signal: new AbortController().signal,
+    })
+    const newIdP = ctxA.sessions.list().map(s => String(s.id)).find(id => !idsBeforeP.has(id))
+    if (pOut && pOut.isError === false && newIdP !== undefined) {
+      const childP = ctxA.agents.get(newIdP)
+      await new Promise(r => setTimeout(r, 500))
+      const firstUserP = childP.session.events.find(ev => ev.type === 'user/message')
+      const pText = Array.isArray(firstUserP?.data?.content) ? firstUserP.data.content.map(p => p?.text ?? '').join('') : ''
+      const idxP = pText.indexOf('交接边界')
+      if (pText.includes('链式队列') && pText.includes('仅限当前票') && !pText.includes('不得自动开工') && !pText.includes('问清本会话要做什么')) {
+        ok('A3. preauthorized boundary switches to chain-authorized wording (scoped to the current ticket)', JSON.stringify(pText.slice(idxP, idxP + 120)))
+      } else {
+        bad('A3. preauthorized boundary', JSON.stringify(pText.slice(idxP, idxP + 240)))
+      }
+    } else {
+      bad('A3. preauthorized handoff', pOut ? `isError=${pOut.isError} newId=${newIdP}` : 'no result')
+    }
+  }
   await handleA.dispose()
 
   // ── Track B: full matt preset — failures must never name my rows ───────
