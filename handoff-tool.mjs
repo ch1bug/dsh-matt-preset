@@ -67,11 +67,6 @@ const handoffSchema = {
       description:
         "fresh (default) = empty child session, zero inherited history — the handoff document carries the context; fork = child continues this conversation's history up to the last completed turn (only for continuing the same ticket mid-work when the window ran out). The handoff document is the child's first prompt either way.",
     },
-    preauthorized: {
-      type: 'boolean',
-      description:
-        'Set true ONLY when the human explicitly approved this chained queue (拍板组链 + 指示开始 auto-handoff). Rewrites the handoff boundary: the ticket assigned in the document body IS the human-approved assignment — the child starts it directly; the authorization covers ONLY that current ticket (handoff onward with preauthorized again). Anything outside the queue stays a candidate. Default false keeps the ask-first boundary.',
-    },
   },
   required: ['document'],
   additionalProperties: false,
@@ -151,34 +146,27 @@ async function executeHandoff(ctx, args, exec) {
     '- 已确认决策: ',
     '- 下一步: ',
   ].join('\n')
-  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. The
-  // document may list pending work ("待办/下一步"), but those are CANDIDATES
-  // for the human to pick, not instructions to execute. The child's first
-  // duty is to verify the snapshot and ASK the human what this session does —
-  // never to auto-start a listed item (O6: a fresh child misreads a hot
+  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. A
+  // document that carries a "## 本会话任务（human 已定向）" section is an
+  // ASSIGNMENT — the child verifies the snapshot, restates understanding, and
+  // declares start without a confirmation round-trip (D35). A document
+  // without that section lists CANDIDATES ("待办/下一步") for the human to
+  // pick, not instructions to execute; the child must verify, restate, and
+  // ASK — never auto-start a listed item (O6: a fresh child misreads a hot
   // pending item as its assignment and barrels into another ticket's work).
-  //
-  // D32/O7: chained-queue authorization. That ask-first boundary is written
-  // for the candidates scenario; when the human explicitly approved a chained
-  // queue, the body's ticket assignment IS the human-approved assignment —
-  // the tool then states that guarantee itself and scopes it per hop, instead
-  // of the author asserting it in prose (the body and the boundary used to
-  // contradict each other, and children resolved the conflict both ways:
-  // 93b82dab started the ticket, b9998d2b stalled the chain asking).
-  const preauthorized = args.preauthorized === true
-  const boundary = preauthorized
-    ? [
-        '## 交接边界（首轮必读）',
-        '- human 已拍板本链式队列并指示开始 auto-handoff：正文中指派的**当前票**即本会话任务——验证环境快照（起手式一条命令）→ 复述票面理解 → 直接开工。',
-        '- 授权范围**仅限当前票**：完成后写 handoff 传队列下一票（同样置 preauthorized），**勿内联续做**；新票 = 新会话。',
-        '- 队列外一切待办与新发现（尤其"最热/续作"字样）仍是候选不是派单——一律 TICKET EXIT 立票，不得开工。',
-      ].join('\n')
-    : [
-        '## 交接边界（首轮必读）',
-        '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
-        '- 本会话首轮：验证环境快照（起手式一条命令）→ 向 human 报告理解 → **问清本会话要做什么**。',
-        '- 在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
-      ].join('\n')
+  // D37/O7: an assignment's authorization is scoped per hop — each chained
+  // handoff re-marks its OWN ticket explicitly (2026-08-31 IRIS incident: a
+  // batch-Q prose claim of blanket authorization collided with the old
+  // single-rule boundary, and children resolved the conflict both ways).
+  const boundary = [
+    '## 交接边界（首轮必读）',
+    '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
+    '- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（"按交接开工 X，如需改道请打断"），不再逐会话确认任务。',
+    '- 授权范围**仅限定向节所指派的当前票**：完成后写 handoff 传下一票时，同样在正文写入「## 本会话任务（human 已定向）」节——授权逐跳显式传递，不得默认外溢到队列外工作（队列外一律 TICKET EXIT 立票）。',
+    '- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
+    '- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入"先报告等确认"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。',
+    '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
+  ].join('\n')
   const documentText = [prefix, '', body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
   let writeError
   try {
@@ -250,7 +238,6 @@ export function apply(ctx) {
       "Execute the /handoff phase boundary: write a portable handoff markdown to the OS temp dir and spawn the child session (same mode) that continues the work; the document becomes the child's first prompt and its first turn starts immediately.",
       'Call this when the phase-boundary decision is /handoff — swapping harness, moving to a new directory, sending work to a colleague, or forking a side task mid-phase.',
       'mode "fresh" (default) = empty child session, zero inherited history (the document carries the context); mode "fork" = child continues this session\'s history up to the last completed turn (same-ticket continuation only).',
-      'preauthorized (default false): set true only when the human explicitly approved this chained queue — the boundary then tells the child to start the assigned ticket directly, scoped to that one ticket; leave false for the ask-first boundary.',
       'You compose the `document` yourself (summary + suggested skills + artifact references, redacted); this tool only writes and spawns.',
       'After it returns, STOP and tell the human to switch to the child session in the sidebar — you cannot switch the main session yourself.',
     ].join('\n'),
