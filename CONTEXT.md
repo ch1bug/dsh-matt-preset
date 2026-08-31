@@ -64,6 +64,8 @@
 - **D28（2026-08-19，grill）** — **起手式工作量分析与阻碍 bug 处理**：① 方向 2——会话入口（起手式）对任务清单做**工作面分类**（problem class，如"封口函数的外部调用点"算一类统一完成），≥2 个不同工作面 → 提醒用户拆票（不自动拆）；按命中计数（≥2 条）判据被否。② 方向 3——发现阻碍 bug：自动立阻碍票（TICKET EXIT 一致性）；按阻塞程度决定优先（完全阻塞→停下处理；可绕行→记录+继续）；按深度决定修法（小 bug 本会话 inline 修+立票记录；深 bug 新会话修，当前任务快照暂停）；修完**回本会话**继续（快照恢复，不重复付交接成本）；代码快照默认 **git WIP（不丢）**，丢弃是用户决策。 **（2026-08-19 收敛注记：保留为定性规则——入口问一句"这活一个窗口装得下吗"、发现阻碍 bug 立票并按深度处理；判据阈值（≥2 类/steps 数）降级不量化，见 D29。）**
 - **D29（2026-08-19，收敛）** — **停止机制堆叠，量化降级为定性**：matt 的 PHASE-BOUNDARIES 明言边界判断是 judgement call，价值在"按顺序问"，不在精确测量。收敛：① **保留行为规则**——D20 一会话一 issue、D21 外部动作门、D22 纠正沉淀、D24 票据出口、D26 交接快照、D27 低频变更；② **量化项降级为定性参考（不实现传感器）**——D25 的 70/90 水位 / 缓存公式 / 100K 尺子、D28 的工作面判据阈值，一律回到"边界处问一句：够不够下个 phase 装（~150k）"；③ workflow-enforcer 保持现状（基线 + 高危即时提醒），方向 1/2/3 的自动化实现**不做**，除非实测 IRIS 真实出问题再针对补一条规则；④ persona 不再加第七门（TICKET EXIT 作为规则保留在 CONTEXT，需要时一句话并入）。依据：两阶段 bootstrap 教训（机制堆叠→实测→删除）+ 本日连续 5 次 persona 改动（D27 自我警示）。
 - **D30（2026-08-19）** — **INITIALIZATION 扩展：init 同时建 AGENTS.md 骨架**（对齐 Codex init 心智：init 建行为指南、setup 补 tracker）。骨架阶段若 AGENTS.md/CLAUDE.md 都不存在 → 创建最小 AGENTS.md（"## Agent skills"：matt 工作流一句话 + CONTEXT.md/docs/adr 指针 + tracker 待 setup 占位）；存在其一则不建（沿用 setup 的"绝不双建"规则）。CONTEXT.md（领域）+ AGENTS.md（行为）= 完整初始化双骨架。
+- **D31（2026-08-29，用户需求）** — **语言知识包层（lang-enforcer）**：工作流保持 matt 七门**零改动**（persona/workflow-enforcer 一字未动，D27 缓存不受影响）；新增独立 sibling 插件，按项目语言注入**知识指针**——detect 文件（如 Cargo.toml）命中后会话级基线 + tool/call 一次性触发提醒（.rs 编辑 → coding-guidelines/unsafe-checker；cargo 输出 → rust-router 错误表；Cargo.toml 变更 → rust-learner），**只发"该查哪个 skill"，永不发流程指令**——流程归七门、知识归语言包，职责物理隔离。声明式语言包 `lang-packs/*.yml` 支撑未来语言扩展（go.yml/python.yml 即插，引擎零改动）；项目级 `lang-gates.yml` 可 disable。依据：76 个 skills 安装后"可发现 ≠ 会使用"，需在写码/编译错误/依赖变更的瞬间精准提醒；遵循 D29 不做量化传感器，机制权重最小（数据包而非代码分支）。
+- **D32（2026-08-31，IRIS 口径差复盘）** — **handoff_tool 增加 `preauthorized` 链式授权参数**：默认 false，边界条款一字不动（候选场景：fresh 子会话不得把待办当派单，O6 条款）；human 拍板组链（批 Q +「开始 auto-handoff」）时作者会话**显式**置 true，工具把交接边界改写为——正文中指派的当前票即本会话任务（验证快照 → 复述票面理解 → 直接开工），授权**仅限当前票**，完成后写 handoff 传下一票（同样置 preauthorized），队列外待办仍是候选（TICKET EXIT 立票）。授权显式化、逐跳可追溯（O1 教训），正文与边界从结构上不再冲突。依据：O7。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)。
 
@@ -82,6 +84,11 @@
 - **smart zone 认知修正**：Matt 的 100K（AI Engineer Podcast 2026 workshop）是针对 Claude 系（Claude Code 1M 窗口）的经验值；本地技能 150K 是更早版本。依据 quadratic attention 退化悬崖，但悬崖位置**模型相关**——deepseek-v4-flash 不适用 Claude 的经验数字。处置：persona 概念化（不写死数字，标注模型相关）；context_status 实测驱动判断。
 
 - ✅ smart zone 概念化（persona 不写死 150K，标注模型相关）。
+
+## 观察记录（2026-08-31，IRIS auto-handoff 链复盘）
+
+- **O7 — 交接边界与链式授权的口径差**：handoff 边界条款（tool 写死「在 human 拍板之前，不得自动开工」）为「文档 = 候选清单」场景设计（即 handoff-tool.mjs 代码注释引用的 O6 理由——该观察当年只落在注释里，未沉淀进本文件）；而 D20 批准的链式队列场景下，作者会话依据 human 批 Q 拍板在正文写「human 链式授权已给出，无需再问」——正文与边界口径相反，链上每份文档必然携带矛盾（2026-08-31 实锤三份：T11-54-08 / T12-33-14 / T12-51-53）。实测行为分叉：93b82dab 判「user message 即 human 指派」直接开工 #412；b9998d2b 按边界停下问人，链卡在队列③ #428。同一条规则两种解读 = O1 口头豁免倾向的模板级重现（授权表述与防滥用条款相撞）。处置：D32。
+
 ## 构建状态
 - ✅ 已升级 DSH 0.1.0-rc.7 → **rc.8**（2026-08-19，A 方案接受现状）：依赖包几乎零源码改动；matt 套件（verify 17 + enforcer V1–V9 + production + persona）全绿；mimo TTS/ASR 闭环 + wsl-bridge win_ls 冒烟通过；生产 3080 与测试 3090 均运行 rc.8。
 - ✅ 规则类实现一次落地（D27 攒批）：persona 第 7 门 TICKET EXIT（D24+A4+B4 并入）；handoff-tool.mjs 附环境快照模板段（D26）；验证全绿。
@@ -102,3 +109,5 @@
 - ✅ workflow-enforcer 已并回 preset 仓库（原独立 repo 由用户删除）；挂载行改相对路径 ./workflow-enforcer.mjs；源码环境验证全绿（verify-production 5/5 + V1-V5 6/6 + matt track B/C）。
 - ✅ 已按 D20 加 ONE ISSUE PER SESSION（第 5 门）：一轮会话一个 issue，多任务由 handoff 链推进。
 - ⏳ 待人工步骤（GUI 实测，可在 3090 测试实例上做）：触发 handoff_tool，确认子会话首轮自动开始、无 {{model}} 报错、侧边栏立即可见；新开会话感受 WORKFLOW ENFORCEMENT 生效。
+- ✅ lang-enforcer.mjs + lang-packs/rust.yml 已实现并挂载（D31，工作流零改动）；tests/verify-lang-enforcer.mjs 冒烟通过（V1 基线/V2 触发/V3 消费型/V4 lang-gates disable/V5 非 matt 会话不注入）。
+- ✅ D32 已实现（2026-08-31）：handoff_tool `preauthorized` 参数（默认 false 行为不变，O6 条款一字未动）；tests/verify.mjs 增 A3 断言（preauthorized=true 边界改写为链式授权版且不含「不得自动开工」/「问清本会话要做什么」）；Windows 机（生产 3080 部署树）verify 19/19 全绿。
