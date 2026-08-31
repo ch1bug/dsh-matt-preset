@@ -68,12 +68,33 @@ const foldIntent = new WeakMap()
  * degradation (O5). */
 const ticketClosed = new WeakMap()
 
+/** Sessions that just CREATED a ticket (`gh issue create`). Armed by the
+ * tool/call event hook, consumed by the next assemble, which then reminds
+ * the agent that a new ticket is its own session's work (D20) — never
+ * chain it into the current session (observed: #498 session built+fixed+
+ * closed #517 inline while its own ticket #498 was still open). */
+const ticketCreated = new WeakMap()
+
+/** Sessions whose latest assistant text reports a batch ticket close-out
+ * ("本地闭环完成/本会话收尾"). Armed by the text/assistant event hook,
+ * consumed by the next assemble: when `.scratch/batch-state.md` exists in
+ * the agent's cwd and names a successor, remind the agent to AUTO-HANDOFF
+ * instead of stopping to wait for "开下一票" (observed: #500 session closed
+ * its ticket, knew #501 was next, and still waited 9 min for the human to
+ * say so). */
+const batchClose = new WeakMap()
+
 /** Matches an issue-close tool call: `gh issue close N` or a PATCH that
  * sets state=closed on issues/N. */
 const CLOSE_PATTERNS = [
   /\bgh\s+issue\s+close\b/,
   /issues\/\d+[^"]*state[=:]["']?closed["']?/i,
   /["']state["']\s*[:=]\s*["']closed["']/i,
+]
+
+/** Matches an issue-create tool call: `gh issue create` (bare or with args). */
+const CREATE_PATTERNS = [
+  /\bgh\s+issue\s+create\b/,
 ]
 
 /** Keywords that mark a fold-in claim (lowercased match). */
@@ -84,6 +105,34 @@ export const FOLD_KEYWORDS = [
   '评估', '容量', '还能装', '够不够', '可并入', '能不能继续', '上下文', '窗口',
   'assess', 'context capacity', 'window left', 'how much context',
 ]
+
+/** Keywords that mark a batch-ticket close-out (agent text) — the moment a
+ * session reports a batch ticket done ("本地闭环完成/本会话收尾") and might
+ * stop to wait for the human to say "开下一票". Arms the next assembly to
+ * check batch-state.md and, when a successor exists, remind the agent to
+ * AUTO-HANDOFF (the batch declaration is the assignment). */
+export const BATCH_CLOSE_KEYWORDS = [
+  '本地闭环完成', '本地闭环', '本会话收尾', '会话收尾', '票完成', '本票交付',
+  'batch 收尾', '批 A 收尾', '收尾报告',
+]
+
+/** The agent's working directory: header carries it (session.meta is not
+ * populated in real runs — the create path puts cwd on the header). */
+export function agentCwd(agent) {
+  return agent?.session?.header?.cwd ?? agent?.session?.meta?.cwd
+}
+
+/** Whether the agent's cwd has a `.scratch/batch-state.md` (batch in
+ * progress). Best-effort: any read failure degrades to false. */
+async function hasBatchState(cwd) {
+  if (!cwd) return false
+  try {
+    await readFile(join(cwd, '.scratch', 'batch-state.md'), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Parse a tool call's arguments (JSON string or object). */
 function callArgs(value) {
@@ -128,7 +177,7 @@ export async function projectGates(cwd, fileName = 'workflow-gates.yml') {
 
 /** Resolve the final gates for an agent, preferring the project file. */
 async function resolveGates(agent, config) {
-  const project = await projectGates(agent?.session?.meta?.cwd, config.gatesFile)
+  const project = await projectGates(agentCwd(agent), config.gatesFile)
   if (project !== null && (project.external.length > 0 || project.destructive.length > 0)) {
     if (config.includeDefault) {
       const base = effectiveGates(config)
@@ -210,8 +259,14 @@ function baselineText() {
     'WORKFLOW GATES — external/destructive actions (git push, gh pr/issue/release,',
     'publish, database reset/drop, rm -rf, force-push, docker volume/system prune):',
     'finish, report the outcome, and WAIT for the human\'s confirmation before running.',
+    'ROUTINE actions need NO confirmation: docker compose up, cargo build/test,',
+    'local git commit, psql read-only queries, file edits — the gate list above',
+    'is exhaustive; do not invent extra confirmation checkpoints beyond it.',
     'A human correction must be acknowledged and written down (propose the doc).',
     'One issue per session.',
+    'BATCH MODE: when the human has declared a batch (攒批), the batch-end push',
+    'follows the batch-end summary — list every issue, get the human\'s',
+    'confirmation, then push and verify CI; mid-batch out-of-scope pushes WAIT.',
   ].join('\n')
 }
 
@@ -247,6 +302,7 @@ async function reminderText(agent, config, ctx, assembled) {
       parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
       if (gateHit('git push', surface)) {
         parts.push('After the push, check the remote CI run for the pushed commit — done means local checks pass, pushed, AND CI green.')
+        parts.push('If this is a batch-end push (BATCH MODE declared), it follows the batch-end summary — list every issue, get the human\'s confirmation, then push and verify CI.')
       }
     }
   }
@@ -264,6 +320,30 @@ async function reminderText(agent, config, ctx, assembled) {
       'degradation — the fresh view can (O5).',
     ].join(' '))
   }
+  if (ticketCreated.get(agent.session) === true && config.ticketCreatedCheck !== false) {
+    ticketCreated.delete(agent.session) // consume: one nudge per create
+    parts.push([
+      '⚠ New ticket created in this session — ONE ISSUE PER SESSION (D20):',
+      'the new ticket is its own session\'s work. Do NOT fix, close, or fold',
+      'it into the current ticket here; leave it to a fresh session (TICKET',
+      'EXIT — create the ticket, then continue the current ticket only).',
+    ].join(' '))
+  }
+  if (batchClose.get(agent.session) === true && config.batchCloseCheck !== false) {
+    batchClose.delete(agent.session) // consume: one nudge per close-out
+    if (await hasBatchState(agentCwd(agent))) {
+      parts.push([
+        'Batch ticket closed out — if this batch has a successor in',
+        '.scratch/batch-state.md, AUTO-HANDOFF to it now (fresh + directed',
+        'section; the batch declaration is the assignment), do not stop and',
+        'wait for the human to say "开下一票". Exceptions: the next ticket',
+        'needs a human decision gate, the human asked to pause, or this was',
+        'the batch end point → go to the batch-end wrap (summary → confirm →',
+        'push). A "本会话收尾" is not a stop-and-wait when a successor is',
+        'named.',
+      ].join(' '))
+    }
+  }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
@@ -279,17 +359,41 @@ export function apply(ctx, config = {}) {
     lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
     const surface = JSON.stringify(data)
     if (CLOSE_PATTERNS.some(re => re.test(surface))) ticketClosed.set(session, true)
+    if (CREATE_PATTERNS.some(re => re.test(surface))) ticketCreated.set(session, true)
   })
 
   // Arm context evidence: assistant fold-in claims AND user assessments of
   // context capacity ("上下文容量怎么样", "评估能否并入") both arm the next
   // assembly, so the measured numbers are present while the model estimates.
+  // Also arm the batch close-out nudge when assistant text reports a ticket
+  // done in a batch (checked against batch-state.md at consume time).
   ctx.on('session/event', (session, event) => {
     if (!['text-chunks', 'assistant/message', 'user/message'].includes(event?.type)) return
     const data = event.data ?? {}
+    // Extract a text surface from whichever shape the event uses:
+    //   - text-chunks: data.texts[] (may be undefined)
+    //   - assistant/message: data.message.content[].text
+    //   - user/message: data.content[] or data.text
+    // JSON.stringify of the whole data is the fallback that never misses,
+    // at the cost of matching on structured fields too (harmless for
+    // keyword arming).
     const texts = data.texts ?? []
-    const text = (Array.isArray(texts) ? texts.join(' ') : JSON.stringify(data)).toLowerCase()
+    let text = Array.isArray(texts) ? texts.join(' ') : ''
+    if (!text) {
+      const content = data.message?.content ?? data.content
+      if (Array.isArray(content)) {
+        text = content
+          .map(part => (typeof part === 'string' ? part : (part?.text ?? '')))
+          .filter(Boolean)
+          .join(' ')
+      } else if (typeof data.message?.text === 'string') {
+        text = data.message.text
+      }
+    }
+    text = text || JSON.stringify(data)
+    text = text.toLowerCase()
     if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
+    if (BATCH_CLOSE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) batchClose.set(session, true)
   })
 
   // Model-driven context query: the agent calls this when the user asks about

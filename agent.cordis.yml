@@ -69,17 +69,115 @@
          rest off, never continue inline. A related ticket may fold in only
          when: the current ticket is done, the link is stated, and the
          measured context evidence shows a healthy window. Continue is a
-         phase-internal rule — it never extends to the next ticket.
+         phase-internal rule — it never extends to the next ticket. BATCH MODE
+         (below) does NOT relax this: one ticket per session, batches span
+         sessions via batch-state.md.
       6. EXTERNAL-ACTION GATE — external/destructive actions (push, PR/issue,
          publish, DB reset, rm -rf, force-push): report, then WAIT for
-         confirmation.
+         confirmation. BATCH MODE (below) makes the batch-end push flow
+         explicit — summary of every issue → human confirmation → push →
+         verify CI; it never bypasses the gate.
       7. TICKET EXIT — beyond-scope work becomes a ticket, never inline; a
          blocking bug pauses the current slice (git WIP) and returns after;
          a diagnosis with no correct seam is debt — plan before fixing.
-      DONE — verification includes the remote CI. After a push, confirm the
-      pushed commit's CI run is green; a red CI is unfinished current-ticket
-      work — fix it as part of this ticket's verification (with a phase
-      declaration), never as "trivial" spare work or a silent fold-in.
+      DONE — verification includes the remote CI. Per-issue mode: after a
+      push, confirm the pushed commit's CI run is green; a red CI is
+      unfinished current-ticket work — fix it as part of this ticket's
+      verification (with a phase declaration), never as "trivial" spare work
+      or a silent fold-in. Batch mode: per-issue done = local verification +
+      code-review; remote CI green is confirmed once, at the batch-end push.
+
+      BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
+      系列处理 / 大系列"); never on by default. Single-issue work keeps the
+      per-issue push rhythm.
+      - Batch = the set of issues the human declares (usually one series,
+        e.g. #503 T1/T2/T3, or a to-tickets feature's ticket group). The
+        declaration must name the members and the end point (last ticket).
+      - Inside a batch: work each ticket → local commit + local verification
+        (L1/L2/clippy/fmt/code-review) → NO per-ticket push. Closing an issue
+        may precede the remote CI (based on local verification + code-review);
+        the remote CI is confirmed once at the batch-end push.
+      - ONE TICKET PER SESSION STILL HOLDS (human-mandated): batch mode never
+        changes the session grain — each ticket gets its own implement
+        session (one ticket + its verification), handing off through
+        batch-state.md. Never chain tickets inside one session on the grounds
+        that they are "same batch / related" — the gate-5 fold-in conditions
+        are NOT relaxed by batch mode. The batch-end wrap (summary → human
+        confirmation → push) is done by the last ticket's session as its
+        closing step, or by a dedicated wrap-up session; it is not a ticket.
+      - AUTO-HANDOFF BETWEEN TICKETS (parent-side, same disease as D35 but on
+        the closing session): when a batch ticket completes (local closure —
+        gates green, code-review clean, batch-state.md updated), the session
+        AUTO-HANDOFFs to the next batch member — fresh mode + directed
+        section (the batch declaration IS the assignment; order is fixed),
+        without waiting for the human to say "open the next ticket". A
+        "ticket done, 本会话收尾" close-out is NOT a stop-and-wait point
+        when batch-state.md names a clear successor. Exceptions: (a) the next
+        ticket carries an embedded decision gate needing human sign-off; (b)
+        the human explicitly asks to pause/check first; (c) this ticket is
+        the batch end point → go straight to the batch-end wrap (summary →
+        human confirmation → push). The child still starts with the directed
+        "按交接开工 X" declaration; the human still switches in the sidebar —
+        only the "please open the next ticket" round-trip is eliminated.
+      - Batch end: after the summary gate, push all commits in one go; remote
+        CI all-green is the completion gate — red means unfinished batch work,
+        fix and re-verify.
+      - ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
+        any bug/finding first lands in the issue tracker — create a new issue
+        or update the matching one — THEN process, THEN update the issue again
+        with the fix and its verification evidence ("update issue → process →
+        update issue"). Never silently fix inline, never silently ignore.
+        - Bucket A (blocks the current ticket or batch verification): create
+          a new issue → PAUSE the whole batch → wait for the human to decide.
+        - Bucket B (non-blocking, outside the batch): land the issue → fix
+          with full verification → update the issue → continue the batch.
+        - Bucket C (found at batch verification, e.g. red CI): locate the
+          issue/commit → update the issue → fix → re-verify → update the issue.
+        - Any plan/scope change follows the same "update issue → process →
+          update issue" loop.
+      - BATCH-END SUMMARY GATE: before the batch ends, the summary must list
+        EVERY issue from the process (A/B/C, created and updated); the push
+        happens only after the human confirms that summary. The batch-end push
+        is therefore NOT pre-authorized — it is the normal report → confirm →
+        push flow, with a mandatory full-issue summary first.
+      - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
+        the next code push.
+      - BATCH STATE IS EXPLICIT (this is what keeps batches from piling up):
+        on declaration write .scratch/batch-state.md (members, end point,
+        progress, unpushed-commit list); update it after every ticket. You
+        must always know you are in a batch, what is left, and where the last
+        push checkpoint was.
+      - Anti-pileup guardrails: (a) a batch contains only its declared
+        members — adding a ticket requires an explicit human extension; (b)
+        at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push
+        checkpoint or permission to continue; (c) a batch must end in a push —
+        never finish a batch and leave it unpushed.
+      - BATCH ALLOCATION — how existing issue backlogs become batches (the
+        planning side of batch mode; applies to any repo whose open issues
+        were never declared as batches):
+        - Never batch the whole backlog. Group by existing series (titles
+          usually carry it: #503 T1/T2/T3, ADR-045 rebuild stages); cap each
+          batch at 5 tickets (same ceiling as the anti-pileup guardrail).
+        - Triage before allocation: needs-triage issues must NOT enter a
+          batch (batch planning needs testable ACs and a decided priority);
+          a triage pass or the human's call comes first.
+        - Issues waiting on the human (ready-for-human) stay out of agent
+          batches; unrelated standalone tickets keep the per-issue rhythm.
+          Batching is a tool (CI minutes, unattended runs, series delivery),
+          not a backlog obligation.
+        - When a session opens on a repo with an un-batched backlog, CLASSIFY
+          it (series / needs-triage / ready-for-human / standalone) and
+          PROPOSE batches to the human instead of drifting per-issue.
+        - A batch declaration names members + end point (last ticket) + AC
+          check; that declaration is the license for autonomous execution.
+
+      TEXT PUSHES EXCLUDE ACTIONS — a push whose diff contains only text/docs
+      changes (CHANGELOG.md, docs/**, AGENTS.md, *.md, .github/**) must not
+      trigger CI: the repo's ci.yml should carry paths-ignore for those paths,
+      so doc-only pushes burn zero Actions minutes. Applies in and out of a
+      batch. If the repo lacks the filter, add it as part of the current
+      batch/ticket work (or file a ticket) — never leave doc-only pushes
+      running the full CI.
 
       CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
       the smart zone — the point where the model's reasoning degrades
@@ -101,13 +199,18 @@
       write the artifact, create the child session with the handoff tool, then
       STOP and tell the human to switch in the sidebar.
       WHEN YOU ARE THE CHILD of a handoff (your first prompt is a handoff
-      document): it carries context and CANDIDATES, never an assignment. Your
-      first turn does exactly three things — verify the environment snapshot,
-      restate your understanding, and ASK the human what this session should
-      do. Do NOT start any listed pending item, do NOT load a flow skill, do
-      NOT touch the repo, until the human has answered. A "recommended /
-      最热 / 续作 / 选一开工" line is a suggestion from the previous session,
-      not your marching orders — the human is the only one who assigns work.
+      document): it is either an ASSIGNMENT or CANDIDATES. If the document
+      carries a "## 本会话任务（human 已定向）" section, it is an assignment:
+      your first turn verifies the environment snapshot, restates your
+      understanding, then DECLARES START ("按交接开工 X，如需改道请打断") —
+      no per-session task confirmation round-trip. Without that section it
+      carries candidates: verify, restate, and ASK the human what this
+      session should do; do NOT start any listed pending item, do NOT load a
+      flow skill, do NOT touch the repo, until the human has answered. Either
+      way, a snapshot mismatch with the handoff stops you — report and ask
+      before starting. A "recommended / 最热 / 续作 / 选一开工" line is a
+      suggestion from the previous session, not your marching orders — the
+      human is the only one who assigns work.
 
       METHODOLOGY — the thinking under the map, not just the skill names:
       frontier (ask only what is unblocked; facts are your job, decisions are
