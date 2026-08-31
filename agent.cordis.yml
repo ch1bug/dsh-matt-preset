@@ -181,6 +181,18 @@
   config:
     baseline: true
 
+# lang-enforcer（内置插件，随 preset 分发）：语言知识包层——工作流（persona/七门/
+# workflow-enforcer）零改动（D31）。检测到项目语言（lang-packs/*.yml 的 detect 文件，
+# 如 Cargo.toml → rust）后注入"该查哪个技能"的知识指针：会话级基线 + tool/call 触发的
+# 一次性提醒（.rs 编辑 → coding-guidelines/unsafe-checker；cargo 输出/E0xxx →
+# rust-router 错误表；Cargo.toml 变更 → rust-learner）。只发知识指针，永不发流程指令
+# ——流程归七门，知识归语言包，职责物理隔离。加语言 = 加 lang-packs/*.yml（零代码）。
+# 项目可在 cwd 放 lang-gates.yml（disable: [rust]）关闭。详见 docs/lang-enforcer.md。
+- id: lang-enforcer
+  name: ./lang-enforcer.mjs
+  config:
+    baselineMode: session
+
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
@@ -435,8 +447,12 @@
 # First consumer — daily skill sync at 09:00 (host local time), run once on
 # mount so skills are fresh at session start. Fill notifySessionId with a real
 # session id to get a followup when the sync fails; leave "" for log-only.
+# ⛔ 已禁用（2026-08-31，Windows 迁移）：command/advisory 仍指向 WSL 路径
+# （~/.agents/upstreams/sync-skills.sh、/home/bh4gxf/code），Windows 下不存在；
+# 修复同步脚本路径后再启用。
 - id: job-sync-skills
   name: ./scheduled-jobs.mjs
+  disabled: true
   config:
     id: job-sync-skills
     schedule: "0 9 * * *"
@@ -444,7 +460,6 @@
     runOnMount: true
     notifyOnFailure: true
     notifySessionId: "matt-session-7a5993c2-f65c-453c-896c-042d90f5b658"
-    # 上游有变更（sync 写 .has-changes）→ 在 code 工作区建"待跟进"分析会话（未读即提醒）
     advisory:
       dir: /home/bh4gxf/code
       title: 上游技能更新待跟进

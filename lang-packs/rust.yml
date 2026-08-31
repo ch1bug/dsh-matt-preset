@@ -1,0 +1,47 @@
+# lang-packs/rust.yml — Rust 知识包（lang-enforcer 的声明式数据）。
+#
+# 约束边界：本包只发"知识指针"（该查哪个 skill / 该跑哪个工具），
+# 绝不发流程指令——流程归 persona 的七门，语言归本包。
+# 未来加语言 = 加一个同格式文件（go.yml / python.yml），引擎零改动。
+#
+# 项目级关闭：仓库根放 lang-gates.yml →  disable: [rust]
+
+language: rust
+detect:
+  - Cargo.toml
+
+# 会话级基线（每会话注入一次；按阶段的知识指向写进文本，时机对齐由
+# persona 的阶段声明负责——本层不判断阶段）。
+baseline: |
+  LANG rust — this project speaks Rust. Workflow is unchanged; knowledge
+  pointers only:
+  - Technical/design/selection questions → rust-router
+    (~/.dsh/skills/rust-router/SKILL.md); load only the 2–4 skills it routes
+    to (L1 mechanics m01–m07 / L2 design m09–m15 / L3 domain-* constraints).
+  - Editing .rs → follow coding-guidelines; any unsafe/extern/transmute →
+    unsafe-checker on each block before moving on.
+  - Reviewing Rust changes → coding-guidelines is the Standards-axis source;
+    unsafe diffs get a dedicated unsafe-checker pass.
+  - Debugging Rust failures → rust-router's error-code table first (mechanism
+    before fix).
+  - Crate/version facts → rust-learner (fetch from crates.io/docs.rs, never
+    quote versions from memory).
+
+# 工具调用触发（正则匹配序列化的 tool/call；每类每次匹配只注入一次）。
+triggers:
+  - surface: '\.rs\b'
+    note: |
+      ⚠ lang:rust — .rs edit: follow coding-guidelines; if this diff adds
+      unsafe/extern/transmute, run unsafe-checker on each block; close with
+      cargo clippy and cargo test.
+  - surface: 'Cargo\.toml'
+    note: |
+      ⚠ lang:rust — manifest change: verify crate versions/features via
+      rust-learner (fetch from crates.io/docs.rs), never from memory; keep
+      rust-router's project defaults (edition 2024, clippy all+pedantic).
+  - surface: 'cargo\s+(build|check|test|clippy|run)'
+    note: |
+      ⚠ lang:rust — cargo produced output: if it contains E0xxx errors, look
+      them up in rust-router's error table (E0382/E0597/E0507 → m01-ownership,
+      E0499/E0502/E0596 → m03-mutability, E0277/E0308/E0599 → m04-zero-cost,
+      E0433 → m11-ecosystem) and explain the mechanism before fixing.
