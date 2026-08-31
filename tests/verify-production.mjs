@@ -32,8 +32,8 @@ import Commands from '@deepseek-ai/dsh-commands'
 import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? '/home/<user>/.npm-global/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
-const MATT_COMPOSITION = process.env.MATT_COMPOSITION ?? '/home/<user>/.dsh/.agent-presets/matt/agent.cordis.yml'
+const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? 'C:/Users/<user>/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/config/agent-presets'
+const MATT_COMPOSITION = process.env.MATT_COMPOSITION ?? fileURLToPath(new URL('../agent.cordis.yml', import.meta.url))
 const PLUGIN = fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))
 
 const results = []
