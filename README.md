@@ -56,9 +56,9 @@ curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install
 
 ## 沙箱批跑（sandcastle × DSH headless，opt-in）
 
-攒批的票据可以下放到 podman 沙箱，由**沙箱内的 DSH headless** AFK 执行；主会话只编排。
-persona 含 SANDBOX BATCH MODE 条款（touch-set 检查 → branch 策略并行 → 批末串行合并 →
-commit SHA + 日志作出口证据），enforcer 默认门禁已把 `sandcastle`/`run-ticket` 列为外部动作。
+攒批的票据可下放到 podman 沙箱由**沙箱内 DSH headless** AFK 执行，主会话只编排。三车道：
+**Y（yolo：票据审计 → 沙箱验证门 → 波次合并）/ B（现行 batch）/ H（human）**；enforcer 默认门禁
+已把 `sandcastle`/`run-ticket` 列为外部动作。决策记录见 [ADR-0003](docs/adr/0003-sandbox-batch-mode.md)，
 脚手架与用法见 **[sandcastle/README.md](sandcastle/README.md)**（模板在 `sandcastle/templates/`）。
 
 ## 验证

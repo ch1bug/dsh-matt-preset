@@ -124,23 +124,42 @@
           fix and re-verify.
       - SANDBOX BATCH MODE (sandcastle; opt-in — only when the human asks for
           sandboxed/AFK parallel ticket runs, e.g. "沙箱批跑"): the main session
-          ORCHESTRATES, sandboxed DSH-headless workers EXECUTE.
+          ORCHESTRATES, sandboxed DSH-headless workers EXECUTE; human judgment
+          at the edges (audit before launch, PR/digest review after), agents in
+          the middle.
           (a) The orchestrating session is a dedicated wrap-up-style session —
           it never edits ticket code inline; one-ticket-per-session governs the
           implement grain, workers are external executors, not sessions.
-          (b) TOUCH-SET CHECK before launch: state each ticket's expected file
-          set; overlapping tickets are serialized or merged into one — never run
-          in parallel (git auto-merge is only trusted across disjoint file sets).
-          (c) Default shape: one podman sandbox + one run per ticket on `branch`
-          strategy (no auto-merge); at batch end merge serially — rebase onto
-          master one ticket at a time; a conflicted ticket returns to its
-          sandbox for one rework run ("rebase, resolve, re-verify, commit") or
-          goes to Bucket A. (d) Every sandbox launch is an EXTERNAL-ACTION GATE
-          event (enforcer matches `sandcastle`/`run-ticket`); the batch-end push
-          still goes through the summary gate. (e) Ticket exit evidence = commit
-          SHAs + the sandbox run log; "worker said done" alone closes nothing.
-          Scaffolding lives in the preset's `sandcastle/templates/` (adapter,
-          run-ticket.mts, Dockerfile) — see README「沙箱批跑」.
+          (b) TICKET AUDIT BEFORE LAUNCH (input quality gate): a ticket enters
+          the queue only with a recorded audit — AC decidable (what "done"
+          means is checkable), touch-set declared (expected file set), the
+          proving verification command named (exact test/lint), forbidden-path
+          scan clean (migrations / money-path / governance semantics → demote
+          to the daytime batch lane), size estimate sane. Audit fails → the
+          ticket goes back for spec rework, never launches on vibes. Mechanical
+          pre-check: `.sandcastle/audit-ticket.mts` writes the audit record;
+          the orchestrator judges what the machine cannot.
+          (c) TOUCH-SET CHECK across the launched set: overlapping tickets are
+          serialized or merged into one — never run in parallel.
+          (d) Y-LANE SHAPE (audit-passed tickets): one podman sandbox + one
+          run per ticket on `branch` strategy; the merge gate is the
+          ORCHESTRATOR-run verification exec in the same sandbox (the exact
+          command the audit named — never the worker's self-report); a big
+          diff passes a simplify pass before that gate. Merge serially in
+          waves (3–5), rebase onto master one ticket at a time; a
+          conflicted/rejected ticket returns to its sandbox for one rework run
+          or goes to Bucket A. Batch end still = one push through the summary
+          gate (Actions-minute economy, ADR-0002); PR-per-unit (`--pr`) only
+          where CI budget allows.
+          (e) Every sandbox launch is an EXTERNAL-ACTION GATE event (enforcer
+          matches `sandcastle`/`run-ticket`); the batch-end push still goes
+          through the summary gate. (f) Ticket exit evidence = audit record +
+          commit SHAs + verification exec output + the sandbox run log;
+          "worker said done" alone closes nothing. (g) WORKER CONTEXT: every
+          worker task injects the project's principles/gotchas digest (from
+          CONTEXT.md/AGENTS.md/ADRs) before the ticket body — workers read
+          before acting. Scaffolding: preset `sandcastle/templates/` — see
+          README「沙箱批跑」and ADR-0003.
       - ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
         any bug/finding first lands in the issue tracker — create a new issue
         or update the matching one — THEN process, THEN update the issue again
