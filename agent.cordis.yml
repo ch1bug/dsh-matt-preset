@@ -120,8 +120,27 @@
         "按交接开工 X" declaration; the human still switches in the sidebar —
         only the "please open the next ticket" round-trip is eliminated.
       - Batch end: after the summary gate, push all commits in one go; remote
-        CI all-green is the completion gate — red means unfinished batch work,
-        fix and re-verify.
+          CI all-green is the completion gate — red means unfinished batch work,
+          fix and re-verify.
+      - SANDBOX BATCH MODE (sandcastle; opt-in — only when the human asks for
+          sandboxed/AFK parallel ticket runs, e.g. "沙箱批跑"): the main session
+          ORCHESTRATES, sandboxed DSH-headless workers EXECUTE.
+          (a) The orchestrating session is a dedicated wrap-up-style session —
+          it never edits ticket code inline; one-ticket-per-session governs the
+          implement grain, workers are external executors, not sessions.
+          (b) TOUCH-SET CHECK before launch: state each ticket's expected file
+          set; overlapping tickets are serialized or merged into one — never run
+          in parallel (git auto-merge is only trusted across disjoint file sets).
+          (c) Default shape: one podman sandbox + one run per ticket on `branch`
+          strategy (no auto-merge); at batch end merge serially — rebase onto
+          master one ticket at a time; a conflicted ticket returns to its
+          sandbox for one rework run ("rebase, resolve, re-verify, commit") or
+          goes to Bucket A. (d) Every sandbox launch is an EXTERNAL-ACTION GATE
+          event (enforcer matches `sandcastle`/`run-ticket`); the batch-end push
+          still goes through the summary gate. (e) Ticket exit evidence = commit
+          SHAs + the sandbox run log; "worker said done" alone closes nothing.
+          Scaffolding lives in the preset's `sandcastle/templates/` (adapter,
+          run-ticket.mts, Dockerfile) — see README「沙箱批跑」.
       - ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
         any bug/finding first lands in the issue tracker — create a new issue
         or update the matching one — THEN process, THEN update the issue again

@@ -44,6 +44,7 @@ export const DEFAULT_GATES = {
   external: [
     'git push', 'gh pr create', 'gh issue create',
     'gh release create', 'gh repo create', 'npm publish', 'cargo publish',
+    'sandcastle', 'run-ticket',
   ],
   destructive: [
     'git reset --hard', 'git clean -f', 'rm -rf', 'docker compose down -v',

@@ -12,6 +12,8 @@ external:
   - "gh pr create"
   - "gh issue create"
   - "npm publish"
+  - "sandcastle"     # AFK 沙箱批跑（.sandcastle/run-ticket.mts 等任何 sandcastle 调用）
+  - "run-ticket"
 
 destructive:
   - "rm -rf"
