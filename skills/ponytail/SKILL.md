@@ -123,6 +123,10 @@ The shortest path to done is the right path.
 1. **验证不可懒**：implement 的 TDD 门、票据审计点名的验证命令（如
    `cargo test -p iris-api --lib`）、code-review——这些不是"可以懒掉的代码"。
    上游"one runnable check"是下限不是上限；工作流要求的验证永远全量执行。
+   **测试的范围由票面 AC 与验证标准决定，不参与阶梯**——资金/安全路径按
+   仓库规范足量覆盖，阶梯只作用于实现代码，永不作用于测试与验证。
+   AC 之外不实现是工作流纪律（落 issue 走 Bucket B），不是偷懒；
+   AC 之内的实现不打折扣——读不懂 AC 就回炉，不是窄化解释。
 2. **Y 车道 worker 默认携带本阶梯**：沙箱 worker 的 task 前缀
    （`.sandcastle/worker-context.md`）注入本阶梯的压缩版；`ponytail:` 注释
    标记是 review 的正向信号（说明 worker 主动做过简化决策）。
