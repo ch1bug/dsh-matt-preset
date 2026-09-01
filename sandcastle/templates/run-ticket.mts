@@ -66,8 +66,29 @@ if (yolo) {
     throw new Error("--yolo 拒绝发射：审计记录缺编排者判词（orchestratorNote 为空）");
 }
 
-// —— 组任务文本：worker 上下文（principles 摘要）→ 票据正文 → 收尾契约 ——
-const principles = readFileSync(".sandcastle/worker-context.md", "utf8").trim(); // 项目 principles/gotchas 摘要（维护一次）
+// —— 组任务文本：worker 上下文（ponytail 阶梯摘要）→ 票据正文 → 收尾契约 ——
+// 项目可放 .sandcastle/worker-context.md 覆盖默认；缺失时用内置阶梯
+const DEFAULT_WORKER_CONTEXT = [
+  "# Worker Context（沙箱 worker 开工前必读）",
+  "",
+  "## 代码阶梯（ponytail，逐级停）",
+  "1. 这东西需要存在吗？投机需求 = 跳过，一行说明。（YAGNI）",
+  "2. 代码库里已有？复用。先找再写。",
+  "3. 标准库有？用它。",
+  "4. 平台原生能力覆盖？5. 已装依赖能干？6. 能一行？7. 才写最小可用代码。",
+  "",
+  "## 不可懒清单",
+  "- 信任边界校验、防数据丢失的错误处理、安全措施——永不简化。",
+  "- 验证永不最小化：任务点名的测试/lint 全量执行；非平凡逻辑至少留一个可运行检查。",
+  "- 先完整读懂，再懒。刻意简化加 `ponytail:` 注释标明天花板。",
+].join("\n");
+const principles = (() => {
+  try {
+    return readFileSync(".sandcastle/worker-context.md", "utf8").trim();
+  } catch {
+    return DEFAULT_WORKER_CONTEXT;
+  }
+})();
 let task: string;
 if (issue) {
   const gh = spawnSync("gh", ["issue", "view", issue, "--json", "title,body"], { encoding: "utf8" });
