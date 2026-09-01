@@ -2,15 +2,17 @@
  * run-ticket.mts — 单票沙箱执行（sandcastle × DSH headless）。
  *
  * 用法：
- *   npx tsx .sandcastle/run-ticket.mts --issue 449                 # 从 gh 拉票据正文当任务
- *   npx tsx .sandcastle/run-ticket.mts "把 README 标题改成 X"      # 直接给任务
- *   npx tsx .sandcastle/run-ticket.mts --issue 449 --branch ticket/449 --strategy branch
+ *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh
+ *   npx tsx .sandcastle/run-ticket.mts "任务文本" --image localhost/<repo>:dsh
+ *   npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:dsh
+ *   npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --pr --auto-merge ...   # CI 配额宽裕才用
  *
  * 前置：
- *   1. 本目录（.sandcastle/）放入本模板三件套（Dockerfile / dsh.ts / run-ticket.mts）
+ *   1. 本目录（.sandcastle/）放 Dockerfile / dsh.ts / run-ticket.mts / audit-ticket.mts
  *   2. npm i -D @ai-hero/sandcastle@0.12.0 tsx   （钉版本，0.x API 周级变动）
  *   3. podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle
  *   4. 项目 workflow-gates.yml 的 external: 已含 sandcastle / run-ticket
+ *   5. --yolo 前必须先跑 audit-ticket.mts（发射钥匙 = 审计记录 pass + 编排者判词）
  *
  * 宿主要求：Windows 需 podman machine 运行中；~/.dsh 内有凭据与 settings.yaml。
  */
@@ -18,32 +20,60 @@ import { run } from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { dshHeadless } from "./dsh.ts";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
+function flag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
+function sh(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+function runOk(cmd: string[], what: string): string {
+  const r = spawnSync(cmd[0], cmd.slice(1), { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`${what} 失败: ${r.stderr || r.stdout}`);
+  return r.stdout.trim();
+}
 
 const issue = arg("issue");
 const image = arg("image");
 if (!image) throw new Error("提供 --image localhost/<repo>:dsh（先 podman build，见文件头前置步骤 3）");
-const strategy = arg("strategy") ?? "merge-to-head"; // merge-to-head | branch（并行批跑用 branch + 批末串行合并）
-const branch = arg("branch");
+const strategy = arg("strategy");
+const yolo = flag("yolo");
+const pr = flag("pr");
+const autoMerge = flag("auto-merge");
+const base = arg("base");
+const branch = arg("branch") ?? (issue ? `sandcastle/ticket-${issue}` : `sandcastle/${Date.now()}`);
+// yolo 车道必须走 branch 策略（不本地自动合并；合并门 = 编排者验证 + 波次收口，ADR-0003）
+const effectiveStrategy = strategy ?? (yolo ? "branch" : "merge-to-head");
 
+// —— 发射钥匙：yolo 必须持有一份 pass 的审计记录，且编排者判词已写 ——
+if (yolo) {
+  if (!issue) throw new Error("--yolo 需要 --issue N（审计记录按 issue 归档）");
+  const auditPath = arg("audit") ?? `.sandcastle/audits/${issue}.json`;
+  let audit: any;
+  try {
+    audit = JSON.parse(readFileSync(auditPath, "utf8"));
+  } catch {
+    throw new Error(`--yolo 拒绝发射：审计记录缺失（先跑 audit-ticket.mts --issue ${issue}）`);
+  }
+  if (audit.verdict !== "launch")
+    throw new Error(`--yolo 拒绝发射：审计 verdict=${audit.verdict}（rework/demote 的票不进沙箱）`);
+  if (!audit.orchestratorNote)
+    throw new Error("--yolo 拒绝发射：审计记录缺编排者判词（orchestratorNote 为空）");
+}
+
+// —— 组任务文本：worker 上下文（principles 摘要）→ 票据正文 → 收尾契约 ——
+const principles = readFileSync(".sandcastle/worker-context.md", "utf8").trim(); // 项目 principles/gotchas 摘要（维护一次）
 let task: string;
 if (issue) {
-  const gh = spawnSync("gh", ["issue", "view", issue, "--json", "title,body"], {
-    encoding: "utf8",
-  });
+  const gh = spawnSync("gh", ["issue", "view", issue, "--json", "title,body"], { encoding: "utf8" });
   if (gh.status !== 0) throw new Error(gh.stderr || "gh issue view 失败");
   const { title, body } = JSON.parse(gh.stdout);
-  task = [
-    `完成 issue #${issue}：${title}`,
-    "",
-    String(body ?? "").slice(0, 60_000), // 防超长；更大的票据改成先 commit 票据文件再引用路径
-    "",
-    "完成标准：实现 + 本地验证（测试/lint）+ git commit。最终回复包含 <promise>COMPLETE</promise>。",
-  ].join("\n");
+  task = [`完成 issue #${issue}：${title}`, "", String(body ?? "").slice(0, 60_000)].join("\n");
 } else {
   task =
     process.argv[2] && !process.argv[2].startsWith("--")
@@ -52,31 +82,32 @@ if (issue) {
           throw new Error("提供 --issue N 或直接给任务文本");
         })();
 }
+const closer = [
+  "",
+  "完成标准：实现 + 本地验证（测试/lint）+ git commit。大 diff 先做一遍简化再进入最终验证。",
+  "最终回复包含 <promise>COMPLETE</promise>。",
+].join("\n");
 
 const result = await run({
-  name: branch ?? (issue ? `ticket-${issue}` : "dsh-ticket"),
+  name: branch,
   agent: dshHeadless(),
   sandbox: podman({
     imageName: image,
     containerUid: 1000,
     containerGid: 1000,
-    mounts: [
-      // 只读借用宿主 ~/.dsh：钩子把凭据与 settings 拷进容器自己的 DSH_HOME
-      { hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true },
-    ],
+    mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
   }),
-  prompt: task,
+  prompt: `${principles}\n\n---\n\n${task}\n${closer}`,
   maxIterations: 1,
-  idleTimeoutSeconds: 1800, // 票据级任务给足空闲预算（容器首启 + 模型调用）
+  idleTimeoutSeconds: 1800,
   branchStrategy:
-    strategy === "branch"
-      ? { type: "branch", branch: branch ?? `sandcastle/ticket-${issue ?? Date.now()}` }
+    effectiveStrategy === "branch"
+      ? { type: "branch", branch }
       : { type: "merge-to-head" },
   hooks: {
     sandbox: {
       onSandboxReady: [
         {
-          // chmod 600：DSH 凭据安全不变量（Windows 挂载拷出即 755 会被拒载）
           command:
             "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml && echo dsh-home-ready",
           timeoutMs: 15_000,
@@ -87,6 +118,25 @@ const result = await run({
   logging: { type: "stdout" },
 });
 
+// —— yolo 收尾：push + PR（CI 配额宽裕的仓库才用；默认就地收口，ADR-0002 分钟经济）——
+let prUrl: string | undefined;
+if (yolo && result.commits.length > 0) {
+  runOk(["git", "push", "-u", "origin", result.branch], "push");
+  const title = issue ? `fix(#${issue}): sandbox worker` : `sandbox: ${branch}`;
+  const body = [
+    issue ? `Closes #${issue}` : "sandbox worker run",
+    "",
+    "```",
+    result.stdout.slice(-1500),
+    "```",
+  ].join("\n");
+  // spawn 数组直传（不经 shell），标题/正文无需转义
+  const created = spawnSync("gh", ["pr", "create", "--head", result.branch, "--title", title, "--body", body, ...(base ? ["--base", base] : [])], { encoding: "utf8" });
+  if (created.status !== 0) throw new Error(`gh pr create 失败: ${created.stderr || created.stdout}`);
+  prUrl = created.stdout.trim().split("\n").findLast(l => l.startsWith("http"));
+  if (autoMerge) runOk(["gh", "pr", "merge", "--squash", "--auto", result.branch], "auto-merge");
+}
+
 console.log(
   "\n=== RunResult ===\n" +
     JSON.stringify(
@@ -94,6 +144,7 @@ console.log(
         branch: result.branch,
         commits: result.commits,
         completionSignal: result.completionSignal,
+        prUrl,
         stdoutTail: result.stdout.slice(-800),
         logFilePath: result.logFilePath,
       },
