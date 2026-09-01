@@ -16,7 +16,9 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
    （Rust 项目把 Dockerfile 里 rustup 注释段打开）
 4. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
    （enforcer 默认清单已含这两条；项目文件存在时默认清单被替换，需显式带上）
-5. 写 `.sandcastle/worker-context.md`：项目 principles/gotchas 摘要（worker 开工前必读）
+5. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
+   缺省用模板内置的 ponytail 阶梯（ vendored 自 [ponytail](https://github.com/DietrichGebert/ponytail)）。
+   主会话同样可用——skill 目录已带 `ponytail`（说 "ponytail" 或 "be lazy" 唤醒，"stop ponytail" 退出）。
 
 ## Y 车道流程（yolo）
 
