@@ -54,6 +54,13 @@ curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install
 > - `notifySessionId` — 失败通知目标会话 id；
 > - `job-sync-skills.advisory.dir` — 上游技能有更新时，在该工作区创建"待跟进"分析会话（未读即提醒）。
 
+## 沙箱批跑（sandcastle × DSH headless，opt-in）
+
+攒批的票据可以下放到 podman 沙箱，由**沙箱内的 DSH headless** AFK 执行；主会话只编排。
+persona 含 SANDBOX BATCH MODE 条款（touch-set 检查 → branch 策略并行 → 批末串行合并 →
+commit SHA + 日志作出口证据），enforcer 默认门禁已把 `sandcastle`/`run-ticket` 列为外部动作。
+脚手架与用法见 **[sandcastle/README.md](sandcastle/README.md)**（模板在 `sandcastle/templates/`）。
+
 ## 验证
 
 ```bash
@@ -63,7 +70,7 @@ ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@dee
 node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + jobs 全套 + workspace attach
 node tests/verify-notify.mjs       # 失败通知端到端（live followup）
 node tests/verify-persona.mjs      # persona 即系统提示词：{{model}}/{{cwd}} 渲染插值
-node tests/verify-enforcer.mjs     # workflow-enforcer V1–V14（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音）
+node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
 # 其它机器部署路径不同时：
 DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
@@ -79,6 +86,9 @@ dsh-matt-preset/
 ├── scheduled-jobs.mjs            # 定时任务（cron + 失败通知）
 ├── workflow-enforcer.mjs         # WORKFLOW GATES 提醒注入
 ├── workflow-gates.yml.example    # 项目级高危清单模板
+├── sandcastle/                   # 沙箱批跑（opt-in）：模板 + 接入文档
+│   ├── README.md
+│   └── templates/                # Dockerfile / dsh.ts adapter / run-ticket.mts
 ├── CONTEXT.md                    # 术语表 + 决策（D1–D35）
 ├── docs/adr/                     # 架构决策记录
 ├── docs/workflow-enforcer.md     # enforcer 使用文档

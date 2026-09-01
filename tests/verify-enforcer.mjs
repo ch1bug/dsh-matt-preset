@@ -309,7 +309,21 @@ if (!v14c.includes('AUTO-HANDOFF')) ok('V14c. batch nudge consumed after firing 
 else bad('V14c. batch nudge repeated', v14c.slice(-160))
 await handle2.dispose()
 
+// V15: a sandcastle AFK launch (.sandcastle/run-ticket.mts) is an EXTERNAL
+// action — the gate ⚠ fires once on the next assembly (sandboxed ticket
+// workers stay behind the external-action gate).
+await ctx.emit('session/event', agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 15, name: 'bash', arguments: JSON.stringify({ command: 'npx tsx .sandcastle/run-ticket.mts --issue 449' }) },
+})
+const v15 = await render()
+if (v15.includes('High-risk action detected') && v15.includes('run-ticket.mts')) ok('V15. sandcastle launch → external-action ⚠ (one-shot)')
+else bad('V15. sandcastle gate', v15.slice(-240))
+const v15b = await render()
+if (!v15b.includes('High-risk action detected')) ok('V15b. sandcastle ⚠ consumed (no repeat)')
+else bad('V15b. sandcastle ⚠ repeated', v15b.slice(-160))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V14) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V15) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

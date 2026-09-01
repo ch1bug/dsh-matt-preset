@@ -1,3 +1,3 @@
 name: Matt 工作流模式
-description: 完全按照 Matt Pocock 的 AI 编码工作流运转：grill 打磨想法 → 原型判定 → to-spec / to-tickets 拆票 → implement（内嵌 tdd）→ code-review；on-ramp（triage / diagnosing-bugs / wayfinder）、代码健康、词汇层与阶段边界（continue → subagent → /compact → /handoff）全覆盖。会话边界由 handoff 工具补齐：handoff 写可移植文档并创建子会话（fork 带历史 / fresh 全新），全新会话走 GUI New Session。
+description: 完全按照 Matt Pocock 的 AI 编码工作流运转：grill 打磨想法 → 原型判定 → to-spec / to-tickets 拆票 → implement（内嵌 tdd）→ code-review；on-ramp（triage / diagnosing-bugs / wayfinder）、代码健康、词汇层与阶段边界（continue → subagent → /compact → /handoff）全覆盖。会话边界由 handoff 工具补齐：handoff 写可移植文档并创建子会话（fork 带历史 / fresh 全新），全新会话走 GUI New Session。沙箱批跑（sandcastle，opt-in）：主会话编排 + podman 沙箱内 DSH headless worker 执行票据（touch-set 检查 + 串行收口），模板在 sandcastle/templates/。
 order: 5
