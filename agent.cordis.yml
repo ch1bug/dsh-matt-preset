@@ -158,7 +158,11 @@
           "worker said done" alone closes nothing. (g) WORKER CONTEXT: every
           worker task injects the project's principles/gotchas digest (from
           CONTEXT.md/AGENTS.md/ADRs) before the ticket body — workers read
-          before acting. Scaffolding: preset `sandcastle/templates/` — see
+          before acting. (h) CLOSE-OUT AUDIT: wave merges go through the
+          `ticket-audit` skill (adversarial checklist, EXEMPT from ponytail —
+          a lazy auditor is how bad merges ship); ponytail rides with workers
+          (worker-context) and activates in main sessions only on explicit
+          invocation. Scaffolding: preset `sandcastle/templates/` — see
           README「沙箱批跑」and ADR-0003.
       - ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
         any bug/finding first lands in the issue tracker — create a new issue
