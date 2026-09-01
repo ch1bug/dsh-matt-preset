@@ -32,6 +32,8 @@ npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:d
 
 # ③ 合并门（编排者执行，不信 worker 自述）——在同一个沙箱里 exec 审计点名的验证命令
 #    绿 → 波次串行合并（rebase onto master，3–5 票一波）；红 → 同沙箱返工一次或 Bucket A
+# ③.5 收口审计：对每票跑 `ticket-audit` 技能（对抗式清单：AC 覆盖/测试真实性/
+#    验证重放/skip 主张核查/touch-set 合规/禁区/诚实性——阶梯豁免）
 
 # ④ 批末一次 push 过 summary gate（Actions 分钟经济，ADR-0002）
 #    CI 配额宽裕的仓库可改 --pr --auto-merge（PR-per-unit，GitHub 当合并队列）
