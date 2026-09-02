@@ -54,7 +54,7 @@ const handoffSchema = {
     document: {
       type: 'string',
       description:
-        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII).',
+        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs (a "## 本会话任务（human 已定向）" section) the tool auto-pins a gate-4 skill-activation line at the document head — name the needed skill in the directed section; do not write the activation line yourself.',
     },
     focus: {
       type: 'string',
@@ -167,7 +167,18 @@ async function executeHandoff(ctx, args, exec) {
     '- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入"先报告等确认"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。',
     '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
   ].join('\n')
-  const documentText = [prefix, '', body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].join('\n')
+  // Gate-4 anchor (2026-09-02 IRIS 观察: 两个批内 handoff 都直接开工、没加载
+  // implement 技能——只有 review 阶段加载了 code-review)。定向交接自动在首因位
+  // 置顶技能激活指令：子会话的第一动作 = 加载 flow skill。仅对定向交接插入
+  // （候选交接不得诱导自动开工）。
+  const isAssignment = body.includes('## 本会话任务（human 已定向）')
+  const activation = isAssignment
+    ? [
+        '> ⚡ 开工前置（gate-4）：你的**第一个动作**是加载本票所需的 flow skill——调用 `skill` 工具（或读取 ~/.dsh/skills/<name>/SKILL.md；定向实现票通常为 `implement`，按定向节所指阶段选择）。',
+        '> 未加载技能前不得开始改代码；加载后按 SKILL.md 的流程执行「## 本会话任务（human 已定向）」节。',
+      ].join('\n')
+    : ''
+  const documentText = [prefix, '', activation, activation ? '' : null, body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')
