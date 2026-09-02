@@ -1,26 +1,22 @@
 /**
- * run-ticket.mts — 单票沙箱执行（sandcastle × DSH headless）。
+ * run-ticket.mts — 单票沙箱执行（sandcastle × DSH headless），完整生命周期：
+ *
+ *   审计钥匙校验 → createSandbox(branch) → worker 运行 → 验证门（编排者亲自 exec）
+ *   → 本地合并（绿）/ park（红）→ 检查点落盘（.sandcastle/state/）→ 可选 PR
  *
  * 用法：
- *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh
- *   npx tsx .sandcastle/run-ticket.mts "任务文本" --image localhost/<repo>:dsh
- *   npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:dsh
- *   npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --pr --auto-merge ...   # CI 配额宽裕才用
+ *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh \
+ *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr]
  *
- * 前置：
- *   1. 本目录（.sandcastle/）放 Dockerfile / dsh.ts / run-ticket.mts / audit-ticket.mts
- *   2. npm i -D @ai-hero/sandcastle@0.12.0 tsx   （钉版本，0.x API 周级变动）
- *   3. podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle
- *   4. 项目 workflow-gates.yml 的 external: 已含 sandcastle / run-ticket
- *   5. --yolo 前必须先跑 audit-ticket.mts（发射钥匙 = 审计记录 pass + 编排者判词）
- *
- * 宿主要求：Windows 需 podman machine 运行中；~/.dsh 内有凭据与 settings.yaml。
+ * 退出码：0=merged/pr  3=验证未过(parked)  4=合并冲突(parked)  5=超时(parked)
+ *         6=worker 无产出(parked)  1=其他失败
+ * 检查点：.sandcastle/state/<id>.json —— night-run 据此幂等续跑，崩溃不丢进度。
  */
-import { run } from "@ai-hero/sandcastle";
+import { createSandbox } from "@ai-hero/sandcastle";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { dshHeadless } from "./dsh.ts";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -29,30 +25,27 @@ function arg(name: string): string | undefined {
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
 }
-function sh(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
-function runOk(cmd: string[], what: string): string {
-  const r = spawnSync(cmd[0], cmd.slice(1), { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`${what} 失败: ${r.stderr || r.stdout}`);
+function runOk(cmd: string[], what: string, cwd?: string): string {
+  const r = spawnSync(cmd[0], cmd.slice(1), { encoding: "utf8", cwd });
+  if (r.status !== 0) throw new Error(`${what} 失败: ${(r.stderr || r.stdout || "").slice(0, 400)}`);
   return r.stdout.trim();
 }
 
 const issue = arg("issue");
 const image = arg("image");
-if (!image) throw new Error("提供 --image localhost/<repo>:dsh（先 podman build，见文件头前置步骤 3）");
-const strategy = arg("strategy");
+if (!image) throw new Error("提供 --image localhost/<repo>:dsh（先 podman build）");
 const yolo = flag("yolo");
 const pr = flag("pr");
 const autoMerge = flag("auto-merge");
 const base = arg("base");
 const branch = arg("branch") ?? (issue ? `sandcastle/ticket-${issue}` : `sandcastle/${Date.now()}`);
-// yolo 车道必须走 branch 策略（不本地自动合并；合并门 = 编排者验证 + 波次收口，ADR-0003）
-const effectiveStrategy = strategy ?? (yolo ? "branch" : "merge-to-head");
+const verifyCmd = arg("verify"); // 客观合并门：审计点名的验证命令，编排者亲自执行
+const maxMinutes = Number(arg("max-minutes") ?? 60);
+const id = issue ?? branch.replace(/\W+/g, "-");
 
-// —— 发射钥匙：yolo 必须持有一份 pass 的审计记录，且编排者判词已写 ——
+// —— 发射钥匙：yolo 必须持有 pass 审计记录 + 编排者判词 ——
 if (yolo) {
-  if (!issue) throw new Error("--yolo 需要 --issue N（审计记录按 issue 归档）");
+  if (!issue) throw new Error("--yolo 需要 --issue N");
   const auditPath = arg("audit") ?? `.sandcastle/audits/${issue}.json`;
   let audit: any;
   try {
@@ -61,26 +54,21 @@ if (yolo) {
     throw new Error(`--yolo 拒绝发射：审计记录缺失（先跑 audit-ticket.mts --issue ${issue}）`);
   }
   if (audit.verdict !== "launch")
-    throw new Error(`--yolo 拒绝发射：审计 verdict=${audit.verdict}（rework/demote 的票不进沙箱）`);
+    throw new Error(`--yolo 拒绝发射：审计 verdict=${audit.verdict}`);
   if (!audit.orchestratorNote)
     throw new Error("--yolo 拒绝发射：审计记录缺编排者判词（orchestratorNote 为空）");
 }
 
-// —— 组任务文本：worker 上下文（ponytail 阶梯摘要）→ 票据正文 → 收尾契约 ——
-// 项目可放 .sandcastle/worker-context.md 覆盖默认；缺失时用内置阶梯
+// —— 组任务：worker 上下文（ponytail 阶梯）→ 票据正文 → 收尾契约 ——
 const DEFAULT_WORKER_CONTEXT = [
   "# Worker Context（沙箱 worker 开工前必读）",
-  "",
   "## 代码阶梯（ponytail，逐级停）",
-  "1. 这东西需要存在吗？投机需求 = 跳过，一行说明。（YAGNI）",
-  "2. 代码库里已有？复用。先找再写。",
-  "3. 标准库有？用它。",
-  "4. 平台原生能力覆盖？5. 已装依赖能干？6. 能一行？7. 才写最小可用代码。",
-  "",
+  "1. 需要存在吗？投机需求=跳过，一行说明。 2. 库里已有？复用。 3. 标准库？ 4. 平台原生？",
+  "5. 已装依赖？ 6. 能一行？ 7. 才写最小可用代码。爬梯前先读懂问题。",
   "## 不可懒清单",
-  "- 信任边界校验、防数据丢失的错误处理、安全措施——永不简化。",
+  "- 信任边界校验、防数据丢失错误处理、安全措施永不简化。",
   "- 验证永不最小化：任务点名的测试/lint 全量执行；非平凡逻辑至少留一个可运行检查。",
-  "- 先完整读懂，再懒。刻意简化加 `ponytail:` 注释标明天花板。",
+  "- 刻意简化加 `ponytail:` 注释标明天花板。先完整读懂，再懒。",
 ].join("\n");
 const principles = (() => {
   try {
@@ -109,22 +97,14 @@ const closer = [
   "最终回复包含 <promise>COMPLETE</promise>。",
 ].join("\n");
 
-const result = await run({
-  name: branch,
-  agent: dshHeadless(),
+const sandbox = await createSandbox({
+  branch,
   sandbox: podman({
     imageName: image,
     containerUid: 1000,
     containerGid: 1000,
     mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
   }),
-  prompt: `${principles}\n\n---\n\n${task}\n${closer}`,
-  maxIterations: 1,
-  idleTimeoutSeconds: 1800,
-  branchStrategy:
-    effectiveStrategy === "branch"
-      ? { type: "branch", branch }
-      : { type: "merge-to-head" },
   hooks: {
     sandbox: {
       onSandboxReady: [
@@ -136,40 +116,93 @@ const result = await run({
       ],
     },
   },
-  logging: { type: "stdout" },
 });
 
-// —— yolo 收尾：push + PR（CI 配额宽裕的仓库才用；默认就地收口，ADR-0002 分钟经济）——
-let prUrl: string | undefined;
-if (yolo && result.commits.length > 0) {
-  runOk(["git", "push", "-u", "origin", result.branch], "push");
-  const title = issue ? `fix(#${issue}): sandbox worker` : `sandbox: ${branch}`;
-  const body = [
-    issue ? `Closes #${issue}` : "sandbox worker run",
-    "",
-    "```",
-    result.stdout.slice(-1500),
-    "```",
-  ].join("\n");
-  // spawn 数组直传（不经 shell），标题/正文无需转义
-  const created = spawnSync("gh", ["pr", "create", "--head", result.branch, "--title", title, "--body", body, ...(base ? ["--base", base] : [])], { encoding: "utf8" });
-  if (created.status !== 0) throw new Error(`gh pr create 失败: ${created.stderr || created.stdout}`);
-  prUrl = created.stdout.trim().split("\n").findLast(l => l.startsWith("http"));
-  if (autoMerge) runOk(["gh", "pr", "merge", "--squash", "--auto", result.branch], "auto-merge");
+// 看门狗：墙钟上限（超时 = parked-timeout，夜间不烧整晚）
+const signal = AbortSignal.timeout(maxMinutes * 60_000);
+let worker;
+try {
+  worker = await sandbox.run({
+    agent: dshHeadless(),
+    prompt: `${principles}\n\n---\n\n${task}\n${closer}`,
+    maxIterations: 1,
+    idleTimeoutSeconds: 900,
+    logging: { type: "stdout" },
+    signal,
+  });
+} catch (e: any) {
+  const timedOut = /timeout|abort/i.test(String(e?.message ?? e));
+  console.error(timedOut ? `PARKED-TIMEOUT (${maxMinutes}min)` : String(e));
+  process.exit(timedOut ? 5 : 1);
 }
 
+// —— 验证门：编排者亲自在同一个沙箱里 exec 审计点名的命令（不信 worker 自述）——
+let verify: { cmd: string; exitCode: number | null } | null = null;
+if (verifyCmd) {
+  const v = await sandbox.exec(verifyCmd);
+  verify = { cmd: verifyCmd, exitCode: v.exitCode };
+  console.log(`\n验证门 exit=${v.exitCode}: ${verifyCmd}`);
+}
+
+const closeRes = await sandbox.close();
+const dirty = Boolean(closeRes.preservedWorktreePath);
+
+function checkpoint(status: string, extra: Record<string, unknown> = {}) {
+  mkdirSync(".sandcastle/state", { recursive: true });
+  const rec = {
+    id,
+    issue: issue ? Number(issue) : undefined,
+    branch,
+    status,
+    verify,
+    dirty,
+    commits: worker.commits,
+    completionSignal: worker.completionSignal,
+    logFilePath: worker.logFilePath,
+    stdoutTail: worker.stdout.slice(-600),
+    finishedAt: new Date().toISOString(),
+    ...extra,
+  };
+  writeFileSync(`.sandcastle/state/${id}.json`, JSON.stringify(rec, null, 2), "utf8");
+  return rec;
+}
+
+if (worker.commits.length === 0) {
+  checkpoint("parked-empty");
+  console.error(`\nPARKED-EMPTY: worker 无 commit（dirty=${dirty}）。worktree: ${closeRes.preservedWorktreePath ?? "已清理"}`);
+  process.exit(6);
+}
+if (verify && verify.exitCode !== 0) {
+  checkpoint("parked-verify");
+  console.error(`\nPARKED-VERIFY: 验证门未过。分支 ${branch} 已保留，返工或人工处理。`);
+  process.exit(3);
+}
+
+// —— 收口：PR-per-unit（CI 配额宽裕）或本地合并（默认，ADR-0002 分钟经济）——
+let prUrl: string | undefined;
+if (pr) {
+  const title = issue ? `fix(#${issue}): sandbox worker` : `sandbox: ${branch}`;
+  const body = [issue ? `Closes #${issue}` : "sandbox worker run", "", "```", worker.stdout.slice(-1500), "```"].join("\n");
+  const created = spawnSync(
+    "gh",
+    ["pr", "create", "--head", branch, "--title", title, "--body", body, ...(base ? ["--base", base] : [])],
+    { encoding: "utf8" },
+  );
+  if (created.status !== 0) throw new Error(`gh pr create 失败: ${created.stderr || created.stdout}`);
+  prUrl = created.stdout.trim().split("\n").findLast((l) => l.startsWith("http"));
+  if (autoMerge) runOk(["gh", "pr", "merge", "--squash", "--auto", branch], "auto-merge");
+} else {
+  const m = spawnSync("git", ["merge", "--no-ff", branch], { encoding: "utf8" });
+  if (m.status !== 0) {
+    spawnSync("git", ["merge", "--abort"]);
+    checkpoint("parked-conflict");
+    console.error(`\nPARKED-CONFLICT: 合并冲突，分支 ${branch} 已保留。返工或手工合并。`);
+    process.exit(4);
+  }
+}
+
+const rec = checkpoint(pr ? "pr" : "merged", { prUrl });
 console.log(
   "\n=== RunResult ===\n" +
-    JSON.stringify(
-      {
-        branch: result.branch,
-        commits: result.commits,
-        completionSignal: result.completionSignal,
-        prUrl,
-        stdoutTail: result.stdout.slice(-800),
-        logFilePath: result.logFilePath,
-      },
-      null,
-      2,
-    ),
+    JSON.stringify({ status: rec.status, branch, commits: rec.commits, prUrl, logFilePath: rec.logFilePath }, null, 2),
 );

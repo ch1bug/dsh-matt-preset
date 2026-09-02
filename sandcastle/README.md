@@ -41,6 +41,25 @@ npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:d
 
 出口证据四件套：**审计记录 + commit SHAs + 验证 exec 输出 + 沙箱运行日志**。"worker 说做完了"不算闭环。
 
+## 夜间批跑（检查点续跑 + 看门狗 + 清晨 digest）
+
+```bash
+# ① 编排会话构建队列（已过票据审计的 Y 车道票，按依赖排序）
+#    .sandcastle/night-queue.json: { "tickets": [449, 452, { "issue": 455, "verify": "cargo test -p iris-agent --lib" }] }
+
+# ② 发车（每票独立子进程：单票崩不伤队列；检查点幂等，中断后重跑同命令即续命）
+npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
+  --verify "cargo test -p iris-api --lib" --max-minutes 60
+
+# ③ 早晨：读 .sandcastle/digest/<stamp>.md → ticket-audit 抽查 → 批末 push 过 summary gate
+```
+
+- **检查点**：每票完成写 `.sandcastle/state/<id>.json`（status/commits/verify/log），
+  merged/pr 的票重跑自动跳过——崩溃从断点继续，不从头再来
+- **看门狗**：`--max-minutes` 每票墙钟上限（AbortSignal），超时 = parked-timeout
+- **配额熔断**：provider 配额/认证错误 = 停止信号，持久化队列退出（exit 2），明晚续跑
+- gitignore 建议：`.sandcastle/state/`、`.sandcastle/digest/`、`.sandcastle/audits/`
+
 ## 已知边界（Windows 宿主实测）
 
 - `copyToWorktree` 在宿主侧 spawn `cp`（ENOENT）——不要用；票据文件先 commit 进分支
