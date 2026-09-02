@@ -148,9 +148,12 @@
           diff passes a simplify pass before that gate. Merge serially in
           waves (3–5), rebase onto master one ticket at a time; a
           conflicted/rejected ticket returns to its sandbox for one rework run
-          or goes to Bucket A. Batch end still = one push through the summary
-          gate (Actions-minute economy, ADR-0002); PR-per-unit (`--pr`) only
-          where CI budget allows.
+          or goes to Bucket A. Every finished ticket persists a checkpoint
+          (state file: SHAs + verification output) and every worker runs under
+          a wall-clock watchdog — unattended batches resume from the
+          checkpoint, never from zero. Batch end still = one push through the
+          summary gate (Actions-minute economy, ADR-0002); PR-per-unit
+          (`--pr`) only where CI budget allows.
           (e) Every sandbox launch is an EXTERNAL-ACTION GATE event (enforcer
           matches `sandcastle`/`run-ticket`); the batch-end push still goes
           through the summary gate. (f) Ticket exit evidence = audit record +

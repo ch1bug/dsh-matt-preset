@@ -32,3 +32,25 @@ human 观察 IRIS backlog：大量 `ready-for-agent` 票是机械票（#588 截�
 - 机械审计可被措辞绕过——编排者判词是必要条件而非充分条件；深模块重构 / 治理 / money-path 票永不进 Y。
 - `copyToWorktree` 在 Windows 宿主不可用（spawn cp ENOENT）——票据文件走"先 commit 进分支"。
 - podman machine 资源是并行度上限（2GiB 只够 1–2 并行；放量前 `podman machine set` 扩容）。
+
+## Amendment（2026-09-02）：四级门禁命名对齐 + 检查点/看门狗（吸收 dsh-punky-swarm 之设计，不引其引擎）
+
+调研 [dsh-punky-swarm](https://github.com/Punky971210/dsh-punky-swarm)（0.3.6，582 测试，AGPL-3.0-only）后，
+采纳其三个概念、拒绝引入其引擎本体（AGPL 传染 + peer 只到 0.1.1 未验证 0.1.2-alpha + 19-20 工具的
+重量级面）。命名对齐其四级门禁，便于与社区语境互通：
+
+| punky 术语 | 我们的实现 | 载体 |
+| --- | --- | --- |
+| Entry Gate | 票据审计（发射钥匙：verdict=launch + 编排者判词） | audit-ticket.mts + run-ticket --yolo 校验 |
+| Plan Contract | AC 可判定 + touch-set 声明 + 验证命令点名 | 审计记录三声明 |
+| Exit Gate | 编排者亲自 exec 验证命令 + ticket-audit 收口审计 | run-ticket --verify（同沙箱 exec） |
+| Complete | 波次串行合并 + 批末一次 push 过 summary gate | night-run.mts + 七门 |
+
+新增机制（落在模板脚本，非引擎）：
+
+- **检查点续跑**：每票完成即写 `.sandcastle/state/<id>.json`（status/commits/verify/log）；
+  `night-run.mts` 按队列幂等推进（已 merged/pr 自动跳过），崩溃/中断重跑同一命令即从断点继续。
+- **墙钟看门狗**：`--max-minutes`（AbortSignal）每票上限，超时 = parked-timeout，夜间不烧整晚。
+- **配额熔断**：provider 配额/认证错误 = 停止信号（persist 队列，exit 2），非重试信号。
+- **清晨 digest**：`.sandcastle/digest/<stamp>.md` 逐票状态 + 抽查/收口提醒。
+- **进程级崩溃隔离**：night-run 逐票 spawn run-ticket 子进程，单票崩不伤队列。
