@@ -110,7 +110,11 @@
         gates green, code-review clean, batch-state.md updated), the session
         AUTO-HANDOFFs to the next batch member — fresh mode + directed
         section (the batch declaration IS the assignment; order is fixed),
-        without waiting for the human to say "open the next ticket". A
+        without waiting for the human to say "open the next ticket". The
+        handoff tool auto-pins a gate-4 skill-activation line at the
+        document head for directed handoffs — the child's first action is
+        loading the flow skill (observed gap: two batch handoffs went
+        straight to implementation without loading `implement`). A
         "ticket done, 本会话收尾" close-out is NOT a stop-and-wait point
         when batch-state.md names a clear successor. Exceptions: (a) the next
         ticket carries an embedded decision gate needing human sign-off; (b)
