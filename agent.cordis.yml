@@ -112,11 +112,12 @@
         section (the batch declaration IS the assignment; order is fixed),
         without waiting for the human to say "open the next ticket". The
         parent MUST declare `skill` on every directed handoff (tool-enforced:
-        an implement-phase ticket declares `implement` — by convention the
-        handoff is the /implement start) and the tool injects the full
-        SKILL.md contract at the document head; the child executes the
-        embedded contract and reads nothing (observed gap: two batch handoffs
-        went straight to implementation without loading `implement`). A
+        an implement-phase ticket declares `implement`; a working-dir grill
+        ticket declares `grill-with-docs`) and the tool pins a `/<skill>`
+        invocation line above the title — DSH's skill system auto-injects the
+        contract, the child executes it and reads nothing (observed gap: two
+        batch handoffs went straight to implementation without loading
+        `implement`). A
         "ticket done, 本会话收尾" close-out is NOT a stop-and-wait point
         when batch-state.md names a clear successor. Exceptions: (a) the next
         ticket carries an embedded decision gate needing human sign-off; (b)
