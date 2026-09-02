@@ -54,12 +54,17 @@ const handoffSchema = {
     document: {
       type: 'string',
       description:
-        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs (a "## 本会话任务（human 已定向）" section) the tool auto-pins a gate-4 skill-activation line at the document head — name the needed skill in the directed section; do not write the activation line yourself.',
+        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs the tool injects the full SKILL.md contract of the `skill` you declare at the document head — do not write skill content or activation lines yourself; declare `skill` and compose the directed section.',
     },
     focus: {
       type: 'string',
       description:
         'Optional: what the next session will be used for. Prefixed to the document as its heading context.',
+    },
+    skill: {
+      type: 'string',
+      description:
+        "定向交接（含「## 本会话任务（human 已定向）」节）必填：子会话要执行的 flow skill 名（implement / code-review / to-tickets / triage…，实现票按惯例 = implement）。工具读取 ~/.dsh/skills/<skill>/SKILL.md 并把契约全文注入交接文档头部——子会话零读取。确无适用技能传 'none'。候选交接不带此参数。",
     },
     mode: {
       type: 'string',
@@ -167,18 +172,58 @@ async function executeHandoff(ctx, args, exec) {
     '- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入"先报告等确认"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。',
     '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
   ].join('\n')
-  // Gate-4 anchor (2026-09-02 IRIS 观察: 两个批内 handoff 都直接开工、没加载
-  // implement 技能——只有 review 阶段加载了 code-review)。定向交接自动在首因位
-  // 置顶技能激活指令：子会话的第一动作 = 加载 flow skill。仅对定向交接插入
-  // （候选交接不得诱导自动开工）。
+  // Gate-4 父会话强约束（2026-09-02 IRIS 观察: 两个批内 handoff 都直接开工、
+  // 没加载 implement 技能——只有 review 阶段加载了 code-review）。修订：义务在
+  // 父会话侧，不由子会话自觉读取——
+  //   1. 定向交接必须声明 skill（缺失/候选交接带 skill → 工具响亮报错）；
+  //   2. 工具读取 ~/.dsh/skills/<skill>/SKILL.md 并把契约全文注入文档头部；
+  //   3. 子会话零读取：契约随首条提示词天然在场，按契约执行定向节。
   const isAssignment = body.includes('## 本会话任务（human 已定向）')
-  const activation = isAssignment
-    ? [
-        '> ⚡ 开工前置（gate-4）：你的**第一个动作**是加载本票所需的 flow skill——调用 `skill` 工具（或读取 ~/.dsh/skills/<name>/SKILL.md；定向实现票通常为 `implement`，按定向节所指阶段选择）。',
-        '> 未加载技能前不得开始改代码；加载后按 SKILL.md 的流程执行「## 本会话任务（human 已定向）」节。',
-      ].join('\n')
-    : ''
-  const documentText = [prefix, '', activation, activation ? '' : null, body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
+  const skill = typeof args.skill === 'string' ? args.skill.trim().replace(/^\//, '') : ''
+  if (isAssignment && !skill) {
+    throw new Error(
+      "定向交接必须声明 skill（父会话强约束，不是子会话的自觉）：传 skill: 'implement' / 'code-review' / 'to-tickets' 等——实现票按惯例等价于以 /implement 开工；确无适用技能传 skill: 'none' 并在定向节说明。",
+    )
+  }
+  if (!isAssignment && skill && skill !== 'none') {
+    throw new Error(
+      "候选交接（无「本会话任务（human 已定向）」节）不携带技能契约——先确定任务并写定向节，或去掉 skill 参数。",
+    )
+  }
+  let contract = ''
+  if (isAssignment && skill !== 'none') {
+    const g = process.getBuiltinModule
+    const fs = g('node:fs')
+    const path = g('node:path')
+    const os = g('node:os')
+    const file = path.join(
+      process.env.DSH_HOME || path.join(os.homedir(), '.dsh'),
+      'skills',
+      skill,
+      'SKILL.md',
+    )
+    let content
+    try {
+      content = fs.readFileSync(file, 'utf8')
+    } catch {
+      throw new Error(
+        `技能契约注入失败：找不到 ${file} ——父会话强约束：声明一个存在的技能，或 skill: 'none'。`,
+      )
+    }
+    if (content.length > 16_000) {
+      content =
+        content.slice(0, 16_000) +
+        `\n<!-- 已截断（${content.length} chars）；完整内容见 ~/.dsh/skills/${skill}/SKILL.md -->`
+    }
+    contract = [
+      `## 技能契约：${skill}（等价于以 /${skill} 开工；父会话已注入全文——直接按此执行，无需再读取任何技能文件）`,
+      '',
+      content,
+      '',
+      `> ⚡ gate-4：按上方「技能契约：${skill}」执行「## 本会话任务（human 已定向）」节；未按契约执行 = gate-4 违规。`,
+    ].join('\n')
+  }
+  const documentText = [prefix, '', contract, contract ? '' : null, body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')
