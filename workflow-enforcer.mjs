@@ -15,6 +15,13 @@
  *      after a matching tool call.
  *   2. CORRECTION SEDIMENTATION (D22) — a human correction must be
  *      acknowledged and written down (propose the doc, get a nod, write).
+ *   3. GRILL QUESTION CONTRACT — while a session is in grill/triage mode
+ *      (skill call in the grill family, or a prompt starting /grill //
+ *      /triage), inject the question-presentation recipe: one decision per
+ *      message, status line, four-piece block, time estimate, opt-in batch.
+ *      Validated by wording micro-test 2026-09-12 (control 5/5 batched 4+
+ *      questions; recipe 5/5 converged, variance ≈ 0). Disable with
+ *      `grillContract: false`.
  *
  * The high-risk list is the plugin default, overridable per project via
  * `workflow-gates.yml` (external:/destructive: lists) or per-row config
@@ -84,6 +91,20 @@ const ticketCreated = new WeakMap()
  * its ticket, knew #501 was next, and still waited 9 min for the human to
  * say so). */
 const batchClose = new WeakMap()
+
+/** Sessions in grill/triage interview mode. Armed by a skill-tool call in
+ * the grill family (grilling / grill-with-docs / grill-me / triage) or by
+ * user/inbox text containing a /grill or /triage prompt prefix. Sticky for
+ * the session — interviews span many turns and the question shape decays
+ * like any soft prose, so the contract is re-injected on every assembly
+ * (one issue per session keeps a session inside one phase anyway). */
+const grillMode = new WeakMap()
+
+/** Skill-tool names that put a session into grill/triage interview mode. */
+const GRILL_SKILL_NAMES = ['grilling', 'grill-with-docs', 'grill-me', 'triage']
+
+/** Prompt prefixes that start a grill/triage session (directed handoffs). */
+const GRILL_PROMPT_PREFIXES = ['/grill', '/triage']
 
 /** Matches an issue-close tool call: `gh issue close N` or a PATCH that
  * sets state=closed on issues/N. */
@@ -271,6 +292,24 @@ function baselineText() {
   ].join('\n')
 }
 
+/** Grill/triage question-presentation contract. Wording validated by the
+ * 2026-09-12 micro-test (control 5/5 batched; recipe 5/5 converged, ≈0
+ * variance). Chinese anchors are the validated output formats. */
+function grillContractText() {
+  return [
+    'GRILL QUESTION CONTRACT — every message that asks the human to decide:',
+    'ONE decision per message. First line = status line (已拍 Q1-Q2，现问 Q3(#643)).',
+    'Four-piece block: one-line question numbered Q<n>(<ticket>) → 2-4 options,',
+    'one line each (effect + cost) → ➡️ 推荐 X：<one-line reason> → last line',
+    '可答：A / 按推荐 / 例外说明.',
+    'Time estimate under the question: 按推荐 ≈10 秒；要看 #… 背景约 N 分钟.',
+    'The last line is always this question\'s answer request — never a summary.',
+    'Batch mode only on explicit human opt-in (批量模式): ≤5 questions, same',
+    'four-piece block each, still one closing ask.',
+    'Asked for background (前因后果)? Four-piece block first, background after.',
+  ].join('\n')
+}
+
 /** renderPrompt treats `{{…}}` as prompt-variable references; tool-call text
  * may legitimately contain template syntax (issue bodies, shell snippets).
  * Neutralize braces at the single choke point so an injected command can
@@ -292,6 +331,9 @@ async function reminderText(agent, config, ctx, assembled) {
   }
   const parts = []
   if (config.baseline !== false) parts.push(baselineText())
+  if (grillMode.get(agent.session) === true && config.grillContract !== false) {
+    parts.push(grillContractText())
+  }
   const call = lastCall.get(agent.session)
   if (call !== undefined) {
     lastCall.delete(agent.session) // consume: fires once per matched call
@@ -361,6 +403,11 @@ export function apply(ctx, config = {}) {
     const surface = JSON.stringify(data)
     if (CLOSE_PATTERNS.some(re => re.test(surface))) ticketClosed.set(session, true)
     if (CREATE_PATTERNS.some(re => re.test(surface))) ticketCreated.set(session, true)
+    // Grill/triage family skill call → interview mode for the whole session.
+    if (String(data.name ?? '').toLowerCase() === 'skill'
+        && GRILL_SKILL_NAMES.includes(String(callArgs(data.arguments).name ?? '').toLowerCase())) {
+      grillMode.set(session, true)
+    }
   })
 
   // Arm context evidence: assistant fold-in claims AND user assessments of
@@ -369,7 +416,7 @@ export function apply(ctx, config = {}) {
   // Also arm the batch close-out nudge when assistant text reports a ticket
   // done in a batch (checked against batch-state.md at consume time).
   ctx.on('session/event', (session, event) => {
-    if (!['text-chunks', 'assistant/message', 'user/message'].includes(event?.type)) return
+    if (!['text-chunks', 'assistant/message', 'user/message', 'agent/inbox/spliced'].includes(event?.type)) return
     const data = event.data ?? {}
     // Extract a text surface from whichever shape the event uses:
     //   - text-chunks: data.texts[] (may be undefined)
@@ -395,6 +442,10 @@ export function apply(ctx, config = {}) {
     text = text.toLowerCase()
     if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
     if (BATCH_CLOSE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) batchClose.set(session, true)
+    // Directed handoff docs start with /grill… or /triage — arm interview
+    // mode (inbox/spliced events carry the handoff as inserted user text;
+    // the JSON.stringify fallback below guarantees the prefix is visible).
+    if (GRILL_PROMPT_PREFIXES.some(p => text.includes(p))) grillMode.set(session, true)
   })
 
   // Model-driven context query: the agent calls this when the user asks about
