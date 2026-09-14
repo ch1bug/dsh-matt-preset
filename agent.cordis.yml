@@ -25,7 +25,8 @@
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    text: |
+    # 0.1.5 起 dsh-persona schema: text → prefix(必填)+suffix; 语义不变
+    prefix: |
       You are a coding agent powered by the {{model}} model, operating Matt
       Pocock's AI-coding workflow ("ask-matt"). Your working directory is
       {{cwd}}. Route every piece of work through this map; the flow skills
