@@ -1,0 +1,13 @@
+{
+  "name": "dsh-matt-preset",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Matt 工作流 agent preset (ask-matt): persona + workflow-enforcer + tool roster, mounted as a local dsh profile bundle (ADR-0001). agent.cordis.yml is the source of truth; cordis.patch.yml is its generated bundle carrier.",
+  "type": "module",
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
