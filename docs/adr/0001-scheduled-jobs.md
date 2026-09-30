@@ -1,6 +1,12 @@
 # 0001 — Matt 模式挂载定时任务执行器（scheduled-jobs）
 
-Status: accepted
+Status: retired（2026-09-30，T1 拍板 4c，#4）
+
+> **退役注记**：`scheduled-jobs.mjs` 与 `job-sync-skills` 行已随 #4（T2 本体合并）
+> 删除。原因：schedule-bundle（time-context + schedule + ui-schedule）三端统一挂载
+> 后，preset 自带的 cron 执行器失去唯一消费者（`job-sync-skills` 自 2026-08-31 起
+> 因 WSL 路径失效已 disabled，见 #1）。本文保留以记录决策历史；相关测试
+> （`verify-advisory.mjs`、`verify-notify.mjs`、`verify.mjs` Track C）一并移除。
 
 Matt 模式需要一个"cron 类似的插件"来定时跑技能同步（`sync-skills.sh`）等任务。我们决定在 matt preset 里挂载一个 `scheduled-jobs` 插件：任务以 agent.cordis.yml 行式配置（每任务 = cron 表达式 + 命令 + 可选 `notifyOnFailure`/`notifySessionId`/`runOnMount`），cron 表达式用 `cron-parser` 库解析（装在 `~/.dsh/node_modules` 用户自有目录，不碰部署包），单一分钟 tick 驱动，配 `jobs_list`/`jobs_run`/`jobs_pause` 三个模型工具；第一个任务是每天 09:00 跑 `sync-skills.sh`（`runOnMount`，失败时通知显式配置的会话）。
 

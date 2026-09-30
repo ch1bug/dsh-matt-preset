@@ -49,7 +49,7 @@ const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 // Custom preset-owned rows only: a full-matt mount failure must never blame
 // these. Shipped rows (tool-bash, str-replace-editor, …) fail on
 // harness-missing host services and are expected.
-const MY_ROWS = ['handoff-tool', 'scheduled-jobs', 'workflow-enforcer']
+const MY_ROWS = ['handoff-tool', 'workflow-enforcer']
 
 const results = []
 const ok = (name, detail = '') => { results.push(`  ✓ ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -270,79 +270,6 @@ try {
       bad('B. full message', message.slice(0, 800))
     }
   }
-
-  // ── Track C: scheduled-jobs smoke ───────────────────────────────────────
-  const rootC = await mkdtemp(join(tmpdir(), 'dsh-jobsmoke-'))
-  await mkdir(join(rootC, 'jobsmoke'))
-  await writeFile(join(rootC, 'jobsmoke', 'agent.cordis.yml'), [
-    '- id: job-test',
-    `  name: ${join(MATT_DIR, 'scheduled-jobs.mjs')}`,
-    '  config:',
-    '    id: job-test',
-    '    schedule: "* * * * * *"',
-    '    command: "echo hello-$RANDOM"',
-    '    runOnMount: true',
-    '    tickSeconds: 1',
-    '',
-  ].join('\n'))
-  const ctxC = await harness([{ path: rootC, trust: 'user' }])
-  results.push('harness C booted (jobs smoke root)')
-
-  try {
-    await ctxC.agentPresets.standingKeyFor('jobsmoke')
-    ok('C. standingKeyFor(jobsmoke) mounts clean')
-  } catch (error) {
-    bad('C. standingKeyFor(jobsmoke)', String(error?.message ?? error))
-    throw error
-  }
-  const handleC = await agentOn(ctxC, 'verify-job-a', 'jobsmoke')
-  const agentC = handleC.agent
-  const toolsC = toolNames(ctxC, agentC)
-  if (['jobs_list', 'jobs_run', 'jobs_pause'].every(t => toolsC.includes(t))) ok('C. jobs tools registered', toolsC.join(', '))
-  else bad('C. jobs tools', toolsC.join(', '))
-
-  const runTool = async (name, args) => {
-    const out = await ctxC.tools.execute({ callId: CallId('c-' + name + '-' + Math.random().toString(36).slice(2)), name, arguments: args, agent: agentC, signal: new AbortController().signal })
-    return out
-  }
-
-  // runOnMount + tick: wait for at least one fire
-  await new Promise(r => setTimeout(r, 2600))
-  const jobsListed = await runTool('jobs_list', {})
-  const text = jobsListed.isError === false ? (jobsListed.value && jobsListed.value.text) ?? JSON.stringify(jobsListed.value) : `error ${jobsListed.error}`
-  const rows = jobsListed.isError === false ? JSON.parse(jobsListed.value.text) : []
-  const jobRow = rows.find(r => r.id === 'job-test')
-  if (jobRow && jobRow.lastRun && jobRow.lastRun.ok && /^hello-\d+$/.test((jobRow.lastRun.outputTail ?? '').trim())) {
-    ok('C. runOnMount + tick fired the job', `lastRun=${jobRow.lastRun.at} output=${(jobRow.lastRun.outputTail ?? '').trim()}`)
-  } else {
-    bad('C. runOnMount + tick', text)
-  }
-
-  // pause → must not fire while paused
-  await runTool('jobs_pause', { id: 'job-test' })
-  const pausedBefore = await runTool('jobs_list', {})
-  const pausedRow = JSON.parse(pausedBefore.value.text).find(r => r.id === 'job-test')
-  const pausedAt = pausedRow.lastRun?.at
-  await new Promise(r => setTimeout(r, 2100))
-  const pausedAfter = await runTool('jobs_list', {})
-  const pausedRow2 = JSON.parse(pausedAfter.value.text).find(r => r.id === 'job-test')
-  if (pausedRow.paused === true && pausedRow2.lastRun?.at === pausedAt) ok('C. jobs_pause stops firing')
-  else bad('C. jobs_pause', `paused=${pausedRow.paused} at=${pausedAt} -> ${pausedRow2.lastRun?.at}`)
-
-  // jobs_run works while paused
-  const ran = await runTool('jobs_run', { id: 'job-test' })
-  const ranRow = JSON.parse(ran.value.text)
-  if (ran.isError === false && ranRow.ok && ranRow.exitCode === 0) ok('C. jobs_run runs despite pause', `output=${(ranRow.output ?? '').trim()}`)
-  else bad('C. jobs_run', JSON.stringify(ranRow ?? ran))
-
-  // resume
-  await runTool('jobs_pause', { id: 'job-test' })
-  const resumed = await runTool('jobs_list', {})
-  const resumedRow = JSON.parse(resumed.value.text).find(r => r.id === 'job-test')
-  if (resumedRow.paused === false) ok('C. jobs_pause resumes')
-  else bad('C. jobs_pause resume', JSON.stringify(resumedRow))
-
-  await handleC.dispose()
 
   // ── Track D: handoff children must land in the sidebar account ──────────
   // The GUI's session.create attaches the session to its workspace; the bare

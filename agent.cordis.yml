@@ -416,11 +416,10 @@
       # preset 自带技能（如 ponytail）——随仓库分发，见 skills/
       - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
 
+# `tool-skill` 只给目录和加载器；customSkillDirs 归 skill-filesystem 一处
+# （T1 拍板 2：tool-skill 上的同键配置是死配置，已删）。
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
-  config:
-    customSkillDirs:
-      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
 
 # ── goals ───────────────────────────────────────────────────────────────────
 
@@ -430,6 +429,9 @@
 # resolves `goals` on the host and an entry-local realm here would hide it. The
 # registry is keyed by session anyway, so one host instance serves every
 # session. What a preset chooses is whether its agent can call the goal tool.
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
 
@@ -524,6 +526,7 @@
       config:
         provider: spawn
         toolName: subagent
+        modelSelectionSettings: true
         backgroundMode: continuable
 
     - id: tool-subagent-fork
@@ -554,8 +557,10 @@
         backgroundMode: one-shot
         maxDepth: provider-managed
 
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    # 0.2.0: workflowEngine 由 dsh-workflow-ptc 提供（与内置 standard preset 一致；
+    # 0.1.7 起旧形态 dsh-workflow-worker-thread 包已被移除，两端都跑不了）。
+    - id: workflow-ptc
+      name: '@deepseek-ai/dsh-workflow-ptc'
       config:
         provider: spawn
 
@@ -586,6 +591,13 @@
     fetch: false
     searchTimeoutMs: 60000
 
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'
+
+- id: tool-plugin-manager
+  name: '@deepseek-ai/dsh-plugin-manager/tools'
+  disabled: true
+
 # ── Matt workflow boundary plugins ──────────────────────────────────────────
 #
 # These close the session-level moves of Matt's phase-boundary tree that an
@@ -600,31 +612,3 @@
 - id: handoff-tool
   name: ./handoff-tool.mjs
 
-# ── scheduled jobs ─────────────────────────────────────────────────────────
-#
-# Cron-like task runner (see docs/adr/0001-scheduled-jobs.md): each job is its
-# own row sharing ./scheduled-jobs.mjs; cron-parser lives at ~/.dsh/node_modules
-# (user-owned; the deployment's node_modules is never touched). The scheduler
-# runs while this preset's standing mount lives (DSH running + mode used).
-#
-# First consumer — daily skill sync at 09:00 (host local time), run once on
-# mount so skills are fresh at session start. Fill notifySessionId with a real
-# session id to get a followup when the sync fails; leave "" for log-only.
-# ⛔ 已禁用（2026-08-31，Windows 迁移）：command/advisory 仍指向 WSL 路径
-# （~/.agents/upstreams/sync-skills.sh、/home/bh4gxf/code），Windows 下不存在；
-# 修复同步脚本路径后再启用。
-- id: job-sync-skills
-  name: ./scheduled-jobs.mjs
-  disabled: true
-  config:
-    id: job-sync-skills
-    schedule: "0 9 * * *"
-    command: "~/.agents/upstreams/sync-skills.sh"
-    runOnMount: true
-    notifyOnFailure: true
-    notifySessionId: "matt-session-7a5993c2-f65c-453c-896c-042d90f5b658"
-    advisory:
-      dir: /home/bh4gxf/code
-      title: 上游技能更新待跟进
-      flagFile: ~/.agents/upstreams/.has-changes
-      messageFile: ~/.agents/upstreams/CHANGELOG.md"

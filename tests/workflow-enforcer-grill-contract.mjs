@@ -1,6 +1,6 @@
 // Wiring test for the grill-question-contract injection in workflow-enforcer.mjs.
 // Simulates the Cordis hook surface: session/event arming + system-prompt/assemble.
-import { apply } from 'file:///C:/Users/lihao/.dsh/.agent-presets/dsh-matt-preset/workflow-enforcer.mjs'
+import { apply } from '../workflow-enforcer.mjs'
 
 const failures = []
 const check = (label, cond) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`); if (!cond) failures.push(label) }
