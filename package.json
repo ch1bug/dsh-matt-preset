@@ -9,5 +9,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "exports": {
+    "./*": "./*",
+    "./package.json": "./package.json"
   }
 }
