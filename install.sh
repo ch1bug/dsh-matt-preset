@@ -3,7 +3,7 @@
 #
 # dsh 没有内置的 preset 安装命令（dsh plugin 只管 npm 插件）；preset 的官方安装位
 # 就是 $DSH_HOME/.agent-presets/<id>/ —— 放进去 dsh 启动时自动发现（user trust）。
-# 本脚本做的正是这件事：clone 仓库到安装位 + 装 scheduled-jobs 的 cron-parser 依赖。
+# 本脚本做的正是这件事：clone 仓库到安装位 + 装 workflow-enforcer 的 yaml 依赖。
 set -euo pipefail
 
 REPO_URL="${DSH_MATT_PRESET_URL:-https://github.com/ch1bug/dsh-matt-preset.git}"
@@ -18,8 +18,7 @@ fi
 mkdir -p "$HOME_DIR/.agent-presets"
 git clone "$REPO_URL" "$TARGET"
 # 内置插件依赖（用户自有目录，不碰部署包）：
-#   cron-parser/luxon — scheduled-jobs；yaml — workflow-enforcer
-npm install --prefix "$HOME_DIR" cron-parser luxon yaml
+npm install --prefix "$HOME_DIR" yaml
 
 echo
 echo "已安装到 $TARGET"

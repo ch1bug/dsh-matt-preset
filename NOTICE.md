@@ -11,7 +11,7 @@
   STANDALONE / UTILITIES / PRECONDITION）改编自
   [mattpocock/skills](https://github.com/mattpocock/skills)（MIT，Copyright 2026 Matt
   Pocock）；WORKFLOW ENFORCEMENT 七门与 INITIALIZATION 为本仓库增补。
-- `handoff-tool.mjs`、`scheduled-jobs.mjs`、persona 增补文本（WORKFLOW ENFORCEMENT /
+- `handoff-tool.mjs`、persona 增补文本（WORKFLOW ENFORCEMENT /
   INITIALIZATION，原 matt-workflow.md）、`tests/` — 本仓库原创。
 - 原始 DeepSeek 版权与 MIT 许可声明见上游仓库。
 
