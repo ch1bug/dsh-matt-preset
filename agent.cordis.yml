@@ -328,12 +328,13 @@
       confirm-before-write still asks the human for the decision items).
       Idempotent: CONTEXT.md present means skip the probe and skeleton.
 
-# workflow-enforcer（内置插件，随 preset 分发，相对路径引用——无外部路径问题）：
+# workflow-enforcer（内置插件，随 preset 分发；注意：preset 的插件行按 profile 目录
+# 解析，写相对 ./ 路径会在挂载审计报 never started——必须用绝对 file:// URL）：
 # 每 turn 注入 WORKFLOW GATES 提醒（基线 + 高危 tool/call 即时追加，D21）；只在含
 # ask-matt 标记的会话注入（防御性 scope）。项目可在 cwd 放 workflow-gates.yml 覆盖
 # 清单，详见 docs/workflow-enforcer.md。
 - id: workflow-enforcer
-  name: ./workflow-enforcer.mjs
+  name: file:///C:/Users/lihao/.dsh/.agent-presets/dsh-matt-preset/workflow-enforcer.mjs
   config:
     baseline: true
 
@@ -345,7 +346,7 @@
 # ——流程归七门，知识归语言包，职责物理隔离。加语言 = 加 lang-packs/*.yml（零代码）。
 # 项目可在 cwd 放 lang-gates.yml（disable: [rust]）关闭。详见 docs/lang-enforcer.md。
 - id: lang-enforcer
-  name: ./lang-enforcer.mjs
+  name: file:///C:/Users/lihao/.dsh/.agent-presets/dsh-matt-preset/lang-enforcer.mjs
   config:
     baselineMode: session
 
@@ -610,5 +611,5 @@
 # first turn starts immediately.
 # The agent then stops and tells the human to switch sessions in the sidebar.
 - id: handoff-tool
-  name: ./handoff-tool.mjs
+  name: file:///C:/Users/lihao/.dsh/.agent-presets/dsh-matt-preset/handoff-tool.mjs
 
