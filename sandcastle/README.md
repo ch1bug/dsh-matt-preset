@@ -71,7 +71,7 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
   真执行归编排者）；消费 `audit-ticket --touch-overlap` 写出的 serial 组——重叠票强制
   拉进同一波并在波内串行（组大小可溢出 5），无 serial 标记则按默认贪心分组
 - **needs-simplify**：run-ticket exit 7（diff 超阈值 parked 为 needs-simplify，
-  分支保留）——night-run 侧的 exit→status 映射登记随后续补齐
+  分支保留）——night-run 已登记 exit 7 → needs-simplify，幂等跳过与 parked 同等对待
 - **看门狗**：`--max-minutes` 每票墙钟上限（AbortSignal），超时 = parked-timeout
 - **配额熔断**：provider 配额/认证错误 = 停止信号，持久化队列退出（exit 2），明晚续跑
 - gitignore 建议：`.sandcastle/state/`、`.sandcastle/digest/`、`.sandcastle/audits/`
