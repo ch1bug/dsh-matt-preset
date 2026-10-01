@@ -1,6 +1,10 @@
 # 0005 — /implement-spec 暂不采用（与 D20 一票一会话的取舍）
 
-Status: accepted（2026-10-01，human 拍板"按建议来"）
+Status: accepted（2026-10-01，human 拍板"按建议来"）；**2026-10-01 修订**：
+复评触发条件已被 ADR-0006 pilot 部分满足——上游 implement-spec 的流水线形态
+经 Agent Teams 在会话内复刻成功（票 grain 降至 teammate 任务、决策仍在
+human），见 ADR-0006。本 ADR 对**上游 /implement-spec 技能本身**的"暂不
+采用"维持不变；其流水线思想由 ADR-0006 的 Teams 形态承接。
 
 ## Context
 
