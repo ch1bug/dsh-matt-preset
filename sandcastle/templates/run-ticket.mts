@@ -125,15 +125,21 @@ export function modelRouteDecision(
  * Linux 可用；宿主 msys 无 GNU sed——该命令只在 onSandboxReady 里跑）。
  */
 export function patchAgentDefaultModelCmd(model: string): string {
+  // 守卫：provider/model 各限 [A-Za-z0-9._-]——sed 串拼接不接受引号/换行/空白
+  const MODEL_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+  if (!MODEL_RE.test(model))
+    throw new Error(`model 需为 provider/model 形式（各段字符集 [A-Za-z0-9._-]）：${model}`);
   const slash = model.indexOf("/");
-  const provider = slash > 0 ? model.slice(0, slash) : model;
-  const modelName = slash > 0 ? model.slice(slash + 1) : "";
+  const provider = model.slice(0, slash);
+  const modelName = model.slice(slash + 1);
+  // sed 替换 + grep 回执：settings 无该块或形状漂移 → 钩子非 0 退出（响亮失败，
+  // 不让 checkpoint 的 route:"lane" 记录夸大实际发生的事）
   return (
     `sed -i '/^agent-default-model:/,+2c\\agent-default-model:\\n` +
-    `  provider: ${provider}\\n  model: ${modelName}' ~/.dsh/settings.yaml`
+    `  provider: ${provider}\\n  model: ${modelName}' ~/.dsh/settings.yaml ` +
+    `&& grep -qx '  model: ${modelName}' ~/.dsh/settings.yaml`
   );
 }
-
 
 /**
  * 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。
@@ -167,30 +173,29 @@ const verifyCmd = arg("verify"); // 客观合并门：审计点名的验证命�
 const maxMinutes = Number(arg("max-minutes") ?? 60);
 const id = issue ?? branch.replace(/\W+/g, "-");
 
+// —— 审计记录（单次读取共用：yolo 发射钥匙 + 模型路由都吃它）——
+let auditRec: { verdict?: string; orchestratorNote?: string; modelLane?: { lane?: string } } | undefined;
+if (issue) {
+  try {
+    auditRec = JSON.parse(readFileSync(arg("audit") ?? `.sandcastle/audits/${issue}.json`, "utf8"));
+  } catch {
+    auditRec = undefined;
+  }
+}
+
 // —— 发射钥匙：yolo 必须持有 pass 审计记录 + 编排者判词 ——
 if (yolo) {
   if (!issue) throw new Error("--yolo 需要 --issue N");
-  const auditPath = arg("audit") ?? `.sandcastle/audits/${issue}.json`;
-  let audit: any;
-  try {
-    audit = JSON.parse(readFileSync(auditPath, "utf8"));
-  } catch {
+  if (auditRec === undefined)
     throw new Error(`--yolo 拒绝发射：审计记录缺失（先跑 audit-ticket.mts --issue ${issue}）`);
-  }
-  if (audit.verdict !== "launch")
-    throw new Error(`--yolo 拒绝发射：审计 verdict=${audit.verdict}`);
-  if (!audit.orchestratorNote)
+  if (auditRec.verdict !== "launch")
+    throw new Error(`--yolo 拒绝发射：审计 verdict=${auditRec.verdict}`);
+  if (!auditRec.orchestratorNote)
     throw new Error("--yolo 拒绝发射：审计记录缺编排者判词（orchestratorNote 为空）");
 }
 
 // —— 模型路由（#16）：--model > 审计 modelLane × model-lanes.json > 宿主默认 ——
 const cliModel = arg("model"); // provider/model，如 zai-coding-cn/glm-5.3-flash
-let auditRec: { modelLane?: { lane?: string } } | undefined;
-try {
-  auditRec = JSON.parse(readFileSync(arg("audit") ?? `.sandcastle/audits/${issue}.json`, "utf8"));
-} catch {
-  auditRec = undefined; // 无 --issue 或无审计记录：走宿主默认
-}
 let laneConfig: Record<string, string> | undefined;
 try {
   laneConfig = JSON.parse(readFileSync(".sandcastle/model-lanes.json", "utf8"));

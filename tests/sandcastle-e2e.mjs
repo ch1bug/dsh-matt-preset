@@ -192,6 +192,14 @@ for (const n of [101, 102, 103]) {
     "patchAgentDefaultModelCmd：替换 agent-default-model 块（provider+model 两行）",
     sed.includes("/^agent-default-model:/,+2c") && sed.includes("provider: prov") && sed.includes("model: model-name") && sed.includes("settings.yaml"),
   );
+  check(
+    "patchAgentDefaultModelCmd：grep 回执（防静默失效）+ 非法字符守卫",
+    sed.includes("&& grep -qx") && (() => {
+      try { rt.patchAgentDefaultModelCmd("no-slash"); return false; } catch { /* 期望抛 */ }
+      try { rt.patchAgentDefaultModelCmd('p/m"evil'); return false; } catch { /* 期望抛 */ }
+      return true;
+    })(),
+  );
 }
 
 // ============================================================
