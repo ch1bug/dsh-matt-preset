@@ -13,65 +13,27 @@
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
-import Commands from '@deepseek-ai/dsh-commands'
-import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
-import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
-import TokenMeter from '@deepseek-ai/dsh-token-meter'
-
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? '/home/bh4gxf/.npm-global/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
-const PLUGIN = fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { AgentPreset, bootHarness, smokePlugins, emitSessionEvent } from './preset-harness.mjs'
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
-const ctx = new Context()
-ctx.baseUrl = pathToFileURL(SHIPPED).href + '/'
-await ctx.plugin(Loader)
-ctx.loader.builtins.include = Include
-ctx.loader.builtins.group = Group
-await ctx.plugin(LlmRuntime)
-await ctx.plugin(SessionStore)
-await ctx.plugin(SystemPrompt, { persona: '' })
-await ctx.plugin(ToolRuntime)
-await ctx.plugin(Commands)
-await ctx.plugin(SubprocessLocal)
-await ctx.plugin(AgentRegistry)
-await ctx.plugin(AgentLoop, { agents: [] })
-await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
-await ctx.plugin(TokenMeter)
-
-// V1: smoke preset with only the workflow-enforcer row, inside a temp root.
-const root = await mkdtemp(join(tmpdir(), 'dsh-enforcer-'))
-await mkdir(join(root, 'enforcersmoke'))
-await writeFile(join(root, 'enforcersmoke', 'agent.cordis.yml'), [
-  '- id: persona',
-  "  name: '@deepseek-ai/dsh-persona'",
-  '  config:',
-  '    text: probe persona running the ask-matt workflow',
-  '- id: workflow-enforcer',
-  `  name: ${PLUGIN}`,
-  '',
-].join('\n'))
-await ctx.plugin(AgentPresets, { default: 'standard', roots: [{ path: root, trust: 'user' }], includeUserRoot: false })
+// V1: smoke preset with only the persona + workflow-enforcer rows.
+const ctx = await bootHarness([
+  { id: 'enforcersmoke', plugins: smokePlugins('probe persona running the ask-matt workflow') },
+])
 
 try {
-  await ctx.agentPresets.standingKeyFor('enforcersmoke')
-  ok('V1. standingKeyFor(enforcersmoke) mounts clean')
+  const v1 = await ctx.agentPresets.resolve('enforcersmoke')
+  if (v1.broken === undefined) ok('V1. enforcersmoke activates clean (registry resolve)')
+  else throw new Error(v1.broken)
 } catch (error) {
-  bad('V1. standingKeyFor', String(error?.message ?? error))
+  bad('V1. enforcersmoke activation', String(error?.message ?? error))
   throw error
 }
 
@@ -95,7 +57,7 @@ if (base.includes('WORKFLOW GATES')) ok('V2. baseline reminder injected on every
 else bad('V2. baseline reminder', base.slice(0, 300))
 
 // V3: a matched high-risk tool/call fires a one-shot ⚠ line on the next assembly.
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 1, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
 })
@@ -112,7 +74,7 @@ if (!afterConsumed.includes('High-risk action detected')) ok('V3b. ⚠ reminder 
 else bad('V3b. consumed once', afterConsumed.slice(0, 300))
 
 // V4: a benign tool/call adds no ⚠ line.
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 2, name: 'bash', arguments: JSON.stringify({ command: 'echo hello' }) },
 })
@@ -121,16 +83,7 @@ if (!afterBenign.includes('High-risk action detected')) ok('V4. benign call adds
 else bad('V4. benign call', afterBenign.slice(0, 300))
 
 // V5: scope — a session WITHOUT the ask-matt marker gets no reminder.
-await mkdir(join(root, 'noscope'))
-await writeFile(join(root, 'noscope', 'agent.cordis.yml'), [
-  '- id: persona',
-  "  name: '@deepseek-ai/dsh-persona'",
-  '  config:',
-  '    text: plain minimal persona',
-  '- id: workflow-enforcer',
-  `  name: ${PLUGIN}`,
-  '',
-].join('\n'))
+await ctx.plugin(AgentPreset, { id: 'noscope', plugins: smokePlugins('plain minimal persona') })
 const handleNoScope = await ctx.agents.create({
   sessionId: SessionId('enforcer-noscope'),
   meta: { cwd: '/tmp/dsh-enforcer-cwd' },
@@ -146,7 +99,7 @@ await handleNoScope.dispose()
 
 // V6: a high-risk command containing template braces ({{.Name}}) must not
 // break prompt rendering — the injected reminder neutralizes them.
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 3, name: 'bash', arguments: JSON.stringify({ command: 'gh issue create --body "{{.Name}} template"' }) },
 })
@@ -191,7 +144,7 @@ else bad('V7b. contextEvidence', `got: ${line2} | want: ${expect2}`)
 if (contextEvidence(fakeAgent(1000000), fakeCtx(0, 0, 0)) === null) ok('V7c. unmeasurable → null (no noise)')
 else bad('V7c. null degradation')
 // fold-intent arming: harness event arms, assemble consumes (no crash, scope intact)
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'text-chunks',
   data: { texts: ['确认存量清理范围，#408 独立票一并处理，窗口健康可并入'] },
 })
@@ -210,7 +163,7 @@ if (covered) ok('V8. assessment keywords armed for user queries', assessmentWord
 else bad('V8. assessment keywords', FOLD_KEYWORDS.join(','))
 
 // V9: a matched git push carries the remote-CI follow-up ("done means CI green").
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 9, name: 'bash', arguments: JSON.stringify({ command: 'git push origin develop' }) },
 })
@@ -223,7 +176,7 @@ agent.session.append('turn/start', { turn: 9 })
 agent.session.append('step/start', { turn: 9, step: 1 })
 agent.session.append('assistant/message', { turn: 9, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'some measurable context content for the meter' }] } }, { surfaceOp: 'append' })
 const cs = await ctx.tools.execute({
-  callId: CallId('v10-cs'), name: 'context_status', arguments: {}, agent, signal: new AbortController().signal,
+  callId: ToolCallId('v10-cs'), name: 'context_status', arguments: {}, agent, signal: new AbortController().signal,
 })
 const csText = cs.isError === false ? (cs.value?.text ?? '') : `error ${cs.error}`
 if (csText.includes('context:') && csText.includes('used')) ok('V10. context_status tool returns measured context', csText.slice(0, 60))
@@ -231,7 +184,7 @@ else bad('V10. context_status', csText.slice(0, 120))
 
 // V11: closing a ticket arms ONE fresh-subagent quality spot check on the
 // next assembly (self-assessment cannot see its own degradation, O5).
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 11, name: 'bash', arguments: JSON.stringify({ command: 'gh issue close 429 --comment "done"' }) },
 })
@@ -245,7 +198,7 @@ else bad('V11b. close nudge consumed', v11b.slice(-160))
 // V12: creating a ticket arms ONE one-issue-per-session reminder on the next
 // assembly — a new ticket is its own session's work, never chained inline
 // (observed: #498 session built+fixed+closed #517 while #498 was still open).
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 12, name: 'bash', arguments: JSON.stringify({ command: 'gh issue create --title "new ticket" --body "body" --label needs-triage' }) },
 })
@@ -269,7 +222,7 @@ else bad('V13. routine whitelist', v13.slice(-240))
 // "开下一票" (observed: #500 closed its ticket, knew #501 was next, waited
 // 9 min for the human to say so).
 // (a) without batch-state.md in the cwd → silent.
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'assistant/message',
   data: { turn: 1, step: 14, message: { role: 'assistant', content: [{ type: 'text', text: '#500 本地闭环完成，本会话收尾。' }] } },
 })
@@ -278,7 +231,7 @@ if (!v14a.includes('AUTO-HANDOFF')) ok('V14a. close-out without batch-state.md �
 else bad('V14a. no-batch nudge leaked', v14a.slice(-200))
 
 // (b) with a batch-state.md naming a successor → nudge (one-shot).
-const batchRoot = join(root, 'batched')
+const batchRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-batch-'))
 await mkdir(join(batchRoot, '.scratch'), { recursive: true })
 await writeFile(join(batchRoot, '.scratch', 'batch-state.md'), [
   '# Batch State',
@@ -297,7 +250,7 @@ const render2 = async () => {
   const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent2, signal))
   return renderPrompt(assembly)
 }
-await ctx.emit('session/event', agent2.session, {
+await emitSessionEvent(ctx, agent2.session, {
   type: 'assistant/message',
   data: { turn: 1, step: 14, message: { role: 'assistant', content: [{ type: 'text', text: '本地闭环完成，本会话收尾。' }] } },
 })
@@ -312,7 +265,7 @@ await handle2.dispose()
 // V15: a sandcastle AFK launch (.sandcastle/run-ticket.mts) is an EXTERNAL
 // action — the gate ⚠ fires once on the next assembly (sandboxed ticket
 // workers stay behind the external-action gate).
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 15, name: 'bash', arguments: JSON.stringify({ command: 'npx tsx .sandcastle/run-ticket.mts --issue 449' }) },
 })

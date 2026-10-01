@@ -5,65 +5,28 @@
  * row, creates an agent with a model route + cwd, renders the prompt, and
  * asserts both variables resolved and the workflow marker is present.
  */
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
-import Commands from '@deepseek-ai/dsh-commands'
-import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
-import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { bootHarness } from './preset-harness.mjs'
 
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? '/home/bh4gxf/.npm-global/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
-
-const results = []
-const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
-const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
-
-const ctx = new Context()
-ctx.baseUrl = pathToFileURL(SHIPPED).href + '/'
-await ctx.plugin(Loader)
-ctx.loader.builtins.include = Include
-ctx.loader.builtins.group = Group
-await ctx.plugin(LlmRuntime)
-await ctx.plugin(SessionStore)
-await ctx.plugin(SystemPrompt, { persona: '' })
-await ctx.plugin(ToolRuntime)
-await ctx.plugin(Commands)
-await ctx.plugin(SubprocessLocal)
-await ctx.plugin(AgentRegistry)
-await ctx.plugin(AgentLoop, { agents: [] })
-await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
-
-const root = await mkdtemp(join(tmpdir(), 'dsh-persona-'))
-await mkdir(join(root, 'personasmoke'))
 const personaText = [
   'You are a coding agent powered by the {{model}} model.',
   'Working directory: {{cwd}}.',
   '',
   'ask-matt-workflow-marker: route work through the workflow map.',
 ].join('\n')
-await writeFile(join(root, 'personasmoke', 'agent.cordis.yml'), [
-  '- id: persona',
-  "  name: '@deepseek-ai/dsh-persona'",
-  '  config:',
-  '    text: |',
-  ...personaText.split('\n').map(line => '      ' + line),
-  '',
-].join('\n'))
-await ctx.plugin(AgentPresets, { default: 'standard', roots: [{ path: root, trust: 'user' }], includeUserRoot: false })
+const ctx = await bootHarness([
+  { id: 'personasmoke', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: personaText } },
+  ] },
+])
 
 const sel = ctx.agentDefaultModel.currentSelection()
+
+const results = []
+const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
+const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 const handle = await ctx.agents.create({
   sessionId: SessionId('persona-smoke'),
   meta: { cwd: '/tmp/persona-cwd' },

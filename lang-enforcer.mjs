@@ -40,6 +40,11 @@ export const name = 'lang-enforcer'
 /** The prompt registry this plugin contributes to. */
 export const inject = ['systemPrompt']
 
+/** The agent's working directory (0.2.0-rc runtimes put cwd on the session
+ * header at creation; meta.cwd is the pre-rc field — same fallback chain as
+ * workflow-enforcer.mjs). */
+const sessionCwd = (agent) => agent?.session?.header?.cwd ?? agent?.session?.meta?.cwd
+
 /** Latest raw tool call per session, consumed by the next assemble. */
 const lastCall = new WeakMap()
 
@@ -103,7 +108,7 @@ export async function projectGates(cwd, fileName = 'lang-gates.yml') {
 async function resolvePacks(agent, packs, logger) {
   const cached = detected.get(agent.session)
   if (cached !== undefined) return cached
-  const cwd = agent?.session?.meta?.cwd
+  const cwd = sessionCwd(agent)
   if (!cwd || packs.length === 0) return []
   const hits = []
   for (const pack of packs) {
@@ -135,7 +140,7 @@ async function reminderText(agent, config, packs, logger, ctx, assembled) {
     if (!texts.includes(marker)) return null
   }
 
-  const cwd = agent?.session?.meta?.cwd
+  const cwd = sessionCwd(agent)
   const gates = await projectGates(cwd, config.gatesFile)
   const disabled = gates?.disable ?? []
   const hits = (await resolvePacks(agent, packs, logger))

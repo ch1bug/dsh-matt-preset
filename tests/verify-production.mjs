@@ -13,39 +13,26 @@
  * V2: real matt persona + a git push tool/call → one-shot ⚠ reminder.
  * V3: real minimal persona + enforcer → NO reminder (scope).
  */
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
-import Commands from '@deepseek-ai/dsh-commands'
-import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
-import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
+import { fileURLToPath } from 'node:url'
+import { parse } from 'yaml'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { AgentPreset, RUNTIME, bootHarness, smokePlugins, emitSessionEvent } from './preset-harness.mjs'
 
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? 'C:/Users/lihao/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/config/agent-presets'
 const MATT_COMPOSITION = process.env.MATT_COMPOSITION ?? fileURLToPath(new URL('../agent.cordis.yml', import.meta.url))
-const PLUGIN = fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))
-
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
-/** Extract the persona text: `text: |` block scalar or `text: <inline>`. */
-async function personaText(path) {
+/** Extract the persona prefix: `prefix: |` block scalar or `prefix: <inline>`. */
+async function personaPrefix(path) {
   const lines = (await readFile(path, 'utf8')).split('\n')
-  const start = lines.findIndex(line => line.includes('text:'))
-  if (start < 0) throw new Error(`no text: in ${path}`)
-  const inline = lines[start].match(/^\s*text:\s*(.*)$/)?.[1]
+  const start = lines.findIndex(line => /^\s*prefix:/.test(line))
+  if (start < 0) throw new Error(`no prefix: in ${path}`)
+  const inline = lines[start].match(/^\s*prefix:\s*(.*)$/)?.[1]
   if (inline !== undefined && inline !== '|') return inline
   const out = []
   for (let i = start + 1; i < lines.length; i++) {
@@ -55,40 +42,33 @@ async function personaText(path) {
   return out.join('\n')
 }
 
-const MATT_PERSONA = await personaText(MATT_COMPOSITION)
-const MINIMAL_PERSONA = await personaText(join(SHIPPED, 'minimal', 'agent.cordis.yml'))
+const MATT_PERSONA = await personaPrefix(MATT_COMPOSITION)
+
+// The shipped minimal preset's persona: a `@deepseek-ai/dsh-persona` row
+// inside the runtime's presets/minimal.patch.yml overlay.
+const findPersona = (node) => {
+  if (Array.isArray(node)) {
+    for (const item of node) { const hit = findPersona(item); if (hit !== undefined) return hit }
+    return undefined
+  }
+  if (node === null || typeof node !== 'object') return undefined
+  if (node.id === 'persona' && typeof node.config?.prefix === 'string') return node.config.prefix
+  for (const value of Object.values(node)) {
+    const hit = findPersona(value)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+const minimalPatch = parse(await readFile(join(RUNTIME, 'dsh-web-app', 'presets', 'minimal.patch.yml'), 'utf8'))
+const MINIMAL_PERSONA = findPersona(minimalPatch)
 
 if (!MATT_PERSONA.includes('ask-matt')) bad('precondition: real matt persona carries the ask-matt marker')
 else ok('precondition: real matt persona carries the ask-matt marker', `(${MATT_PERSONA.length} chars)`)
 
-const ctx = new Context()
-ctx.baseUrl = pathToFileURL(SHIPPED).href + '/'
-await ctx.plugin(Loader)
-ctx.loader.builtins.include = Include
-ctx.loader.builtins.group = Group
-await ctx.plugin(LlmRuntime)
-await ctx.plugin(SessionStore)
-await ctx.plugin(SystemPrompt, { persona: '' })
-await ctx.plugin(ToolRuntime)
-await ctx.plugin(Commands)
-await ctx.plugin(SubprocessLocal)
-await ctx.plugin(AgentRegistry)
-await ctx.plugin(AgentLoop, { agents: [] })
-await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
+const ctx = await bootHarness()
 
-const root = await mkdtemp(join(tmpdir(), 'dsh-prod-'))
 const smoke = async (id, persona) => {
-  await mkdir(join(root, id))
-  await writeFile(join(root, id, 'agent.cordis.yml'), [
-    '- id: persona',
-    "  name: '@deepseek-ai/dsh-persona'",
-    '  config:',
-    '    text: |',
-    ...persona.split('\n').map(line => '      ' + line),
-    '- id: workflow-enforcer',
-    `  name: ${PLUGIN}`,
-    '',
-  ].join('\n'))
+  await ctx.plugin(AgentPreset, { id, plugins: smokePlugins(persona) })
   const handle = await ctx.agents.create({
     sessionId: SessionId('prod-' + id),
     meta: { cwd: '/tmp/dsh-prod-cwd' },
@@ -97,7 +77,6 @@ const smoke = async (id, persona) => {
   })
   return handle
 }
-await ctx.plugin(AgentPresets, { default: 'standard', roots: [{ path: root, trust: 'user' }], includeUserRoot: false })
 const signal = new AbortController().signal
 const render = async (agent) => {
   const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
@@ -112,7 +91,7 @@ if (v1.includes('WORKFLOW GATES')) ok('V1. real matt persona → WORKFLOW GATES 
 else bad('V1. baseline with real persona', v1.slice(0, 300))
 
 // V2: real matt persona + git push call → one-shot ⚠ on next assembly.
-await ctx.emit('session/event', mattAgent.session, {
+await emitSessionEvent(ctx, mattAgent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 1, name: 'bash', arguments: JSON.stringify({ command: 'git push --dry-run origin main' }) },
 })

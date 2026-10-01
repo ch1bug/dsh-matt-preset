@@ -8,52 +8,39 @@
  *   - "LANG rust"（lang 基线）：应全程只 1 次（session 一次）；
  *   - "⚠ lang:rust"（lang 触发）：应只在工具调用后的那一轮 1 次。
  */
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import SessionProjectionCache from '@deepseek-ai/dsh-session-projection-cache'
-import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
+import { bootHarness, emitSessionEvent, ensurePresetMountable, parsePlugins, resolveLocalNames, disableRows } from './preset-harness.mjs'
 
 const PRESET_DIR = fileURLToPath(new URL('..', import.meta.url))
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? 'C:/Users/lihao/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/config/agent-presets'
+const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 const root = await mkdtemp(join(tmpdir(), 'lang-count-'))
 const rustDir = join(root, 'rust-proj')
 await mkdir(rustDir, { recursive: true })
 await writeFile(join(rustDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
 
-const ctx = new Context()
-ctx.baseUrl = pathToFileURL(SHIPPED).href + '/'
-await ctx.plugin(Loader)
-ctx.loader.builtins.include = Include
-ctx.loader.builtins.group = Group
-await ctx.plugin(LlmRuntime)
-await ctx.plugin(SessionStore)
-await ctx.plugin(SystemPrompt, { persona: '' })
-await ctx.plugin(ToolRuntime)
-await ctx.plugin(AgentRegistry)
+// Mount the REAL dsh-matt-preset: the repo's agent.cordis.yml body parsed in
+// the entry-list dialect and registered as a preset declaration (#9: the
+// registry no longer scans directory roots). Rows needing the real Host
+// stack (delegation/compaction isolated groups; sandboxPolicy-confined
+// fs/shell tools; jobs) cannot activate in this harness and carry no prompt
+// sections — disable them for this prompt-count test (the new registry
+// refuses presets with unusable rows).
+const HARNESS_DISABLED = ['delegation', 'compaction', 'tool-pwsh', 'tool-fs', 'str-replace-editor', 'tool-jobs']
+const mattPlugins = disableRows(resolveLocalNames(parsePlugins(
+  await readFile(join(PRESET_DIR, 'agent.cordis.yml'), 'utf8'),
+  pathToFileURL(PRESET_DIR).href + '/',
+), PRESET_ROOT), HARNESS_DISABLED)
+const ctx = await bootHarness([{ id: 'dsh-matt-preset', plugins: mattPlugins }])
 await ctx.plugin(SessionProjectionCache)
-await ctx.plugin(AgentLoop, { agents: [] })
-await new Promise(r => setTimeout(r, 300)) // alpha.4: factory 注册是异步的，立即 create 会 NO_FACTORY
-await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
-
-const presetsRoot = join(root, 'presets')
-await mkdir(presetsRoot)
-const { symlink } = await import('node:fs/promises')
-await symlink(PRESET_DIR, join(presetsRoot, 'dsh-matt-preset'), 'junction')
-await ctx.plugin(AgentPresets, { default: 'standard', roots: [{ path: presetsRoot, trust: 'user' }], includeUserRoot: false })
+await ensurePresetMountable(ctx, 'dsh-matt-preset')
 
 const signal = new AbortController().signal
 const count = (text, needle) => text.split(needle).length - 1
@@ -71,7 +58,7 @@ const render = async () => renderPrompt(await ctx.systemPrompt.assemble(assemble
 
 stat('轮1(初始)      ', await render())
 stat('轮2(无调用)    ', await render())
-await ctx.emit('session/event', agent.session, {
+await emitSessionEvent(ctx, agent.session, {
   type: 'tool/call',
   data: { turn: 1, step: 1, name: 'str_replace_editor', arguments: JSON.stringify({ path: join(rustDir, 'src', 'main.rs') }) },
 })
@@ -79,4 +66,3 @@ stat('轮3(.rs调用后) ', await render())
 stat('轮4(无新调用)  ', await render())
 
 await handle.dispose()
-await ctx.stop()

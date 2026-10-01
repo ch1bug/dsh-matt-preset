@@ -13,38 +13,18 @@
  *     subagents…), so a failure is expected — but it must never name the
  *     rows this work added.
  */
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pathToFileURL, fileURLToPath } from 'node:url'
-import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPresets from '@deepseek-ai/dsh-agent-presets'
-import Commands from '@deepseek-ai/dsh-commands'
-import SubprocessLocal from '@deepseek-ai/dsh-subprocess-local'
-import { Storage } from '@deepseek-ai/dsh-storage'
-import * as StorageJsonMod from '@deepseek-ai/dsh-storage-json'
-import * as StorageDomainMod from '@deepseek-ai/dsh-storage-domain'
-import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
-import { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
-import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { bootHarness, parsePlugins, resolveLocalNames } from './preset-harness.mjs'
 
-const StorageJsonPlugin = { name: StorageJsonMod.name, apply: StorageJsonMod.apply, Config: StorageJsonMod.Config, inject: StorageJsonMod.inject }
-const StorageDomainPlugin = { name: StorageDomainMod.name, apply: StorageDomainMod.apply, Config: StorageDomainMod.Config, inject: StorageDomainMod.inject }
-
-// The deployment's shipped preset dir; override with DSH_SHIPPED_PRESETS on other machines.
-const SHIPPED = process.env.DSH_SHIPPED_PRESETS ?? '/home/bh4gxf/.npm-global/lib/node_modules/@deepseek-ai/dsh/config/agent-presets'
 // Repo-relative: tests/verify.mjs -> the repo root, which IS the matt preset directory.
 const MATT_DIR = fileURLToPath(new URL('..', import.meta.url))
-// The root that CONTAINS the repo: discovery scans its subdirectories for presets.
+// The root that CONTAINS the repo: preset-local plugin names resolve under it.
 const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 // Custom preset-owned rows only: a full-matt mount failure must never blame
 // these. Shipped rows (tool-bash, str-replace-editor, …) fail on
@@ -55,37 +35,10 @@ const results = []
 const ok = (name, detail = '') => { results.push(`  ✓ ${name}${detail ? ` — ${detail}` : ''}`) }
 const bad = (name, detail = '') => { results.push(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`) }
 
-const harness = async (roots, dataRoot) => {
-  const ctx = new Context()
-  ctx.baseUrl = pathToFileURL(SHIPPED).href + '/'
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  ctx.loader.builtins.group = Group
-  await ctx.plugin(LlmRuntime)
-  await ctx.plugin(SessionStore)
-  await ctx.plugin(SystemPrompt, { persona: '' })
-  await ctx.plugin(ToolRuntime)
-  await ctx.plugin(Commands)
-  await ctx.plugin(SubprocessLocal)
-  await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentLoop, { agents: [] })
-  // Production resolves the default model route for every created agent; the
-  // handoff child must receive it too (the {{model}} prompt variable reads
-  // agent.options.model). Mirror it with a fake route.
-  await ctx.plugin(AgentDefaultModel, { provider: 'mock', model: 'mock' })
-  await ctx.plugin(AgentPresets, { default: 'standard', roots, includeUserRoot: false })
-  if (dataRoot !== undefined) {
-    // The production web composition's storage/workspace stack, isolated to
-    // a temp data root (mirrors cordis.patch.yml rows: storage, storage-json,
-    // storage-domain, session-persistence-jsonl, workspace).
-    await ctx.plugin(Storage)
-    await ctx.plugin(StorageJsonPlugin, { root: join(dataRoot, 'storages') })
-    await ctx.plugin(StorageDomainPlugin, { backend: 'json' })
-    await ctx.plugin(JsonlSessionPersistence, { root: join(dataRoot, 'sessions') })
-    await ctx.plugin(WorkspaceRegistry)
-  }
-  return ctx
-}
+// `dataRoot` mounts the production storage/workspace stack isolated under a
+// temp dir (mirrors cordis.patch.yml rows: storage, storage-json,
+// storage-domain, session-persistence-jsonl, workspace).
+const harness = (presets, dataRoot) => bootHarness(presets, dataRoot)
 
 const agentOn = async (ctx, id, presetId, cwd) => {
   const handle = await ctx.agents.create({
@@ -101,23 +54,18 @@ const commandNames = (ctx, agent) => ctx.commands.list(agent).map(c => c.name).s
 
 try {
   // ── Track A: smoke preset = the handoff row ──────────────────────────────
-  const root = await mkdtemp(join(tmpdir(), 'dsh-matt-smoke-'))
-  await mkdir(join(root, 'mattsmoke'))
-  await writeFile(join(root, 'mattsmoke', 'agent.cordis.yml'), [
-    '- id: handoff-tool',
-    `  name: ${join(MATT_DIR, 'handoff-tool.mjs')}`,
-    '',
-  ].join('\n'))
+  const smokePlugins = [{ id: 'handoff-tool', name: pathToFileURL(join(MATT_DIR, 'handoff-tool.mjs')).href }]
   const ctxA = await harness([
-    { path: root, trust: 'user' },
+    { id: 'mattsmoke', plugins: smokePlugins },
   ])
   results.push('harness A booted (smoke root)')
 
   try {
-    const key = await ctxA.agentPresets.standingKeyFor('mattsmoke')
-    ok('A. standingKeyFor(mattsmoke) mounts clean', `key=${JSON.stringify(key)}`)
+    const resolved = await ctxA.agentPresets.resolve('mattsmoke')
+    if (resolved.broken === undefined) ok('A. mattsmoke activates clean (registry resolve)')
+    else throw new Error(resolved.broken)
   } catch (error) {
-    bad('A. standingKeyFor(mattsmoke)', String(error?.message ?? error))
+    bad('A. mattsmoke activation', String(error?.message ?? error))
     throw error
   }
 
@@ -135,7 +83,7 @@ try {
   let out
   try {
     out = await ctxA.tools.execute({
-      callId: CallId('verify-handoff-1'),
+      callId: ToolCallId('verify-handoff-1'),
       name: 'handoff_tool',
       arguments: { document: doc, mode: 'fresh' },
       agent: agentA,
@@ -162,7 +110,7 @@ try {
     if (child.options?.model === 'mock') ok('A. handoff child carries the model route', `model=${child.options.model}`)
     else bad('A. handoff child model route', JSON.stringify(child.options))
     await new Promise(r => setTimeout(r, 500))
-    const childEvents = child.session.events
+    const childEvents = child.session.snapshotEvents()
     const firstUser = childEvents.find(ev => ev.type === 'user/message')
     if (firstUser !== undefined) {
       const parts = Array.isArray(firstUser.data?.content) ? firstUser.data.content : []
@@ -188,7 +136,7 @@ try {
   {
     const beforeDef = ctxA.sessions.list().length
     const defOut = await ctxA.tools.execute({
-      callId: CallId('verify-handoff-2'),
+      callId: ToolCallId('verify-handoff-2'),
       name: 'handoff_tool',
       arguments: { document: doc },
       agent: agentA,
@@ -198,7 +146,7 @@ try {
       const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => id !== String(agentA.session.id))
       const child = ctxA.agents.get(childId)
       await new Promise(r => setTimeout(r, 500))
-      const childEvents = child.session.events
+      const childEvents = child.session.snapshotEvents()
       const userMsgs = childEvents.filter(ev => ev.type === 'user/message')
       const inherited = userMsgs.filter(ev => !/Handoff/i.test(JSON.stringify(ev.data?.content ?? '')))
       if (userMsgs.length === 1 && inherited.length === 0) {
@@ -219,9 +167,9 @@ try {
     const idsBeforeP = new Set(ctxA.sessions.list().map(s => String(s.id)))
     const assignedDoc = doc + '\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A3'
     const pOut = await ctxA.tools.execute({
-      callId: CallId('verify-handoff-3'),
+      callId: ToolCallId('verify-handoff-3'),
       name: 'handoff_tool',
-      arguments: { document: assignedDoc },
+      arguments: { document: assignedDoc, skill: 'implement' },
       agent: agentA,
       signal: new AbortController().signal,
     })
@@ -229,45 +177,52 @@ try {
     if (pOut && pOut.isError === false && newIdP !== undefined) {
       const childP = ctxA.agents.get(newIdP)
       await new Promise(r => setTimeout(r, 500))
-      const firstUserP = childP.session.events.find(ev => ev.type === 'user/message')
+      const firstUserP = childP.session.snapshotEvents().find(ev => ev.type === 'user/message')
       const pText = Array.isArray(firstUserP?.data?.content) ? firstUserP.data.content.map(p => p?.text ?? '').join('') : ''
       const idxP = pText.indexOf('交接边界')
       const dualRule = pText.includes('定向交接') && pText.includes('声明开工') && pText.includes('候选交接') && pText.includes('不得自动开工')
       const scoped = pText.includes('仅限定向节所指派的当前票') && pText.includes('TICKET EXIT')
       const markerPassed = pText.includes('## 本会话任务（human 已定向）')
-      if (dualRule && scoped && markerPassed) {
-        ok('A3. boundary carries D35 dual rules + D37 per-hop scope; 定向 marker passes through', JSON.stringify(pText.slice(idxP, idxP + 120)))
+      const skillPinned = pText.includes('/implement')
+      if (dualRule && scoped && markerPassed && skillPinned) {
+        ok('A3. boundary carries D35 dual rules + D37 per-hop scope; 定向 marker passes through; /implement pinned', JSON.stringify(pText.slice(idxP, idxP + 120)))
       } else {
-        bad('A3. D35/D37 boundary', JSON.stringify({ dualRule, scoped, markerPassed, sample: pText.slice(idxP, idxP + 240) }))
+        bad('A3. D35/D37 boundary', JSON.stringify({ dualRule, scoped, markerPassed, skillPinned, sample: pText.slice(idxP, idxP + 240) }))
       }
     } else {
-      bad('A3. D35/D37 boundary', pOut ? `isError=${pOut.isError} newId=${newIdP}` : 'no result')
+      bad('A3. D35/D37 boundary', pOut ? `isError=${pOut.isError} err=${JSON.stringify(pOut.error)?.slice(0, 400)} newId=${newIdP}` : 'no result')
     }
   }
   await handleA.dispose()
 
   // ── Track B: full matt preset — failures must never name my rows ───────
   const ctxB = await harness([
-    { path: SHIPPED, trust: 'system' },
-    { path: PRESET_ROOT, trust: 'user' },
+    { id: 'dsh-matt-preset', plugins: resolveLocalNames(parsePlugins(
+      await readFile(join(MATT_DIR, 'agent.cordis.yml'), 'utf8'),
+      pathToFileURL(MATT_DIR).href + '/',
+    ), PRESET_ROOT) },
   ])
-  results.push('harness B booted (shipped + user roots)')
+  results.push('harness B booted (full matt declaration)')
   const listed = await ctxB.agentPresets.list()
   const matt = listed.find(p => p.id === 'dsh-matt-preset')
-  if (matt && !matt.broken) ok('B. roster lists dsh-matt-preset (not broken, trust ' + matt.trust + ')')
-  else bad('B. roster lists dsh-matt-preset', matt?.broken ?? 'not found')
-  try {
-    await ctxB.agentPresets.standingKeyFor('dsh-matt-preset')
-    // If this ever succeeds, the harness is complete enough — great.
-    ok('B. standingKeyFor(dsh-matt-preset) mounts clean')
-  } catch (error) {
-    const message = String(error?.message ?? error)
-    const blamed = MY_ROWS.filter(row => message.includes(row))
-    if (blamed.length === 0) {
-      ok('B. full-matt failure names only harness-missing host services', `rows blamed: none of ${MY_ROWS.join('/')}`)
+  if (!matt) bad('B. roster lists dsh-matt-preset', 'not found')
+  else if (matt.broken === undefined) ok('B. roster lists dsh-matt-preset (activates clean)')
+  else if (matt.broken.split('\n').every(l => /: waiting for /.test(l))) ok('B. roster lists dsh-matt-preset', `harness-missing services only: ${matt.broken.split('\n')[0]}…`)
+  else bad('B. roster lists dsh-matt-preset', matt.broken)
+  {
+    const resolved = await ctxB.agentPresets.resolve('dsh-matt-preset')
+    if (resolved.broken === undefined) {
+      // If this ever succeeds, the harness is complete enough — great.
+      ok('B. dsh-matt-preset activates clean in harness')
     } else {
-      bad('B. full-matt failure blames added rows', blamed.join(', '))
-      bad('B. full message', message.slice(0, 800))
+      const message = resolved.broken
+      const blamed = MY_ROWS.filter(row => message.includes(row))
+      if (blamed.length === 0) {
+        ok('B. full-matt failure names only harness-missing host services', `rows blamed: none of ${MY_ROWS.join('/')}`)
+      } else {
+        bad('B. full-matt failure blames added rows', blamed.join(', '))
+        bad('B. full message', message.slice(0, 800))
+      }
     }
   }
 
@@ -277,15 +232,9 @@ try {
   // itself. Boot the production storage/workspace stack over a temp root
   // and assert the workspace's sessionIds account gains the child.
   const rootD = await mkdtemp(join(tmpdir(), 'dsh-matt-ws-'))
-  await mkdir(join(rootD, 'preset'))
-  await writeFile(join(rootD, 'preset', 'agent.cordis.yml'), [
-    '- id: handoff-tool',
-    `  name: ${join(MATT_DIR, 'handoff-tool.mjs')}`,
-    '',
-  ].join('\n'))
   const wsDir = join(rootD, 'workdir')
   await mkdir(wsDir)
-  const ctxD = await harness([{ path: rootD, trust: 'user' }], join(rootD, 'data'))
+  const ctxD = await harness([{ id: 'preset', plugins: [{ id: 'handoff-tool', name: pathToFileURL(join(MATT_DIR, 'handoff-tool.mjs')).href }] }], join(rootD, 'data'))
   results.push('harness D booted (workspace stack)')
 
   const workspace = await ctxD.workspaceRegistry.create(wsDir)
@@ -296,7 +245,7 @@ try {
   // handoff_tool child attaches
   const beforeHD = ctxD.workspaceRegistry.list()[0].sessionIds.length
   const handoffOut = await ctxD.tools.execute({
-    callId: CallId('verify-ws-handoff'),
+    callId: ToolCallId('verify-ws-handoff'),
     name: 'handoff_tool',
     arguments: { document: '# Handoff\n\nDummy.\n\n## suggested skills\n- tdd', mode: 'fork' },
     agent: agentD,

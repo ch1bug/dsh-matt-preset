@@ -31,7 +31,9 @@ triggers:              # 正则匹配序列化 tool/call；每次匹配只注入
   —— 排在 workflow:gates（95）之后，知识从属于流程。
 - **作用域**：与 workflow-enforcer 相同的 marker 守卫（默认 `ask-matt`），
   minimal/code 会话不受影响。
-- **检测**：`detect` 文件在 `session.meta.cwd` 下命中即缓存（正结果缓存，
+- **检测**：`detect` 文件在 agent 工作目录（0.1.7-rc+ 运行时为
+  `session.header.cwd`，旧运行时 `session.meta.cwd`，插件两者兼容）下命中即缓存
+  （正结果缓存，
   负结果每轮重查——项目中途新增 Cargo.toml 也能被捕获）。
 - **触发**：`session/event` 的 `tool/call` 记最近一次调用，下一次 assemble 消费
   （匹配与否都消费——同 workflow-enforcer 语义，绝不为同一次调用重复注入）。
