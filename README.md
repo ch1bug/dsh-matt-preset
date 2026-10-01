@@ -88,6 +88,7 @@ dsh-matt-preset/
 ├── handoff-tool.mjs              # 交接工具（fork/fresh 子会话 + 环境快照段）
 ├── workflow-enforcer.mjs         # WORKFLOW GATES 提醒注入
 ├── workflow-gates.yml.example    # 项目级高危清单模板
+├── scripts/                      # sync-skills（上游技能镜像同步：sh + ps1 双实现，#1）
 ├── sandcastle/                   # 沙箱批跑（opt-in）：模板 + 接入文档
 │   ├── README.md
 │   └── templates/                # Dockerfile / dsh.ts adapter / audit-ticket / run-ticket / night-run / lib / worker-context
