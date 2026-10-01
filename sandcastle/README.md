@@ -96,6 +96,9 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - checkpoint 记 `modelRoute`（cli/lane/default + note）；night-run 队列项可带 `"model"` 透传
 - **白天批（非沙箱）**：batch-state.md 成员行标 lane；批内 handoff 定向节写明"本票跑 X 模型"
   （规避 handoff 子会话模型固化为部署默认的限制）；批末总结回收 lane 判断准确率（retro 素材）
+  - batch-state 成员行示例：`- #503 T2：implement 分片（lane B，zai-coding-cn/glm-5.3-flash）`
+  - handoff 定向节示例（正文内加一行）：`本票模型：zai-coding-cn/glm-5.3-flash（lane B）——子会话起手把模型选择器对齐到此`
+  - 批末回收示例：digest/总结加一列 `lane 预判 vs 实际`（A 预判跑成常规难度 → 下次降 B）
 
 ## 已知边界（Windows 宿主实测）
 
