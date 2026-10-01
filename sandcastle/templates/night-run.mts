@@ -35,22 +35,49 @@ export interface Wave {
   serialGroups: string[][];
 }
 
+/** T1 扫描报告的固定文件名：显式消费，不混入通用扫描。 */
+const TOUCH_OVERLAP_FILE = "touch-overlap.json";
+
+/**
+ * 跨报告按票号合并 serial 组（union-find）：同一票出现在多份报告的多个组时，
+ * 这些组传递合并为一个——否则 planWaves 的 groupOf 取首命中会漏掉其余组的
+ * 串行约束。返回合并后的组（每组 >1 成员，保持首次出现顺序）。
+ */
+export function mergeSerialGroups(groups: string[][]): string[][] {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    // 路径压缩
+    let c = x;
+    while (parent.get(c) !== c) { const n = parent.get(c)!; parent.set(c, r); c = n; }
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    for (const x of [a, b]) if (!parent.has(x)) parent.set(x, x);
+    parent.set(find(a), find(b));
+  };
+  for (const g of groups) for (let i = 1; i < g.length; i++) union(g[0], g[i]);
+  const byRoot = new Map<string, string[]>();
+  for (const id of parent.keys()) {
+    const root = find(id);
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root)!.push(id);
+  }
+  return [...byRoot.values()].filter((g) => g.length > 1);
+}
+
 /**
  * 消费 T1 audit-ticket.mts --touch-overlap 写出的 .sandcastle/audits/*.json，
  * 提取 `serial: true` 分组（写域重叠 → 必须串行或合并）。
  * 目录缺失 / 无 serial 标记 / 单文件解析失败 → 宽容跳过，返回已收集的组。
+ * touch-overlap.json 被显式排除在通用扫描外并专门消费（不依赖文件遍历顺序
+ * 的巧合）；跨报告的重叠组经 mergeSerialGroups 合并去重。
  */
 export function loadSerialGroups(auditsDir: string): string[][] {
   if (!existsSync(auditsDir)) return [];
   const groups: string[][] = [];
-  for (const f of readdirSync(auditsDir)) {
-    if (!f.endsWith(".json")) continue;
-    let obj: any;
-    try {
-      obj = JSON.parse(readFileSync(`${auditsDir}/${f}`, "utf8"));
-    } catch {
-      continue; // 单个坏文件不拖垮整轮
-    }
+  const collect = (obj: any): void => {
     // 形态一：单票审计带 serial 标记，group/tickets 列出同组成员
     if (obj?.serial === true) {
       const members = (Array.isArray(obj.group) ? obj.group : Array.isArray(obj.tickets) ? obj.tickets : [obj.issue])
@@ -65,8 +92,25 @@ export function loadSerialGroups(auditsDir: string): string[][] {
         }
       }
     }
+  };
+  for (const f of readdirSync(auditsDir)) {
+    if (!f.endsWith(".json") || f === TOUCH_OVERLAP_FILE) continue;
+    try {
+      collect(JSON.parse(readFileSync(`${auditsDir}/${f}`, "utf8")));
+    } catch {
+      continue; // 单个坏文件不拖垮整轮
+    }
   }
-  return groups;
+  // 显式专门消费 T1 扫描报告（语义同通用扫描，但身份明确、只读一次）
+  const scanPath = `${auditsDir}/${TOUCH_OVERLAP_FILE}`;
+  if (existsSync(scanPath)) {
+    try {
+      collect(JSON.parse(readFileSync(scanPath, "utf8")));
+    } catch {
+      // 坏报告同样宽容跳过
+    }
+  }
+  return mergeSerialGroups(groups);
 }
 
 /**
@@ -75,7 +119,8 @@ export function loadSerialGroups(auditsDir: string): string[][] {
  */
 export function planWaves(merged: string[], serialGroups: string[][]): Wave[] {
   const inMerged = new Set(merged);
-  // issue → 所属 serial 组（取第一个命中的组即可：重叠即同波，组间不重复分配）
+  // issue → 所属 serial 组（loadSerialGroups 已跨报告 union-find 合并去重，
+  // 同一票只会命中一个组——首命中即全部约束）
   const groupOf = new Map<string, string[]>();
   for (const g of serialGroups) {
     for (const m of g) if (inMerged.has(m) && !groupOf.has(m)) groupOf.set(m, g);
