@@ -54,3 +54,22 @@ human 观察 IRIS backlog：大量 `ready-for-agent` 票是机械票（#588 截�
 - **配额熔断**：provider 配额/认证错误 = 停止信号（persist 队列，exit 2），非重试信号。
 - **清晨 digest**：`.sandcastle/digest/<stamp>.md` 逐票状态 + 抽查/收口提醒。
 - **进程级崩溃隔离**：night-run 逐票 spawn run-ticket 子进程，单票崩不伤队列。
+
+## Amendment（2026-10-01）：三块机械支撑落地（原"文档有、代码无"差距关闭）
+
+本 ADR 盘点时列为差距的三块机制已在 `sandcastle/templates/` 落地（issue #11，
+spec: `.scratch/spec-sandcastle-mechanics.md`）：
+
+- **跨票 touch-set 重叠扫描**（audit-ticket.mts `--touch-overlap`）：审计记录落盘
+  `touchSet` 数组；扫描读全部 `.sandcastle/audits/*.json`，写域有交集（精确相等或
+  目录前缀）的票 union-find 归并为 `serial: true` 分组，写
+  `.sandcastle/audits/touch-overlap.json` 供 night-run 消费。exit 语义与单票审计一致
+  （0=成功含建议输出，1=信息不足硬失败）。
+- **night-run 波次合并提示**（night-run.mts）：digest 末尾附 merged 票 3–5 票一波的
+  分组建议（模板只给分组与提示文本，真执行归编排者）；软消费 serial 组——重叠票
+  强制同波、波内 rebase onto master 串行（组大小可溢出 5），无 serial 标记按默认
+  贪心分组。
+- **大 diff simplify 门**（run-ticket.mts 合并门前）：diff 行数严格大于阈值
+  （默认 800，`--simplify-threshold` 可配）→ 输出 simplify 提醒并把该票 checkpoint
+  为 `needs-simplify`（exit 7，分支保留）；`--no-simplify` 显式豁免。night-run 侧
+  exit 7 → status 的映射登记随后补齐。

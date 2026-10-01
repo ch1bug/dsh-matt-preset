@@ -25,13 +25,24 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 ```bash
 # ① 票据审计（机械预检：标签/AC 关键词/验证命令/touch-set/禁区词）
 npx tsx .sandcastle/audit-ticket.mts --issue 449          # exit 0=launch 2=demote 1=rework
+#   → 审计记录落盘 touchSet 数组（跨票重叠扫描的数据源）
 #   → 编排者（主会话）在 .sandcastle/audits/449.json 补写 orchestratorNote 判词
+#   → 跨票扫描：npx tsx .sandcastle/audit-ticket.mts --touch-overlap
+#     读全部 audits 的 touchSet（精确相等或目录前缀都算交集），union-find 归并
+#     重叠票 → 写 .sandcastle/audits/touch-overlap.json（serial:true 分组建议，
+#     night-run 波次分组消费）；exit 0=扫描成功（含建议输出） 1=信息不足（缺记录/
+#     缺 touchSet/JSON 损坏 → 回炉重审）
 
 # ② 发射（--yolo 校验审计记录；缺判词拒发）
 npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:dsh
 
 # ③ 合并门（编排者执行，不信 worker 自述）——在同一个沙箱里 exec 审计点名的验证命令
-#    绿 → 波次串行合并（rebase onto master，3–5 票一波）；红 → 同沙箱返工一次或 Bucket A
+#    绿 → 先过大 diff simplify 门（已落地：diff 行数 > 阈值默认 800，可配
+#    --simplify-threshold；超限 → exit 7 + checkpoint 为 needs-simplify，分支保留，
+#    simplify pass 后重跑或 --no-simplify 显式豁免）→ 波次串行合并
+#    （rebase onto master，3–5 票一波；serial 组强制同波、波内串行——分组建议由
+#    night-run digest 的波次提示段给出，写域重叠票也可并入或直接合并）；红 → 同沙箱
+#    返工一次或 Bucket A
 # ③.5 收口审计：对每票跑 `ticket-audit` 技能（对抗式清单：AC 覆盖/测试真实性/
 #    验证重放/skip 主张核查/touch-set 合规/禁区/诚实性——阶梯豁免）
 
@@ -56,6 +67,11 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 
 - **检查点**：每票完成写 `.sandcastle/state/<id>.json`（status/commits/verify/log），
   merged/pr 的票重跑自动跳过——崩溃从断点继续，不从头再来
+- **波次合并提示**（已落地）：digest 末尾附 merged 票的 3–5 票一波分组建议（纯提示，
+  真执行归编排者）；消费 `audit-ticket --touch-overlap` 写出的 serial 组——重叠票强制
+  拉进同一波并在波内串行（组大小可溢出 5），无 serial 标记则按默认贪心分组
+- **needs-simplify**：run-ticket exit 7（diff 超阈值 parked 为 needs-simplify，
+  分支保留）——night-run 侧的 exit→status 映射登记随后续补齐
 - **看门狗**：`--max-minutes` 每票墙钟上限（AbortSignal），超时 = parked-timeout
 - **配额熔断**：provider 配额/认证错误 = 停止信号，持久化队列退出（exit 2），明晚续跑
 - gitignore 建议：`.sandcastle/state/`、`.sandcastle/digest/`、`.sandcastle/audits/`
