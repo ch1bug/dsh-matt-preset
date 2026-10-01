@@ -134,3 +134,5 @@
 
 - ✅ lang-enforcer.mjs + lang-packs/rust.yml 已实现并挂载（D36，工作流零改动）；tests/verify-lang-enforcer.mjs 冒烟通过（V1 基线/V2 触发/V3 消费型/V4 lang-gates disable/V5 非 matt 会话不注入）。
 - ✅ 两机合并落地（2026-08-31，Windows 机）：合并旧机攒批线 13 笔（D31–D35/ADR 0002/enforcer 白名单与 AUTO-HANDOFF 检测/persona 批改队列）+ Windows 本地线（D36 lang-enforcer、job-sync-skills 因 WSL 路径禁用并立票 #1、verify-production Windows 路径、install.sh 执行位修复）；handoff 边界 = D35 双规则 + D37 逐跳限定句，`preauthorized` 参数按方案 c 删除；CONTEXT.md 本地 D31/D32 重编号为 D36/D37（远端 D31/D32=攒批线保留）；verify 套件全绿。
+
+- **技能镜像同步**（2026-10-01，#1）：上游 clone 在 C:/Work/code/skills；同步用 scripts/sync-skills.sh（msys）或 sync-skills.ps1——适配层（GLOSSARY 家族→CONTEXT 家族 + implement-spec 剔除）内建于脚本；fork 保护清单 scripts/sync-skills.exclude。镜像目标 ~/.dsh/skills
