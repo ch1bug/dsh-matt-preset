@@ -62,11 +62,22 @@ export function judgeSimplify(
   return { ...base, needsSimplify: false, message: `simplify 门通过：diff ${diffLines} 行 ≤ 阈值 ${threshold}。` };
 }
 
-/** 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。 */
-function countDiffLines(branch: string): number {
-  const r = spawnSync("git", ["diff", `HEAD...${branch}`], { encoding: "utf8" });
-  if (r.status !== 0) return 0; // 统计失败不阻断主流程（缺 merge-base 等场景）
-  return r.stdout.split("\n").length;
+/** diff 统计结果：statFailed=true 表示 git diff 统计失败（#12：告警+记录，不阻断）。 */
+export interface DiffStat {
+  diffLines: number;
+  statFailed: boolean;
+}
+
+/**
+ * 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。
+ * 统计失败（非 0 退出，如缺 merge-base）→ statFailed=true + diffLines=0：
+ * 调用方负责 console.error 告警并在 checkpoint 记 simplifyStatFailed，不阻断合并门。
+ * `git` 参数可注入 mock 命令（冒烟测试用失败的 node 自身模拟）。
+ */
+export function countDiffLines(branch: string, git: string = "git"): DiffStat {
+  const r = spawnSync(git, ["diff", `HEAD...${branch}`], { encoding: "utf8" });
+  if (r.status !== 0 || r.error) return { diffLines: 0, statFailed: true };
+  return { diffLines: r.stdout.split("\n").length, statFailed: false };
 }
 
 function arg(name: string): string | undefined {
@@ -235,10 +246,18 @@ if (verify && verify.exitCode !== 0) {
 }
 
 // —— 大 diff simplify 门（合并门前）：超阈值 → 提醒 + needs-simplify 检查点 ——
-const simplifyDecision = judgeSimplify(countDiffLines(branch), {
+// 统计失败（#12 拍板选 a）：显式告警 + checkpoint 记 simplifyStatFailed:true，放行不阻断。
+const diffStat = countDiffLines(branch);
+const simplifyDecision = judgeSimplify(diffStat.diffLines, {
   threshold: Number(arg("simplify-threshold") ?? 800),
   noSimplify: flag("no-simplify"),
 });
+if (diffStat.statFailed) {
+  console.error(
+    `\nWARNING: countDiffLines 统计失败（git diff HEAD...${branch} 非 0）。` +
+      `simplify 门放行，本票将记录 simplifyStatFailed:true（见 checkpoint），人工可复核。`,
+  );
+}
 console.log(`\n${simplifyDecision.message}`);
 if (simplifyDecision.needsSimplify) {
   checkpoint("needs-simplify", { simplify: simplifyDecision });
@@ -269,7 +288,7 @@ if (pr) {
   }
 }
 
-const rec = checkpoint(pr ? "pr" : "merged", { prUrl });
+const rec = checkpoint(pr ? "pr" : "merged", { prUrl, ...(diffStat.statFailed ? { simplifyStatFailed: true } : {}) });
 console.log(
   "\n=== RunResult ===\n" +
     JSON.stringify({ status: rec.status, branch, commits: rec.commits, prUrl, logFilePath: rec.logFilePath }, null, 2),
