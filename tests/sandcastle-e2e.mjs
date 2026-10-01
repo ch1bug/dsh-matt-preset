@@ -229,9 +229,9 @@ for (const n of [101, 102, 103]) {
   const nightRunUrl = pathToFileURL(join(TPL, "night-run.mts")).href;
   const smoke = `
 import { judgeSimplify, countDiffLines, EXIT_STATUS } from ${JSON.stringify(runTicketUrl)};
-import { statusForExit } from ${JSON.stringify(nightRunUrl)};
+import { statusForExit, loadSerialGroups, mergeSerialGroups } from ${JSON.stringify(nightRunUrl)};
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 
 // 真 git 仓库：master 上造 >800 行 diff 的分支（cwd = 假仓 W）
 const g = (...a) => spawnSync("git", a, { encoding: "utf8" }).status === 0;
@@ -244,6 +244,15 @@ g("checkout", "-q", "master");
 
 const real = countDiffLines("ticket-big");            // 真 git 统计
 const failed = countDiffLines("ticket-big", "definitely-missing-git-cmd"); // mock 失败
+
+// 跨报告 serial 组去重（#14）：两份报告各含一组、共享票 202 → 传递合并为一组
+mkdirSync("audits2", { recursive: true });
+writeFileSync("audits2/r1.json", JSON.stringify({ groups: [{ serial: true, tickets: [201, 202] }] }));
+writeFileSync("audits2/r2.json", JSON.stringify({ groups: [{ serial: true, tickets: [202, 203] }] }));
+writeFileSync("audits2/touch-overlap.json", JSON.stringify({ serial: false, groups: [], singletons: [] }));
+const dedupeLoaded = loadSerialGroups("audits2");
+const dedupeMerged = mergeSerialGroups([[201, 202], [202, 203]]);
+
 const out = {
   exitNeedsSimplify: EXIT_STATUS.NEEDS_SIMPLIFY,
   statusForExit7: statusForExit(7),
@@ -251,7 +260,7 @@ const out = {
   atThreshold: judgeSimplify(800),
   noSimplify: judgeSimplify(801, { noSimplify: true }),
   customThreshold: judgeSimplify(201, { threshold: 200 }),
-  real, failed,
+  real, failed, dedupeLoaded, dedupeMerged,
 };
 writeFileSync("smoke.json", JSON.stringify(out), "utf8");
 `;
@@ -273,6 +282,15 @@ writeFileSync("smoke.json", JSON.stringify(out), "utf8");
   check(
     "countDiffLines mock git 失败 → statFailed=true（#12 告警+记录路径的判定面）",
     s?.failed?.statFailed === true && s?.failed?.diffLines === 0,
+  );
+  const asSet = (g) => [...new Set(g)].sort().join(",");
+  check(
+    "loadSerialGroups 跨报告传递合并（#14）：r1[201,202]+r2[202,203] → 一组 [201,202,203]",
+    Array.isArray(s?.dedupeLoaded) && s.dedupeLoaded.length === 1 && asSet(s.dedupeLoaded[0]) === "201,202,203",
+  );
+  check(
+    "mergeSerialGroups 纯函数同口径（#14）",
+    Array.isArray(s?.dedupeMerged) && s.dedupeMerged.length === 1 && asSet(s.dedupeMerged[0]) === "201,202,203",
   );
 }
 
