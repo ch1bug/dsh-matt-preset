@@ -22,7 +22,8 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { arg, isMain } from "./lib.ts";
+import { EXIT_STATUS } from "./run-ticket.mts";
 
 // ============================================================
 // 波次合并提示（纯函数，供冒烟测试直接导入）
@@ -78,13 +79,8 @@ export function loadSerialGroups(auditsDir: string): string[][] {
   if (!existsSync(auditsDir)) return [];
   const groups: string[][] = [];
   const collect = (obj: any): void => {
-    // 形态一：单票审计带 serial 标记，group/tickets 列出同组成员
-    if (obj?.serial === true) {
-      const members = (Array.isArray(obj.group) ? obj.group : Array.isArray(obj.tickets) ? obj.tickets : [obj.issue])
-        .filter((m: unknown) => m !== undefined && m !== null).map(String);
-      if (members.length > 1) groups.push(members);
-    }
-    // 形态二：一份扫描报告含 groups 数组
+    // 一份扫描报告含 groups 数组（audit-ticket --touch-overlap 的形态；
+    // 单票审计记录自带的 serial 标记是已删的死分支——无生产者）
     if (Array.isArray(obj?.groups)) {
       for (const g of obj.groups) {
         if (g?.serial === true && Array.isArray(g.tickets) && g.tickets.length > 1) {
@@ -171,15 +167,15 @@ export function renderWaveHints(waves: Wave[]): string {
   return lines.join("\n");
 }
 
-/** run-ticket.mts 退出码 → 状态（7=needs-simplify，T3 大 diff simplify 门）。 */
+/** run-ticket.mts 退出码 → 状态（消费 run-ticket 导出的 EXIT_STATUS，单一事实源）。 */
 export function statusForExit(code: number | null): string {
   const map: Record<number, string> = {
-    0: "merged",
-    3: "parked-verify",
-    4: "parked-conflict",
-    5: "parked-timeout",
-    6: "parked-empty",
-    7: "needs-simplify",
+    [EXIT_STATUS.MERGED]: "merged",
+    [EXIT_STATUS.VERIFY_FAILED]: "parked-verify",
+    [EXIT_STATUS.CONFLICT]: "parked-conflict",
+    [EXIT_STATUS.TIMEOUT]: "parked-timeout",
+    [EXIT_STATUS.EMPTY]: "parked-empty",
+    [EXIT_STATUS.NEEDS_SIMPLIFY]: "needs-simplify",
   };
   return map[code ?? 1] ?? `failed(${code})`;
 }
@@ -201,10 +197,6 @@ export function skipReason(prevStatus: string): string | undefined {
 // ============================================================
 // CLI 主体整体包在 main()：冒烟测试 import 纯函数时不读队列、不 spawn、不退出。
 function main(): void {
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
 const queueFile = arg("queue") ?? ".sandcastle/night-queue.json";
 const image = arg("image");
 if (!image) throw new Error("提供 --image localhost/<repo>:dsh");
@@ -291,5 +283,5 @@ console.log(`\n${digest}\n\ndigest → ${digestPath}`);
 process.exit(stopped ? 2 : 0);
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMain) main();
+const isEntryPoint = isMain(import.meta.url);
+if (isEntryPoint) main();

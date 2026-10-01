@@ -10,7 +10,7 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 
 ## 项目接入（一次性）
 
-1. 把 `templates/` 四件套拷进项目 `.sandcastle/`（Dockerfile / dsh.ts / audit-ticket.mts / run-ticket.mts）
+1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / dsh.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——lib.ts 与模板同目录、相对导入 `./lib.ts`，别漏拷）
 2. `npm i -D @ai-hero/sandcastle@0.12.0 tsx` —— **钉版本**（0.x API 周级变动）
 3. 构建镜像：`podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle`
    （Rust 项目把 Dockerfile 里 rustup 注释段打开）
