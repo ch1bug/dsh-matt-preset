@@ -126,6 +126,31 @@ export function renderWaveHints(waves: Wave[]): string {
   return lines.join("\n");
 }
 
+/** run-ticket.mts 退出码 → 状态（7=needs-simplify，T3 大 diff simplify 门）。 */
+export function statusForExit(code: number | null): string {
+  const map: Record<number, string> = {
+    0: "merged",
+    3: "parked-verify",
+    4: "parked-conflict",
+    5: "parked-timeout",
+    6: "parked-empty",
+    7: "needs-simplify",
+  };
+  return map[code ?? 1] ?? `failed(${code})`;
+}
+
+/**
+ * 幂等跳过判定：上次状态已是终态或待人工处理态 → 返回跳过说明；否则
+ * undefined（重发射）。needs-simplify 与 parked 同等对待（待简化/返工后
+ * 由人工或编排者清检查点重跑，夜间队列不盲目重发射）。
+ */
+export function skipReason(prevStatus: string): string | undefined {
+  if (prevStatus === "merged" || prevStatus === "pr") return "checkpoint 已收口，跳过";
+  if (prevStatus === "parked-verify" || prevStatus === "parked-conflict") return "上次已 park（未返工），跳过";
+  if (prevStatus === "needs-simplify") return "上次已 needs-simplify（待简化），跳过";
+  return undefined;
+}
+
 // ============================================================
 // CLI 主体（被直接执行时才跑；导入做冒烟测试时不触发）
 // ============================================================
@@ -159,12 +184,9 @@ for (const t of tickets) {
   // 幂等：检查点显示已收口 → 跳过（崩溃/中断后重跑即续命）
   if (existsSync(stateFile)) {
     const prev = JSON.parse(readFileSync(stateFile, "utf8"));
-    if (prev.status === "merged" || prev.status === "pr") {
-      results.push({ id: String(issue), status: prev.status, note: "checkpoint 已收口，跳过" });
-      continue;
-    }
-    if (prev.status === "parked-verify" || prev.status === "parked-conflict") {
-      results.push({ id: String(issue), status: prev.status, note: "上次已 park（未返工），跳过" });
+    const reason = skipReason(prev.status);
+    if (reason) {
+      results.push({ id: String(issue), status: prev.status, note: reason });
       continue;
     }
   }
@@ -191,8 +213,7 @@ for (const t of tickets) {
     stopped = true;
     break;
   }
-  const map: Record<number, string> = { 0: "merged", 3: "parked-verify", 4: "parked-conflict", 5: "parked-timeout", 6: "parked-empty" };
-  const status = map[child.status ?? 1] ?? `failed(${child.status})`;
+  const status = statusForExit(child.status ?? 1);
   results.push({ id: String(issue), status, note: output.slice(-300) });
 }
 
