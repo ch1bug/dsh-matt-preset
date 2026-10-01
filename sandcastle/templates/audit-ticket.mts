@@ -175,6 +175,33 @@ add(
 const touch = /文件[：:]\s*(.+)|touch-?set[：:]\s*(.+)|files?[：:]\s*(.+)/i.exec(text);
 const touchSet = parseTouchSet(touch ? (touch[1] ?? touch[2] ?? touch[3]) : undefined);
 add("touch-set: 声明了预期改动文件集", touchSet.length > 0, touchSet.join(", ") || "正文未声明文件集");
+
+// ── 模型车道（model-lane，#16）：机械提示 + 编排者 --lane 覆盖 ──────────
+// A=顶配（决策/架构/资金/治理语义）B=常规（默认）C=低配（docs-only/机械改）。
+// 机械判据只是提示；A 档最终由编排者 --lane A 拍板（record.source 记录来源）。
+const laneArg = arg("lane");
+if (laneArg && !["A", "B", "C"].includes(laneArg)) throw new Error("--lane 只接受 A|B|C");
+const docsOnly =
+  touchSet.length > 0 && touchSet.every((p) => /^(\.{0,2}\/)?docs\//.test(p) || p.endsWith(".md"));
+const heavy =
+  /决策|架构|architecture|\bADR\b|money|balance|ledger|治理|governance|迁移|migration/i
+    .test(`${title}\n${text}`);
+let suggested = "B";
+let laneReason = "常规 implement 票（默认车道 B）";
+if (docsOnly) {
+  suggested = "C";
+  laneReason = `touch-set 全为文档（${touchSet.join(", ")}）→ 机械降档 C`;
+} else if (heavy) {
+  suggested = "A";
+  laneReason = "标题/正文命中决策/架构/资金/治理语义 → 机械提示升档 A（编排者可 --lane 覆盖）";
+}
+const modelLane = {
+  lane: laneArg ?? suggested,
+  suggested,
+  source: laneArg ? ("orchestrator" as const) : ("mechanical" as const),
+  reason: laneReason,
+};
+
 const hits = forbidden.filter(f => lower.includes(f.toLowerCase()));
 add(
   `禁区扫描: [${forbidden.join(", ")}]`,
@@ -192,6 +219,7 @@ const record = {
   title,
   verdict,
   touchSet, // --touch-overlap 跨票扫描的数据源
+  modelLane, // run-ticket 据此路由 worker 模型（.sandcastle/model-lanes.json 映射）
   checks,
   auditedAt: new Date().toISOString(),
   // 编排者判词（机械检查通过 ≠ 票据合格）——由主会话补写后 run-ticket 才接受
@@ -200,6 +228,7 @@ const record = {
 writeFileSync(join(AUDIT_DIR, `${issue}.json`), JSON.stringify(record, null, 2), "utf8");
 
 for (const c of checks) console.log(`${c.pass ? "✓" : "✗"} ${c.check} — ${c.note}`);
+console.log(`model-lane: ${modelLane.lane}（${modelLane.source}）— ${laneReason}`);
 console.log(`\nverdict: ${verdict.toUpperCase()}  →  ${join(AUDIT_DIR, `${issue}.json`)}`);
 if (verdict === "launch")
   console.log("下一步：编排者补写 orchestratorNote 判词，然后 run-ticket.mts --yolo --audit 才会发射。");

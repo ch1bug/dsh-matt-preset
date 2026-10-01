@@ -7,7 +7,8 @@
  *     --queue .sandcastle/night-queue.json
  *
  * 队列格式（.sandcastle/night-queue.json，由编排会话或人工维护）：
- *   { "tickets": [449, 452, { "issue": 455, "verify": "cargo test -p iris-agent --lib" }] }
+ *   { "tickets": [449, 452, { "issue": 455, "verify": "cargo test -p iris-agent --lib", "model": "p/mini" }] }
+ *   （ticket 对象的 model 可选：透传 run-ticket --model；缺省按审计 modelLane 路由）
  *
  * 行为：
  *   - 逐票 spawn run-ticket.mts（进程级崩溃隔离，单票崩不伤队列）
@@ -204,7 +205,7 @@ const verify = arg("verify");
 const maxMinutes = arg("max-minutes") ?? "60";
 
 const queue = JSON.parse(readFileSync(queueFile, "utf8"));
-const tickets: (number | { issue: number; verify?: string; branch?: string })[] = queue.tickets;
+const tickets: (number | { issue: number; verify?: string; branch?: string; model?: string })[] = queue.tickets;
 const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 const digestPath = `.sandcastle/digest/night-${stamp}.md`;
 
@@ -216,6 +217,7 @@ for (const t of tickets) {
   const issue = typeof t === "number" ? t : t.issue;
   const tVerify = (typeof t === "object" && t.verify) || verify;
   const tBranch = typeof t === "object" ? t.branch : undefined;
+  const tModel = typeof t === "object" ? t.model : undefined; // #16：显式模型透传
   const stateFile = `.sandcastle/state/${issue}.json`;
 
   // 幂等：检查点显示已收口 → 跳过（崩溃/中断后重跑即续命）
@@ -242,6 +244,7 @@ for (const t of tickets) {
   ];
   if (tVerify) args.push("--verify", tVerify);
   if (tBranch) args.push("--branch", tBranch);
+  if (tModel) args.push("--model", tModel);
   const child = spawnSync("npx", args, { encoding: "utf8", shell: true });
   const output = (child.stdout || "") + "\n" + (child.stderr || "");
 
