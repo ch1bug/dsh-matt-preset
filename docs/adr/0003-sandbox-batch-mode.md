@@ -71,5 +71,5 @@ spec: `.scratch/spec-sandcastle-mechanics.md`）：
   贪心分组。
 - **大 diff simplify 门**（run-ticket.mts 合并门前）：diff 行数严格大于阈值
   （默认 800，`--simplify-threshold` 可配）→ 输出 simplify 提醒并把该票 checkpoint
-  为 `needs-simplify`（exit 7，分支保留）；`--no-simplify` 显式豁免。night-run 侧
-  exit 7 → status 的映射登记随后补齐。
+  为 `needs-simplify`（exit 7，分支保留）；`--no-simplify` 显式豁免。night-run 已登记
+  exit 7 → needs-simplify（statusForExit），幂等跳过与 parked 同等对待（T2b）。
