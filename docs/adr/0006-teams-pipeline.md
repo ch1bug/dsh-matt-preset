@@ -1,8 +1,10 @@
 # ADR-0006: Teams × implement-spec 白天流水线（pilot 实证）
 
-- 状态：草案（pilot 完成，待 human 复核后定稿）
+- 状态：accepted（2026-10-01 定稿，human 拍板；pilot 载体 #11 已关闭）
 - 日期：2026-10-01
-- 关联：issue #11、ADR-0002（批末 push 门）、ADR-0005（/implement-spec 延期）、ADR-0003（sandcastle）
+- 关联：issue #11、ADR-0002（批末 push 门）、ADR-0005（/implement-spec 延期，
+  本 ADR 定稿后其复评触发条件已部分满足，该文已加修订注）、ADR-0003（sandcastle）、
+  后续票 #12–#15（模板质量收敛，不阻塞本 ADR）
 
 ## 背景
 
@@ -59,4 +61,8 @@ Agent Teams（任务板 blocked_by=任务图、2 个 durable teammates、send_me
 ## 后果
 
 - 后续 3–6 票机械系列默认走本流水线；单票/探索票仍走 /implement 单会话。
-- ADR-0005 的"延期"可改判为"被 Teams 形态替代实现"（定稿时一并修订措辞）。
+- ADR-0005 已加修订注：上游 /implement-spec 技能本身仍"暂不采用"（persona 不
+  路由），但其流水线思想由本 ADR 的 Teams 形态承接——复评触发条件部分满足的
+  处置记录在彼文，不再"改判"原文决策。
+- pilot 暴露的模板质量尾巴收敛在 #12–#15（不阻塞流水线复用）；端到端冒场脚本
+  暂存 `.scratch/e2e-sandcastle.sh`（15/15），#15 负责提升进 tests/。
