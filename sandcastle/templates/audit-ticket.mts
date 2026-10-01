@@ -19,11 +19,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
+import { arg } from "./lib.ts";
 
 const AUDIT_DIR = join(".sandcastle", "audits");
 const OVERLAP_REPORT = join(AUDIT_DIR, "touch-overlap.json");

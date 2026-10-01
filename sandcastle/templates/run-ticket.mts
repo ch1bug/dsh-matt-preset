@@ -8,15 +8,31 @@
  *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh \
  *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr]
  *
- * 退出码：0=merged/pr  3=验证未过(parked)  4=合并冲突(parked)  5=超时(parked)
- *         6=worker 无产出(parked)  7=大 diff 待简化(needs-simplify)  1=其他失败
+ * 退出码（EXIT_STATUS 单一事实源——night-run statusForExit 消费本导出，勿另立映射）：
+ *   0=merged/pr  3=验证未过(parked)  4=合并冲突(parked)  5=超时(parked)
+ *   6=worker 无产出(parked)  7=大 diff 待简化(needs-simplify)  1=其他失败
  * 检查点：.sandcastle/state/<id>.json —— night-run 据此幂等续跑，崩溃不丢进度。
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { arg, flag, isMain } from "./lib.ts";
 // 沙箱依赖（@ai-hero/sandcastle、./dsh.ts）在 main() 内动态导入：
 // 本模块的纯函数（judgeSimplify）可在未安装 sandcastle 依赖的环境里被冒烟测试导入。
+
+// ============================================================
+// 退出码语义（单一事实源，night-run.mts statusForExit 消费）
+// ============================================================
+
+/** run-ticket.mts 退出码。新增/改码只动这里 + 头注释，night-run 自动跟随。 */
+export const EXIT_STATUS = {
+  MERGED: 0,
+  OTHER: 1,
+  VERIFY_FAILED: 3,
+  CONFLICT: 4,
+  TIMEOUT: 5,
+  EMPTY: 6,
+  NEEDS_SIMPLIFY: 7,
+} as const;
 
 // ============================================================
 // 大 diff simplify 门（纯函数，供冒烟测试直接导入）
@@ -80,13 +96,6 @@ export function countDiffLines(branch: string, git: string = "git"): DiffStat {
   return { diffLines: r.stdout.split("\n").length, statFailed: false };
 }
 
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
-function flag(name: string): boolean {
-  return process.argv.includes(`--${name}`);
-}
 function runOk(cmd: string[], what: string, cwd?: string): string {
   const r = spawnSync(cmd[0], cmd.slice(1), { encoding: "utf8", cwd });
   if (r.status !== 0) throw new Error(`${what} 失败: ${(r.stderr || r.stdout || "").slice(0, 400)}`);
@@ -200,7 +209,7 @@ try {
 } catch (e: any) {
   const timedOut = /timeout|abort/i.test(String(e?.message ?? e));
   console.error(timedOut ? `PARKED-TIMEOUT (${maxMinutes}min)` : String(e));
-  process.exit(timedOut ? 5 : 1);
+  process.exit(timedOut ? EXIT_STATUS.TIMEOUT : EXIT_STATUS.OTHER);
 }
 
 // —— 验证门：编排者亲自在同一个沙箱里 exec 审计点名的命令（不信 worker 自述）——
@@ -237,12 +246,12 @@ function checkpoint(status: string, extra: Record<string, unknown> = {}) {
 if (worker.commits.length === 0) {
   checkpoint("parked-empty");
   console.error(`\nPARKED-EMPTY: worker 无 commit（dirty=${dirty}）。worktree: ${closeRes.preservedWorktreePath ?? "已清理"}`);
-  process.exit(6);
+  process.exit(EXIT_STATUS.EMPTY);
 }
 if (verify && verify.exitCode !== 0) {
   checkpoint("parked-verify");
   console.error(`\nPARKED-VERIFY: 验证门未过。分支 ${branch} 已保留，返工或人工处理。`);
-  process.exit(3);
+  process.exit(EXIT_STATUS.VERIFY_FAILED);
 }
 
 // —— 大 diff simplify 门（合并门前）：超阈值 → 提醒 + needs-simplify 检查点 ——
@@ -262,7 +271,7 @@ console.log(`\n${simplifyDecision.message}`);
 if (simplifyDecision.needsSimplify) {
   checkpoint("needs-simplify", { simplify: simplifyDecision });
   console.error(`\nNEEDS-SIMPLIFY: 分支 ${branch} 已保留，先做 simplify pass 再重跑（或 --no-simplify 豁免）。`);
-  process.exit(7);
+  process.exit(EXIT_STATUS.NEEDS_SIMPLIFY);
 }
 
 // —— 收口：PR-per-unit（CI 配额宽裕）或本地合并（默认，ADR-0002 分钟经济）——
@@ -284,7 +293,7 @@ if (pr) {
     spawnSync("git", ["merge", "--abort"]);
     checkpoint("parked-conflict");
     console.error(`\nPARKED-CONFLICT: 合并冲突，分支 ${branch} 已保留。返工或手工合并。`);
-    process.exit(4);
+    process.exit(EXIT_STATUS.CONFLICT);
   }
 }
 
@@ -295,5 +304,5 @@ console.log(
 );
 }
 
-const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMain) await main();
+const isEntryPoint = isMain(import.meta.url);
+if (isEntryPoint) await main();
