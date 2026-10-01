@@ -77,6 +77,26 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - **配额熔断**：provider 配额/认证错误 = 停止信号，持久化队列退出（exit 2），明晚续跑
 - gitignore 建议：`.sandcastle/state/`、`.sandcastle/digest/`、`.sandcastle/audits/`
 
+## 模型路由（model-lane，#16）
+
+不是所有票都值得最好的模型。排批/审计时分级，worker 按档路由：
+
+| Lane | 判据（机械提示） | 典型 |
+| --- | --- | --- |
+| **A** 顶配 | 标题/正文命中决策/架构/ADR/money/治理/迁移语义（机械只提示，编排者 `--lane A` 拍板） | 架构改造、money-path |
+| **B** 常规 | 默认 | 一般 implement 票 |
+| **C** 低配 | touch-set 全为 docs/ 或 *.md | docs-only、模板填充 |
+
+- 审计记录 `modelLane: {lane, suggested, source, reason}`（`--lane A|B|C` 覆盖，source 记来源）
+- 映射配置 `.sandcastle/model-lanes.json`（项目自定，缺省不路由）：
+  `{ "A": "zai-coding-cn/glm-5.3", "B": "zai-coding-cn/glm-5.3-flash", "C": "zai-coding-cn/glm-5.3-air" }`
+- 生效机制：run-ticket 解析路由（`--model provider/model` > lane 映射 > 宿主默认），命中后
+  onSandboxReady 钩子在容器内 sed 替换 `~/.dsh/settings.yaml` 的 `agent-default-model:` 块——
+  headless worker 的 `agentDefaultModel` 即改（DSH headless 无 CLI 模型参数，settings 是唯一缝）
+- checkpoint 记 `modelRoute`（cli/lane/default + note）；night-run 队列项可带 `"model"` 透传
+- **白天批（非沙箱）**：batch-state.md 成员行标 lane；批内 handoff 定向节写明"本票跑 X 模型"
+  （规避 handoff 子会话模型固化为部署默认的限制）；批末总结回收 lane 判断准确率（retro 素材）
+
 ## 已知边界（Windows 宿主实测）
 
 - `copyToWorktree` 在宿主侧 spawn `cp`（ENOENT）——不要用；票据文件先 commit 进分支

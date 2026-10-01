@@ -6,7 +6,9 @@
  *
  * 用法：
  *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh \
- *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr]
+ *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr] \
+ *     [--model provider/model]   # #16 显式路由；缺省按审计 modelLane ×
+ *     .sandcastle/model-lanes.json（{"A":"p/top","B":"p/mid","C":"p/mini"}）路由
  *
  * 退出码（EXIT_STATUS 单一事实源——night-run statusForExit 消费本导出，勿另立映射）：
  *   0=merged/pr  3=验证未过(parked)  4=合并冲突(parked)  5=超时(parked)
@@ -84,6 +86,55 @@ export interface DiffStat {
   statFailed: boolean;
 }
 
+// ============================================================
+// 模型路由（#16 model-lane）：CLI --model > 审计 lane 映射 > 宿主默认
+// ============================================================
+
+/** 模型路由决策结果（checkpoint 记录 + 启动日志）。 */
+export interface ModelRouteDecision {
+  route: "cli" | "lane" | "default";
+  model?: string;
+  lane?: string;
+  note: string;
+}
+
+/**
+ * 决策顺序：`--model provider/model` 显式指定优先；否则审计记录的
+ * `modelLane.lane` 查 `.sandcastle/model-lanes.json` 映射（如
+ * `{"A":"x/max","B":"x/pro","C":"x/mini"}`）；都缺 → default（worker
+ * 继承宿主 settings.yaml 的 agent-default-model，即拷入容器的默认）。
+ */
+export function modelRouteDecision(
+  audit: { modelLane?: { lane?: string } } | undefined,
+  cliModel: string | undefined,
+  laneConfig: Record<string, string> | undefined,
+): ModelRouteDecision {
+  if (cliModel) return { route: "cli", model: cliModel, note: `--model 显式指定：${cliModel}` };
+  const lane = audit?.modelLane?.lane;
+  if (lane) {
+    const model = laneConfig?.[lane];
+    if (model) return { route: "lane", model, lane, note: `审计 lane ${lane} → ${model}（.sandcastle/model-lanes.json）` };
+    return { route: "default", lane, note: `审计 lane ${lane} 未在 .sandcastle/model-lanes.json 映射 → worker 继承宿主默认` };
+  }
+  return { route: "default", note: "无 lane 信息（无审计记录或旧版记录）→ worker 继承宿主默认" };
+}
+
+/**
+ * 生成把容器内 ~/.dsh/settings.yaml 的 `agent-default-model:` 块（键 + 两行
+ * provider/model）替换为指定模型的 sed 命令（GNU sed `addr,+2c`，容器内
+ * Linux 可用；宿主 msys 无 GNU sed——该命令只在 onSandboxReady 里跑）。
+ */
+export function patchAgentDefaultModelCmd(model: string): string {
+  const slash = model.indexOf("/");
+  const provider = slash > 0 ? model.slice(0, slash) : model;
+  const modelName = slash > 0 ? model.slice(slash + 1) : "";
+  return (
+    `sed -i '/^agent-default-model:/,+2c\\agent-default-model:\\n` +
+    `  provider: ${provider}\\n  model: ${modelName}' ~/.dsh/settings.yaml`
+  );
+}
+
+
 /**
  * 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。
  * 统计失败（非 0 退出，如缺 merge-base）→ statFailed=true + diffLines=0：
@@ -131,6 +182,23 @@ if (yolo) {
   if (!audit.orchestratorNote)
     throw new Error("--yolo 拒绝发射：审计记录缺编排者判词（orchestratorNote 为空）");
 }
+
+// —— 模型路由（#16）：--model > 审计 modelLane × model-lanes.json > 宿主默认 ——
+const cliModel = arg("model"); // provider/model，如 zai-coding-cn/glm-5.3-flash
+let auditRec: { modelLane?: { lane?: string } } | undefined;
+try {
+  auditRec = JSON.parse(readFileSync(arg("audit") ?? `.sandcastle/audits/${issue}.json`, "utf8"));
+} catch {
+  auditRec = undefined; // 无 --issue 或无审计记录：走宿主默认
+}
+let laneConfig: Record<string, string> | undefined;
+try {
+  laneConfig = JSON.parse(readFileSync(".sandcastle/model-lanes.json", "utf8"));
+} catch {
+  laneConfig = undefined;
+}
+const modelRoute = modelRouteDecision(auditRec, cliModel, laneConfig);
+console.log(`model-route: ${modelRoute.route} — ${modelRoute.note}`);
 
 // —— 组任务：worker 上下文（ponytail 阶梯）→ 票据正文 → 收尾契约 ——
 const DEFAULT_WORKER_CONTEXT = [
@@ -185,8 +253,12 @@ const sandbox = await createSandbox({
     sandbox: {
       onSandboxReady: [
         {
+          // 基础：宿主凭据/settings 拷入容器 DSH_HOME；lane 路由命中时追加
+          // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）
           command:
-            "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml && echo dsh-home-ready",
+            "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml"
+            + (modelRoute.model ? ` && ${patchAgentDefaultModelCmd(modelRoute.model)}` : "")
+            + " && echo dsh-home-ready",
           timeoutMs: 15_000,
         },
       ],
@@ -231,6 +303,7 @@ function checkpoint(status: string, extra: Record<string, unknown> = {}) {
     branch,
     status,
     verify,
+    modelRoute, // #16：本票 worker 实际走的模型路由决策（cli/lane/default）
     dirty,
     commits: worker.commits,
     completionSignal: worker.completionSignal,

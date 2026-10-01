@@ -165,6 +165,35 @@ for (const n of [101, 102, 103]) {
   );
 }
 
+// —— 1.5 模型车道（#16）：机械分级 + 编排者覆盖 + 路由纯函数 ——
+{
+  const b101 = readJ(".sandcastle", "audits", "101.json");
+  const b103 = readJ(".sandcastle", "audits", "103.json");
+  check(
+    "audit modelLane 机械分级：101→B / 103→C(docs-only)，source=mechanical",
+    b101.modelLane?.lane === "B" && b101.modelLane?.source === "mechanical"
+      && b103.modelLane?.lane === "C" && b103.modelLane?.source === "mechanical",
+  );
+  const r = tsx([".sandcastle/audit-ticket.mts", "--issue", "103", "--lane", "A"]);
+  const ovr = readJ(".sandcastle", "audits", "103.json");
+  check(
+    "audit --lane A 覆盖：lane=A / source=orchestrator / suggested 保留 C",
+    r.status === 0 && ovr.modelLane?.lane === "A" && ovr.modelLane?.source === "orchestrator" && ovr.modelLane?.suggested === "C",
+  );
+  const rt = await import(pathToFileURL(join(TPL, "run-ticket.mts")).href);
+  check(
+    "modelRouteDecision：cli > lane 映射 > default",
+    rt.modelRouteDecision(undefined, "p/m", undefined).route === "cli"
+      && rt.modelRouteDecision({ modelLane: { lane: "C" } }, undefined, { C: "p/mini" }).model === "p/mini"
+      && rt.modelRouteDecision({ modelLane: { lane: "A" } }, undefined, undefined).route === "default",
+  );
+  const sed = rt.patchAgentDefaultModelCmd("prov/model-name");
+  check(
+    "patchAgentDefaultModelCmd：替换 agent-default-model 块（provider+model 两行）",
+    sed.includes("/^agent-default-model:/,+2c") && sed.includes("provider: prov") && sed.includes("model: model-name") && sed.includes("settings.yaml"),
+  );
+}
+
 // ============================================================
 // 2. touch-overlap：101/102 重叠（src/b.ts）串行组，103 独立
 // ============================================================
