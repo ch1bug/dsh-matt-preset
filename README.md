@@ -61,15 +61,17 @@ curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install
 ## 验证
 
 ```bash
-# 依赖解析同部署：把测试的 @deepseek-ai 指到 dsh 安装的 node_modules
+# 依赖解析同部署：把测试的 @deepseek-ai 指到已装 dsh 运行时的包表
+# （Windows 用 junction：cmd /c mklink /J tests\node_modules\@deepseek-ai <dsh>\node_modules\@deepseek-ai）
 mkdir -p tests/node_modules
 ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@deepseek-ai" tests/node_modules/@deepseek-ai
+# 0.2.0-rc 起 preset 走声明注册（不再扫目录 roots）；共享挂具 tests/preset-harness.mjs
+# 自动从已装运行时解析 baseUrl，无需环境变量。
 node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + workspace attach
 node tests/verify-persona.mjs      # persona 即系统提示词：{{model}}/{{cwd}} 渲染插值
 node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
-# 其它机器部署路径不同时：
-DSH_SHIPPED_PRESETS=<shipped agent-presets 目录> node tests/verify.mjs
+node tests/verify-lang-count.mjs   # 注入次数计数：GATES 每轮 1 / LANGBASE 会话 1 / LANGTRIGGER 触发 1
 ```
 
 ## 目录
