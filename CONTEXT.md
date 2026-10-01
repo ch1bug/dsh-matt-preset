@@ -33,6 +33,7 @@
 - 宿主组成（base/web.cordis.yml）不可改：任何新能力只能进 preset 层。
 
 - `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。
+- **DSH 测试/升级通道分工（human 指令，2026-10-01）**：日常测试一律用**源代码检出 + 网页端**（`pnpm run dev:web` / 现有 web URL）；**桌面端（安装版）只用于稳定后的版本升级**——开发中的改动不得先行装上桌面端。任何"装新版本试试"的动作先问自己走的是哪条通道。
 ## 决策
 
 - **D1（2026-08-18，访谈 R1）** — 做**通用 job-runner**：配置驱动的定时任务列表，每任务 = 时间表 + shell 命令；技能同步是第一个消费者。
