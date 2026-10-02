@@ -11,7 +11,8 @@
 #   1. GLOSSARY-MAP.md → CONTEXT-MAP.md、GLOSSARY.md → CONTEXT.md（内容替换）
 #   2. GLOSSARY-FORMAT.md → CONTEXT-FORMAT.md（文件名 + 内容替换）
 #   3. implement-spec 不同步（ADR-0005）
-#   4. fork 保护：scripts/sync-skills.exclude 列出的技能名不覆盖；上游有变更时打警告
+#   4. 行尾统一 LF（上游 clone 受 core.autocrlf 影响可能检出 CRLF；现存镜像为 LF）
+#   5. fork 保护：scripts/sync-skills.exclude 列出的技能名不覆盖；上游有变更时打警告
 set -euo pipefail
 
 DRY_RUN=0
@@ -46,10 +47,17 @@ apply_transforms() { # 适配层：GLOSSARY 家族 → CONTEXT 家族（内容 +
            -e 's/GLOSSARY\.md/CONTEXT.md/g' \
            -e '/- \*\*`\/implement-spec`\*\* for the whole spec/d' \
            -e 's/Then work the tickets one of two ways:/Then work the tickets:/' \
-           -e 's/; `\/implement-spec`'"'"'s implementers each drive `\/tdd`, and it runs one `\/code-review` over the integration branch\././' "$f"
+           -e 's/; `\/implement-spec`'"'"'s implementers each drive `\/tdd`, and it runs one `\/code-review` over the integration branch\././' \
+           -e 's/\r$//' "$f"
   done
   find "$dir" -name 'GLOSSARY-FORMAT.md' | while read -r f; do
     mv "$f" "$(dirname "$f")/CONTEXT-FORMAT.md"
+  done
+  # 行尾归一 LF：所有文本文件（判定=首 4KB 无 NUL 字节；未触 transform 的也要归一）
+  find "$dir" -type f | while read -r f; do
+    if ! head -c 4096 "$f" | od -An -tx1 | grep -q ' 00 '; then
+      sed -i 's/\r$//' "$f"
+    fi
   done
 }
 
@@ -71,10 +79,15 @@ for cat_dir in $CATEGORIES; do
       continue
     fi
     if [ $DRY_RUN = 1 ]; then
-      if [ ! -d "$dst" ] || ! git diff --no-index -w --quiet "$src" "$dst" 2>/dev/null; then
+      # 变换后比变换后：dry-run 对 src 也过一遍适配层，避免已同步状态永远误报
+      scratch=$(mktemp -d)
+      cp -r "$src" "$scratch/x"
+      apply_transforms "$scratch/x"
+      if [ ! -d "$dst" ] || ! git diff --no-index -w --quiet "$scratch/x" "$dst" 2>/dev/null; then
         echo "DRY-RUN will-sync $name"
         changed=$((changed+1))
       fi
+      rm -rf "$scratch"
     else
       rm -rf "$dst.tmp-sync"
       cp -r "$src" "$dst.tmp-sync"
@@ -93,5 +106,8 @@ for cat_dir in $CATEGORIES; do
   done
 done
 
-[ $DRY_RUN = 1 ] && echo "—— dry-run 完：将同步 $changed 个技能（上游 → 适配层 → 镜像）"
-[ $DRY_RUN = 0 ] && echo "—— 同步完：$changed 个技能，$warned 个 fork 警告"
+if [ $DRY_RUN = 1 ]; then
+  echo "—— dry-run 完：将同步 $changed 个技能（上游 → 适配层 → 镜像）"
+else
+  echo "—— 同步完：$changed 个技能，$warned 个 fork 警告"
+fi

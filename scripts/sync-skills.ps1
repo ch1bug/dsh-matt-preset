@@ -59,10 +59,20 @@ function Invoke-Transforms([string]$Dir) {
     $n = ($n -split "`n" | Where-Object { $_ -notmatch '^\s*- \*\*`/implement-spec`\*\* for the whole spec' }) -join "`n"
     $n = $n -replace 'Then work the tickets one of two ways:', 'Then work the tickets:'
     $n = $n -replace "; ``/implement-spec``'s implementers each drive ``/tdd``, and it runs one ``/code-review`` over the integration branch\.", '.'
+    $n = $n -replace "`r`n", "`n"   # 行尾统一 LF（上游 clone 受 autocrlf 影响可能 CRLF；现存镜像为 LF）
     if ($n -ne $c) { Set-Content -NoNewline -Path $_.FullName -Value $n }
   }
   Get-ChildItem $Dir -Recurse -Filter 'GLOSSARY-FORMAT.md' | ForEach-Object {
     Rename-Item $_.FullName 'CONTEXT-FORMAT.md'
+  }
+  # 行尾归一 LF：所有文本文件（判定=首 4KB 无 NUL 字节；未触 transform 的也要归一）
+  Get-ChildItem $Dir -Recurse -File | ForEach-Object {
+    $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+    $probe = [Math]::Min(4096, $bytes.Length)
+    for ($i = 0; $i -lt $probe; $i++) { if ($bytes[$i] -eq 0) { return } }
+    $c = Get-Content $_.FullName -Raw
+    $n = $c -replace "`r`n", "`n"
+    if ($n -ne $c) { Set-Content -NoNewline -Path $_.FullName -Value $n }
   }
 }
 
@@ -82,9 +92,14 @@ foreach ($cat in $Categories) {
       continue
     }
     if ($DryRun) {
-      if (-not (Test-TreeEqual $src.FullName $dst)) {
+      # 变换后比变换后：dry-run 对 src 也过一遍适配层，避免已同步状态永远误报
+      $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("sync-dry-" + [System.Guid]::NewGuid().ToString('N'))
+      Copy-Item -Recurse $src.FullName $scratch
+      Invoke-Transforms $scratch
+      if (-not (Test-TreeEqual $scratch $dst)) {
         Write-Host "DRY-RUN will-sync $name"; $changed++
       }
+      Remove-Item -Recurse -Force $scratch
     } else {
       $tmp = "$dst.tmp-sync"
       if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
