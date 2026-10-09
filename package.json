@@ -1,10 +1,29 @@
 {
   "name": "dsh-matt-preset",
-  "version": "0.1.0",
+  "version": "0.2.0-rc.2-r1",
   "private": true,
-  "description": "Matt 工作流 agent preset (ask-matt): persona + workflow-enforcer + tool roster, mounted as a local dsh profile bundle (ADR-0001). agent.cordis.yml is the source of truth; cordis.patch.yml is its generated bundle carrier.",
+  "description": "Matt 工作流 agent preset (ask-matt): persona + workflow-enforcer + tool roster, installed as a version-stamped copy into a DSH agent-preset root (#21, bin/install.mjs). agent.cordis.yml is the source of truth; cordis.patch.yml is its generated bundle carrier.",
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "dsh-preset-install": "bin/install.mjs"
+  },
+  "dependencies": {
+    "yaml": "^2.6.0"
+  },
+  "files": [
+    "preset.yml",
+    "agent.cordis.yml",
+    "cordis.patch.yml",
+    "workflow-gates.yml.example",
+    "*.mjs",
+    "skills",
+    "lang-packs",
+    "sandcastle",
+    "LICENSE",
+    "NOTICE.md",
+    "README.md"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

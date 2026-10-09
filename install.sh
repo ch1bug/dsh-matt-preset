@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # dsh-matt-preset 一键安装。
 #
+# ⚠️ DEPRECATED（#21）：已被版本化 copy-installer 取代——见 bin/install.mjs 与
+# docs/RELEASE.md（install/upgrade/uninstall/--version，版本戳 + 回滚）。本脚本
+# 保留至下一票清理；新装请用：
+#   node bin/install.mjs install
+#
 # dsh 没有内置的 preset 安装命令（dsh plugin 只管 npm 插件）；preset 的官方安装位
 # 就是 $DSH_HOME/.agent-presets/<id>/ —— 放进去 dsh 启动时自动发现（user trust）。
 # 本脚本做的正是这件事：clone 仓库到安装位 + 装 workflow-enforcer 的 yaml 依赖。
