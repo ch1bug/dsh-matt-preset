@@ -18,6 +18,8 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { arg, flag, isMain } from "./lib.ts";
+// patchAgentDefaultModelCmd 单源化进 @ch1bug/sandcastle-dsh 包（#18）；
+// re-export 保持既有导入面（冒烟测试 rt.patchAgentDefaultModelCmd）不变。
 // 沙箱依赖（@ai-hero/sandcastle、./dsh.ts）在 main() 内动态导入：
 // 本模块的纯函数（judgeSimplify）可在未安装 sandcastle 依赖的环境里被冒烟测试导入。
 
@@ -119,27 +121,7 @@ export function modelRouteDecision(
   return { route: "default", note: "无 lane 信息（无审计记录或旧版记录）→ worker 继承宿主默认" };
 }
 
-/**
- * 生成把容器内 ~/.dsh/settings.yaml 的 `agent-default-model:` 块（键 + 两行
- * provider/model）替换为指定模型的 sed 命令（GNU sed `addr,+2c`，容器内
- * Linux 可用；宿主 msys 无 GNU sed——该命令只在 onSandboxReady 里跑）。
- */
-export function patchAgentDefaultModelCmd(model: string): string {
-  // 守卫：provider/model 各限 [A-Za-z0-9._-]——sed 串拼接不接受引号/换行/空白
-  const MODEL_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-  if (!MODEL_RE.test(model))
-    throw new Error(`model 需为 provider/model 形式（各段字符集 [A-Za-z0-9._-]）：${model}`);
-  const slash = model.indexOf("/");
-  const provider = model.slice(0, slash);
-  const modelName = model.slice(slash + 1);
-  // sed 替换 + grep 回执：settings 无该块或形状漂移 → 钩子非 0 退出（响亮失败，
-  // 不让 checkpoint 的 route:"lane" 记录夸大实际发生的事）
-  return (
-    `sed -i '/^agent-default-model:/,+2c\\agent-default-model:\\n` +
-    `  provider: ${provider}\\n  model: ${modelName}' ~/.dsh/settings.yaml ` +
-    `&& grep -qx '  model: ${modelName}' ~/.dsh/settings.yaml`
-  );
-}
+export { patchAgentDefaultModelCmd } from "@ch1bug/sandcastle-dsh";
 
 /**
  * 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。

@@ -1,32 +1,17 @@
-import type { AgentProvider } from "@ai-hero/sandcastle";
-
-/** POSIX 单引号转义（PrintCommand.command 是完整 shell 命令串，在容器内执行） */
-function sh(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
-
 /**
- * DSH headless adapter：把容器内的 `dsh --profile headless "<task>"`
- * 包装成 sandcastle 的 AgentProvider。
+ * dsh.ts — 薄引用（#18）：DSH headless provider 正式化为独立 npm 包
+ * `@ch1bug/sandcastle-dsh`（源仓 sandcastle-dsh，ADR-0003 方案 A），本模板
+ * 只 re-export。目标项目安装：`npm install ./ch1bug-sandcastle-dsh-<ver>.tgz`
+ * （或发布后 npm install @ch1bug/sandcastle-dsh）。
  *
- * - DSH headless：单任务进出（任务=argv 位置参数，不读 stdin），最终回复
- *   打 stdout，exit 0（turn/end）/ 1（error）。
- * - 超大任务不要内联 prompt（Linux 128KB argv 上限）：编排者先把票据文件
- *   commit 进分支，task 只写"执行 .sandcastle/tickets/<N>.md"。
- * - 凭据不在 provider env 注入：沙箱钩子把宿主 ~/.dsh 的凭据与 settings
- *   拷入容器 DSH_HOME（见 run-ticket.mts 的 onSandboxReady）。
- * - parseStreamLine 返回 []：headless 不产生 JSON 行流，走 stdout 兜底。
+ * 导出面（详情见包 README）：dshHeadless / sh / patchAgentDefaultModelCmd /
+ * dshHomeReadyCommand / dshSandboxOptions / DOCKERFILE_SNIPPET。
  */
-export function dshHeadless(): AgentProvider {
-  return {
-    name: "dsh-headless",
-    env: {},
-    captureSessions: false,
-    buildPrintCommand({ prompt }) {
-      return { command: `dsh --profile headless ${sh(prompt)}` };
-    },
-    parseStreamLine() {
-      return [];
-    },
-  };
-}
+export {
+  dshHeadless,
+  sh,
+  patchAgentDefaultModelCmd,
+  dshHomeReadyCommand,
+  dshSandboxOptions,
+  DOCKERFILE_SNIPPET,
+} from "@ch1bug/sandcastle-dsh";

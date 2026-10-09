@@ -12,11 +12,14 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 
 1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / dsh.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——lib.ts 与模板同目录、相对导入 `./lib.ts`，别漏拷）
 2. `npm i -D @ai-hero/sandcastle@0.12.0 tsx` —— **钉版本**（0.x API 周级变动）
-3. 构建镜像：`podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle`
+3. `npm i ./ch1bug-sandcastle-dsh-<ver>.tgz` —— DSH provider 包（#18 正式化：
+   dshHeadless / patchAgentDefaultModelCmd / 沙箱接入件；`dsh.ts` 与 run-ticket
+   均从该包导入。发布后可直接 `npm i @ch1bug/sandcastle-dsh`；版本锚定见包内 docs/RELEASE.md）
+4. 构建镜像：`podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle`
    （Rust 项目把 Dockerfile 里 rustup 注释段打开）
-4. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
+5. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
    （enforcer 默认清单已含这两条；项目文件存在时默认清单被替换，需显式带上）
-5. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
+6. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
    缺省用模板内置的 ponytail 阶梯（ vendored 自 [ponytail](https://github.com/DietrichGebert/ponytail)）。
    主会话同样可用——skill 目录已带 `ponytail`（说 "ponytail" 或 "be lazy" 唤醒，"stop ponytail" 退出）。
 
@@ -102,6 +105,9 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 
 ## 已知边界（Windows 宿主实测）
 
+- PATH 上 `bash` 解析到 `C:\WINDOWS\system32\bash.exe`（WSL）时，`sandcastle-e2e.mjs`
+  搭台必挂（msys 路径映射 + gcc 缺失）——跑 e2e 前把 `Git\bin`（与 `msys64\ucrt64\bin`
+  的 gcc）前置到 PATH（2026-10-09 实测，#18）
 - `copyToWorktree` 在宿主侧 spawn `cp`（ENOENT）——不要用；票据文件先 commit 进分支
 - DSH 凭据要求 mode 600——模板钩子里已带 `chmod 600`
 - podman machine 内存是并行度上限（2GiB 只够 1–2 并行；放量先 `podman machine set` 扩容）
