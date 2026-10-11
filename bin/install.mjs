@@ -1,23 +1,29 @@
 #!/usr/bin/env node
 /**
- * install.mjs — dsh-matt-preset copy-installer (#21)。
+ * install.mjs — dsh-matt-preset installer（#21 copy-installer + #28 bundle 装载）。
  *
- * 把 preset 包（npm pack tarball 或源码/本地包目录）resolve 出 payload，
- * 整目录拷入配置 root（默认 $DSH_HOME/.agent-presets/matt/），并写版本戳。
- * DSH 的 preset 发现是纯文件系统 roots（显式配置），无 npm 安装机制——
- * 本安装器只负责把文件放到位；bundle 挂载属 profile 侧（ADR-0001 形态）。
+ * 两段式：
+ *   1) 稳定存储：payload 整目录拷入 $DSH_HOME/.agent-presets/matt/，写版本戳
+ *      （VERSION.json / manifest.json），运行时依赖 yaml 随副本走——回滚 = 用
+ *      旧版本重新 install（--force 覆盖），旧 tag ↔ 旧 npm 版本一一对应
+ *      （docs/RELEASE.md）。
+ *   2) 装载挂载：rc.2 的 preset 注册表不做目录扫描（#28 根因），装载机制是
+ *      bundle patch——把存储目录经 `dsh plugin --profile <p> add` 链入 profile，
+ *      package.json 的 dsh.bundle.patch（→ cordis.patch.yml，由
+ *      #6 载体生成/锁定）随之生效。
  *
  * 用法：
- *   dsh-preset-install install  [--from <tarball|dir>] [--root <dir>] [--force]
- *   dsh-preset-install upgrade  [--from <tarball|dir>] [--root <dir>]
- *   dsh-preset-install uninstall [--root <dir>]
+ *   dsh-preset-install install  [--profile <name>] [--from <tarball|dir>] [--force]
+ *   dsh-preset-install upgrade  [--profile <name>] [--from <tarball|dir>]
+ *   dsh-preset-install uninstall [--profile <name>]
  *   dsh-preset-install --version
  *
- * 回滚 = 用旧版本重新 install（--force 覆盖）：旧 tag ↔ 旧 npm 版本一一对应
- * （release docs 见 docs/RELEASE.md）。
+ * #21 的 --root（存储根覆盖）仍受支持，用于测试/非默认布局；profile 挂载
+ * 一律走 DSH_HOME/profiles/<name>。
  */
 import { spawnSync } from 'node:child_process'
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -25,6 +31,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
+const PKG_NAME = 'dsh-matt-preset'
 /** Payload 插件在运行时 import 的依赖（workflow-enforcer → yaml）：随安装副本走。 */
 const RUNTIME_DEPS = ['yaml']
 
@@ -41,16 +48,69 @@ function parseArgs(argv) {
     else if (a === '--force') args.force = true
     else if (a === '--root') args.root = argv[++i]
     else if (a === '--from') args.from = argv[++i]
+    else if (a === '--profile') args.profile = argv[++i]
     else if (a.startsWith('--')) die(`unknown option: ${a}`)
     else args._.push(a)
   }
   return args
 }
 
-function defaultRoot() {
+function dshHome() {
+  return process.env.DSH_HOME ?? join(homedir(), '.dsh')
+}
+
+function defaultStoreRoot() {
   if (process.env.DSH_MATT_ROOT) return process.env.DSH_MATT_ROOT
-  const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
-  return join(dshHome, '.agent-presets')
+  return join(dshHome(), '.agent-presets')
+}
+
+/** Run dsh (or node) and die with its stderr on failure. */
+function runOrDie(cmd, cmdArgs, what) {
+  const r = spawnSync(cmd, cmdArgs, {
+    encoding: 'utf8',
+    shell: process.platform === 'win32' && cmd !== process.execPath,
+  })
+  if (r.status !== 0) die(`${what} failed (exit ${r.status}):\n${r.stderr || r.stdout}`)
+  return r
+}
+
+/** Is the dsh CLI available? (装载挂载需要它；纯存储操作不需要。) */
+function dshAvailable() {
+  return spawnSync('dsh', ['--version'], {
+    encoding: 'utf8', shell: process.platform === 'win32',
+  }).status === 0
+}
+
+/** Link the store into the profile: the bundle-patch mount step (#28).
+ *  `dsh plugin --profile <p> add` creates the profile layer when absent
+ *  (shipped names like `web` included), so no template bootstrap is needed. */
+function mount(profile, store) {
+  runOrDie('dsh', ['plugin', '--profile', profile, 'add', store],
+    `dsh plugin --profile ${profile} add`)
+}
+
+/** Remove the profile link. Pre-checks the profile's dependency table so a
+ *  fresh profile without the link doesn't turn `dsh plugin rm` into an error;
+ *  if the profile layout ever shifts, we warn and let `dsh plugin rm` decide. */
+function unmount(profile) {
+  let deps = {}
+  try {
+    deps = JSON.parse(readFileSync(join(dshHome(), 'profiles', profile, 'package.json'), 'utf8')).dependencies ?? {}
+  } catch { /* profile layer absent/unreadable — nothing linked, fall through */ }
+  if (!(PKG_NAME in deps)) return
+  runOrDie('dsh', ['plugin', '--profile', profile, 'rm', PKG_NAME],
+    `dsh plugin --profile ${profile} rm`)
+}
+
+/** Run the mount/unmount step, or degrade loudly when dsh is unavailable:
+ *  the store copy still lands, but the profile keeps its previous state
+ *  (stale link on uninstall) and the operator gets the manual command. */
+function mountOrWarn(profile, step, what) {
+  if (dshAvailable()) { step(); return }
+  const manual = what === 'unmount'
+    ? `dsh plugin --profile ${profile} rm ${PKG_NAME}`
+    : `dsh plugin --profile ${profile} add ${join(defaultStoreRoot(), 'matt')}`
+  console.error(`dsh not found on PATH — skipped profile ${what} (装载需手动: ${manual})`)
 }
 
 /** Expand one package.json `files` entry (dirs recurse; `*.mjs` globs) against srcDir. */
@@ -92,7 +152,7 @@ async function payloadOf(pkgDir) {
   return { pkg, entries: present }
 }
 
-async function installTo(target, { pkgDir, source }, { previousVersion } = {}) {
+async function installTo(target, { pkgDir, source }, { previousVersion, profile } = {}) {
   const { pkg, entries } = await payloadOf(pkgDir)
   // 原地替换语义：先清空目标（stale 文件不残留），再整目录拷入
   await rm(target, { recursive: true, force: true })
@@ -104,9 +164,9 @@ async function installTo(target, { pkgDir, source }, { previousVersion } = {}) {
   }
   const now = new Date().toISOString()
   // 运行时依赖随安装副本走：插件 import 'yaml' 的解析锚点是插件文件自身，
-  // 安装目录旁必须有 node_modules/yaml（旧 install.sh 的 npm install --prefix 等价物）。
-  // 解析锚定**来源包自身**（回滚装旧 tag 时 vendor 旧包声明的依赖版本），
-  // 来源目录无 node_modules 时（tarball 解压目录）才回退到安装器自身环境。
+  // 安装目录旁必须有 node_modules/yaml。解析锚定**来源包自身**（回滚装旧 tag
+  // 时 vendor 旧包声明的依赖版本），来源目录无 node_modules 时（tarball 解压
+  // 目录）才回退到安装器自身环境。
   let req = createRequire(join(pkgDir, 'package.json'))
   try { req.resolve(RUNTIME_DEPS[0] + '/package.json') }
   catch { req = createRequire(join(PKG_DIR, 'package.json')) }
@@ -121,7 +181,7 @@ async function installTo(target, { pkgDir, source }, { previousVersion } = {}) {
   await writeFile(join(target, 'VERSION.json'),
     JSON.stringify({ version: pkg.version, installedAt: now, source }, null, 2) + '\n')
   await writeFile(join(target, 'manifest.json'),
-    JSON.stringify({ version: pkg.version, source, previousVersion: previousVersion ?? null, files: entries, dependencies: deps }, null, 2) + '\n')
+    JSON.stringify({ version: pkg.version, source, previousVersion: previousVersion ?? null, profile: profile ?? null, files: entries, dependencies: deps }, null, 2) + '\n')
   return { version: pkg.version, files: entries.length }
 }
 
@@ -132,16 +192,20 @@ async function main() {
 
   if (args.version) { console.log(pkg.version); return }
 
-  const root = resolve(args.root ?? defaultRoot())
-  const target = join(root, 'matt')
+  const profile = args.profile ?? 'web'
+  // 显式 --root = 纯存储模式（测试/非默认布局）：只落 store，不碰任何 profile
+  const storeOnly = args.root !== undefined
+  const storeRoot = resolve(args.root ?? defaultStoreRoot())
+  const target = join(storeRoot, 'matt')
   const previousVersionOf = async () => existsSync(join(target, 'VERSION.json'))
     ? JSON.parse(await readFile(join(target, 'VERSION.json'), 'utf8')).version
     : null
 
   if (cmd === 'uninstall') {
     if (!existsSync(target)) die(`not installed: ${target} (未安装)`)
+    if (!storeOnly) mountOrWarn(profile, () => unmount(profile), 'unmount')
     await rm(target, { recursive: true, force: true })
-    console.log(`uninstalled: ${target}`)
+    console.log(`uninstalled: ${target} (profile '${profile}' unmounted)`)
     return
   }
 
@@ -149,10 +213,12 @@ async function main() {
     if (!existsSync(join(target, 'VERSION.json'))) die(`not installed: ${target} (未安装——请先用 install)`)
     const prev = await previousVersionOf()
     const src = await resolveSource(args.from)
-    const res = await installTo(target, src, { previousVersion: prev })
+    const res = await installTo(target, src, { previousVersion: prev, profile })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
+    // link 指向的是存储目录本身，文件已原地替换；重挂一次刷新 pnpm 元数据
+    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
     console.log(`upgraded ${prev} -> ${res.version} (${res.files} entries) at ${target}`)
-    console.log('重启 dsh（或新开会话）生效；回滚：重新 install 旧版本包。')
+    console.log(`重启 dsh --profile ${profile}（或新开会话）生效；回滚：重新 install 旧版本包。`)
     return
   }
 
@@ -162,10 +228,11 @@ async function main() {
     }
     const prev = await previousVersionOf()
     const src = await resolveSource(args.from)
-    const res = await installTo(target, src, { previousVersion: prev })
+    const res = await installTo(target, src, { previousVersion: prev, profile })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
-    console.log(`installed ${res.version} (${res.files} entries) at ${target}`)
-    console.log('重启 dsh web（或新开会话），在 hero-chip 选择 "Matt 工作流模式"。')
+    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
+    console.log(`installed ${res.version} (${res.files} entries) at ${target}${storeOnly ? '' : `, mounted into profile '${profile}'`}`)
+    console.log(`重启 dsh --profile ${profile}（或新开会话），在 hero-chip 选择 "Matt 工作流"。`)
     return
   }
 

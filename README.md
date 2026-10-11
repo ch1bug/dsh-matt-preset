@@ -7,11 +7,11 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具
 
 ## 这是什么规范
 
-- **DSH agent preset**（`@deepseek-ai/dsh-agent-presets` 规范）：一个 preset 目录 =
-  `preset.yml`（roster 元数据：`name`/`description`/`order`）+ `agent.cordis.yml`
-  （cordis 组合，即发现器认的 `COMPOSITION_FILE`）。安装位 =
-  `$DSH_HOME/.agent-presets/<id>/`（user trust）；preset id 必须匹配
-  `/^[a-z0-9][a-z0-9-]*$/`。
+- **DSH agent preset**（`@deepseek-ai/dsh-agent-preset` 插件行）：`preset.yml`
+  （roster 元数据：`name`/`description`/`order`）随 `agent.cordis.yml` 一起构成
+  bundle 载体 `cordis.patch.yml`。安装位 = `$DSH_HOME/.agent-presets/matt/`
+  （installer 的稳定存储，#28）；装载经 bundle patch 挂进 profile
+  （`dsh plugin add`），不靠目录扫描。
 - 目录内的 `.mjs` 是 **cordis 插件**（导出 `name`/`apply`/`inject`），组合文件按
   相对路径 `./xxx.mjs` 引用——它们是这个 preset 的组成部分，不是独立发布的 npm 插件包。
 - 与 **DSH 插件**（npm 包，作为 bundle 装进 profile，如 `dsh-llm-mimo`）的区别：
@@ -29,24 +29,28 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具
 > 曾试验两阶段 bootstrap（梁神模式，`tool-bootstrap.mjs`）：实测仅对 DeepSeek V4 Pro
 > 有效，对其他模型（含 V4 Flash）是副作用，已取消（见 `CONTEXT.md` D17），恢复全量表面。
 
-## 安装
+## 安装（bundle patch 装载，#28）
 
-DSH 的 preset 没有包管理器：`dsh plugin` 只管 profile 的 **npm 插件**，GUI 设置里的
-"复制 preset" 也只能复制 roster 上已有的 preset。preset 的官方安装位就是 user root 的
-一个目录——**放进去 dsh 启动时自动发现**（`$DSH_HOME/.agent-presets/<id>/`，id 匹配
-`/^[a-z0-9][a-z0-9-]*$/`），不需要任何注册或配置。所以"安装"= 把本仓库放进那个位：
+DSH 0.2.0-rc 起的 preset 注册表**不做目录扫描**——放进 `.agent-presets/` 不会再被
+发现（旧「自动发现」约定仅对 `dsh-agent-presets` 宿主有效）。装载机制是 **bundle
+patch**：本包 `package.json` 声明 `dsh.bundle.patch`（→ 生成的 `cordis.patch.yml`，
+内含 preset 插件行 `dsh-matt-preset`），经 `dsh plugin --profile <p> add` 链入
+profile 生效。
 
-```bash
-git clone https://github.com/ch1bug/dsh-matt-preset.git ~/.dsh/.agent-presets/dsh-matt-preset
-```
-
-或一键（等价，含依赖）：
+一条命令（payload 拷入 `$DSH_HOME/.agent-presets/matt/` 作稳定存储 + 版本戳，
+再挂进 profile）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ch1bug/dsh-matt-preset/main/install.sh | bash
+npx github:ch1bug/dsh-matt-preset install          # 默认挂到 profile web
+# 或：git clone 后 node bin/install.mjs install / npm pack 后 install --from <tgz>
 ```
 
-然后重启 `dsh web`（或新开会话），hero-chip 选择 "Matt 工作流模式"（没有就刷新一下页面）。
+- 指定 profile：`--profile <name>`（layer 不存在时 `dsh plugin add` 自动创建）。
+- 升级/回滚/卸载：`upgrade`（原地替换；回滚 = 重装旧版本包）/ `uninstall`
+  （存储与 profile link 一起摘）。版本戳在 `.agent-presets/matt/VERSION.json`。
+- 旧 `install.sh`（纯目录拷贝）在 rc.2 上**装完加载不了**，仅为兼容保留，#31 移除。
+
+然后重启 `dsh --profile <p>`（或新开会话），hero-chip 选择 "Matt 工作流"。
 
 > 定时任务：`scheduled-jobs.mjs` 已退役（#4，ADR-0001）；提醒类需求用
 > schedule-bundle 的 `schedule_create` 等工具。
