@@ -32,24 +32,16 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具
 ## 安装（bundle patch 装载，#28）
 
 DSH 0.2.0-rc 起的 preset 注册表**不做目录扫描**——放进 `.agent-presets/` 不会再被
-发现（旧「自动发现」约定仅对 `dsh-agent-presets` 宿主有效）。装载机制是 **bundle
-patch**：本包 `package.json` 声明 `dsh.bundle.patch`（→ 生成的 `cordis.patch.yml`，
-内含 preset 插件行 `dsh-matt-preset`），经 `dsh plugin --profile <p> add` 链入
-profile 生效。
+发现；装载机制是 **bundle patch**。安装/升级/回滚/卸载、`--profile`/`--root`、
+版本戳、已知风险与两段式挂载说明的**单一事实源是 [docs/RELEASE.md](docs/RELEASE.md)「安装 / 升级 / 回滚 / 卸载」一节**（#41）。
 
-一条命令（payload 拷入 `$DSH_HOME/.agent-presets/matt/` 作稳定存储 + 版本戳，
-再挂进 profile）：
+一条命令（payload 拷入稳定存储 + 版本戳，再挂进 profile）：
 
 ```bash
-npx github:ch1bug/dsh-matt-preset install          # 默认挂到 profile web
-# 或：git clone 后 node bin/install.mjs install / npm pack 后 install --from <tgz>
+npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profile web；参数与备选形式（clone / npm pack --from）见 docs/RELEASE.md
 ```
 
-- 指定 profile：`--profile <name>`（layer 不存在时 `dsh plugin add` 自动创建）。
-- 升级/回滚/卸载：`upgrade`（原地替换；回滚 = 重装旧版本包）/ `uninstall`
-  （存储与 profile link 一起摘）。版本戳在 `.agent-presets/matt/VERSION.json`。
-
-然后重启 `dsh --profile <p>`（或新开会话），hero-chip 选择 "Matt 工作流"。
+装完按 docs/RELEASE.md 提示重启生效，hero-chip 选择 "Matt 工作流"。
 
 > 定时任务：`scheduled-jobs.mjs` 已退役（#4，ADR-0001）；提醒类需求用
 > schedule-bundle 的 `schedule_create` 等工具。

@@ -22,13 +22,15 @@ git push --tags               # push 属外部操作，走批末/human 门
 npm pack                      # 产物即安装源；npm publish 由 human 拍板（package.json 仍 private）
 ```
 
-## 安装 / 升级 / 回滚 / 卸载（copy-installer，bin/install.mjs）
+## 安装 / 升级 / 回滚 / 卸载（copy-installer，bin/install.mjs；#41 起本节为安装事实源）
 
 ```bash
+npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 新用户一条命令；npm 默认禁 git 源 fetch（EALLOWGIT，故需 allow-git；取值随 npm 版本而异，见 npm 文档），等价于以下任一形式
 node bin/install.mjs install                 # 默认从本仓源码安装（包发布后可 npx .）
 node bin/install.mjs install --from dsh-matt-preset-0.2.0-rc.2-r1.tgz   # 从 tarball
 node bin/install.mjs install --from /path/to/checkout                   # 从源码目录
 node bin/install.mjs install --root <dir>           # 默认 root = $DSH_HOME/.agent-presets
+node bin/install.mjs install --profile <name>       # 默认挂到 profile web；layer 不存在时自动创建
 node bin/install.mjs upgrade  [--from …]            # 原地替换（stale 文件清除，记录 previousVersion）
 node bin/install.mjs uninstall
 node bin/install.mjs --version
@@ -49,8 +51,13 @@ node bin/install.mjs --version
 installer 只负责把文件放到位（preset root 侧）；把装好的 preset 挂进 dsh 会话属
 profile 侧（ADR-0001 形态）：profile 的 package.json 以 `link:` 依赖指向安装目录
 （`"dsh-matt-preset": "link:<root>/matt"`），经 `dsh.profile.bundles` 挂载
-cordis.patch.yml。插件行 `dsh-matt-preset/x.mjs` 按包名经该 link 解析——包名
-`dsh-matt-preset` 与插件命名空间刻意一致，勿改。
+cordis.patch.yml。DSH 0.2.0-rc 起 preset 注册表**不做目录扫描**——放进
+`.agent-presets/` 不会被自动发现（旧「自动发现」约定仅对 `dsh-agent-presets`
+宿主有效），必须走 bundle patch 挂载。插件行 `dsh-matt-preset/x.mjs` 按包名经该
+link 解析——包名 `dsh-matt-preset` 与插件命名空间刻意一致，勿改。
+
+安装/升级后重启 `dsh --profile <p>`（或新开会话）生效，hero-chip 选择
+"Matt 工作流"。
 
 ## 验证（本票 AC 证据，2026-10-09）
 
