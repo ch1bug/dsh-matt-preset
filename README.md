@@ -48,7 +48,6 @@ npx github:ch1bug/dsh-matt-preset install          # 默认挂到 profile web
 - 指定 profile：`--profile <name>`（layer 不存在时 `dsh plugin add` 自动创建）。
 - 升级/回滚/卸载：`upgrade`（原地替换；回滚 = 重装旧版本包）/ `uninstall`
   （存储与 profile link 一起摘）。版本戳在 `.agent-presets/matt/VERSION.json`。
-- 旧 `install.sh`（纯目录拷贝）在 rc.2 上**装完加载不了**，仅为兼容保留，#31 移除。
 
 然后重启 `dsh --profile <p>`（或新开会话），hero-chip 选择 "Matt 工作流"。
 
