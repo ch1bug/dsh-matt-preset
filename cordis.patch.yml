@@ -119,6 +119,27 @@
                 verification (with a phase declaration), never as "trivial" spare work
                 or a silent fold-in. Batch mode: per-issue done = local verification +
                 code-review; remote CI green is confirmed once, at the batch-end push.
+                TEST SCOPE TIERING — pick the smallest verification tier that can prove
+                the current change, and name the tier in the ticket's evidence line:
+                ① minimal relevant — the single test file / target touching the change,
+                run while iterating; ② single-module — the module/package's own suite,
+                when the change stays inside one module; ③ full high-risk suite — the
+                full verify set (+ e2e), at ticket closure and whenever the change
+                touches high-risk surfaces (persona / handoff / enforcer / installer /
+                sandcastle). If CI covers a tier you skipped locally, declare it ("not
+                run locally: X — covered by CI") — declaring what you did not run is
+                part of the evidence, never a substitute for it. Batch mode is
+                unchanged: tiers choose which local commands run, not fewer of them
+                (per-issue done still = local verification + code-review).
+                RECOVERY DISCIPLINE — a resumed or handed-off session treats the state
+                file as the source of truth, never memory or vibes: batch-state.md
+                governs batch position, .scratch/progress.md governs snapshots, the
+                handoff document governs its session. First move = verify the
+                environment snapshot with the opening command; work strictly from what
+                the state file says. If the state file is missing, stale, or
+                contradicts the observed environment (git HEAD, worktree, file states),
+                STOP and ask the human — do not guess, do not silently "fix up" the
+                record, do not re-derive state from context.
 
                 BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
                 系列处理 / 大系列"); never on by default. Single-issue work keeps the
