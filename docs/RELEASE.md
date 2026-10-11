@@ -59,6 +59,26 @@ link 解析——包名 `dsh-matt-preset` 与插件命名空间刻意一致，�
 安装/升级后重启 `dsh --profile <p>`（或新开会话）生效，hero-chip 选择
 "Matt 工作流"。
 
+## 版本条目（Changelog）模板（ADR-0007）
+
+规范：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意
+到**。正反例与批次模式一致性见 [adr/0007-changelog-release-convention.md](adr/0007-changelog-release-convention.md)。条目在打 tag 时写，不逐票更新。
+
+```markdown
+## dsh-v<official>-r<N>（<npm version>）
+
+### 注意到（升级用户视角）
+- <破坏性变化 + 迁移路径>（如有，必写并指向对应 RELEASE.md 节）
+- <新增/删除的命令、插件行为、skill、安装方式变化>
+- <persona/工作流门禁对会话行为的变化>
+
+### 锚
+tag `dsh-v<official>-r<N>` · npm `<official>-r<N>` · 产物 `dsh-matt-preset-<npm version>.tgz`
+```
+
+不写：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作。本仓暂无
+CHANGELOG.md 文件——首个 tag（首次发版）时按本模板在仓库根创建。
+
 ## 验证（本票 AC 证据，2026-10-09）
 
 - 单测：`node tests/verify-installer.mjs`（8 项：fresh/重复拒绝/--force/upgrade/

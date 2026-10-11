@@ -76,6 +76,8 @@
 - **D38（2026-10-01，#16）** — **排批模型路由推荐（model-lane）**：不是所有票都要最好的模型——排批/审计时给票分级 **A（顶配：决策/架构/money/治理语义，机械只提示、编排者 `--lane A` 拍板）/ B（常规，默认）/ C（低配：docs-only）**，audit 记录落 `modelLane`；worker 路由顺序 `--model` > lane×`.sandcastle/model-lanes.json` 映射 > 宿主默认，命中映射时容器钩子 sed 替换 `agent-default-model:` 块（DSH headless 无 CLI 模型参数，settings 是唯一缝——2026-10-01 源码调研：路由是请求头级，subagent/workflow 面已支持 per-call 覆盖，Team teammate 只能继承 Lead，#17 待分诊）。白天批用 batch-state lane 标注 + handoff 定向节写明模型（规避 handoff 子会话取部署默认）；批末回收 lane 准确率。落地：audit-ticket/run-ticket/night-run 模板 + sandcastle/README 模型路由节。
 - **D39（2026-10-11，#36）** — **测试分级 + 恢复纪律（comet 借入 adopt C2）**：persona 增两节——① TEST SCOPE TIERING（最小相关 → 单模块 → 高风险全量三级；跳过的层级若被 CI 覆盖须声明 "not run locally"——声明未跑项是证据的一部分，不是豁免）；② RECOVERY DISCIPLINE（恢复会话以状态文件为唯一事实源——batch-state.md / progress.md / handoff 文档；快照与环境不符 → 停下问 human，不猜、不自行修正记录）。与 DONE 三要素、批次模式不冲突：分级只选"跑哪些本地命令"，不减验证义务。依据：#29 comet 调研（rpamis/comet 的 AGENTS.md 测试分级与可恢复状态实践）。
 
+- **D40（2026-10-11，#37）** — **Changelog/RELEASE 条目规范（comet 借入 adopt C3）**：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意到**（正例：命令/插件行为/安装方式/persona 门禁变化、破坏性变化+迁移路径；反例：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作）。条目在打 tag 时写、不逐票更新——与 ADR-0002「docs 本地 commit 随批末 push」天然兼容。模板落 docs/RELEASE.md；本仓暂无 CHANGELOG.md，首个 tag 时按模板创建。详见 [docs/adr/0007-changelog-release-convention.md](docs/adr/0007-changelog-release-convention.md)。
+
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 
 ## 观察记录（2026-08-19，IRIS ef2ef0b5 会话复盘）
