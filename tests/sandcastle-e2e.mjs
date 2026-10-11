@@ -64,19 +64,34 @@ N="$3"
 F="$(dirname "$0")/issue-$N.json"
 if [ -f "$F" ]; then cat "$F"; else echo "unknown issue" >&2; exit 1; fi
 `;
-const GH_C = `#include <stdlib.h>
+// #30：旧 shim 经 system()→cmd 解析裸 "bash"（PATH 漂移到 WSL 即挂）且
+// cmd /c 引号剥离规则脆弱。改为 CreateProcessA 直启已解析的 msys bash，
+// -l（login shell）注入 /usr/bin 标准路径；gh.exe 路径剥扩展名指向同目录
+// gh 脚本，归一正斜杠（msys 兼容，dirname "$0" 才正确）。
+const ghC = (bashPath) => {
+  const b = bashPath.replace(/\//g, "\\\\"); // C 源码字面量：/ → \\（转义反斜杠）
+  return `#include <windows.h>
+#include <stdio.h>
 #include <string.h>
-#include <windows.h>
 int main(int argc, char **argv) {
-  char cmd[4096] = "bash \\""; char self[2048];
-  GetModuleFileNameA(NULL, self, sizeof self); /* self = .../bin/gh.exe */
-  char *slash = strrchr(self, '\\\\'); if (slash) *(slash) = 0;
-  strcat(self, "\\\\gh\\"");
-  strcat(cmd, self);
-  for (int i = 1; i < argc; i++) { strcat(cmd, " "); strcat(cmd, argv[i]); }
-  return system(cmd);
+  char self[2048]; GetModuleFileNameA(NULL, self, sizeof self);
+  char *s; for (s = self; *s; s++) if (*s == '\\\\') *s = '/';
+  char *dot = strrchr(self, '.');
+  if (dot && _stricmp(dot, ".exe") == 0) *dot = 0; /* gh.exe → 同目录 gh 脚本 */
+  char cmd[8192];
+  int n = snprintf(cmd, sizeof cmd, "\\"${b}\\" -l \\"%s\\"", self);
+  for (int i = 1; i < argc && n > 0 && n < (int)sizeof cmd; i++)
+    n += snprintf(cmd + n, sizeof cmd - n, " %s", argv[i]);
+  STARTUPINFOA si = { .cb = sizeof si };
+  PROCESS_INFORMATION pi;
+  if (!CreateProcessA("${b}", cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return 127;
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code);
+  CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+  return (int)code;
 }
 `;
+};
 
 // —— stub run-ticket：模拟 run-ticket 的 exit/state 契约（真实现见模板源）——
 // night-run 从 ./run-ticket.mts 导入 EXIT_STATUS——stub 必须同名导出。
@@ -102,9 +117,43 @@ ${mode === "fail" ? `  console.error("STUB MUST NOT BE CALLED — idempotency br
 `;
 
 // —— bash 驱动器：一条命令一次调用（PATH 注入只发生在 bash 内部）——
+// #30：Windows PATH 上 bash 可能漂移到 WSL bash（无 /c、无 gcc）或 Git bash
+// （无 gcc）；e2e 需要 msys 工具链（setup.sh 的 gh.exe shim 依赖 gcc，
+// /ucrt64/bin fallback 属 msys2）。显式解析一个「gcc 可达」的 bash，
+// 探针判别，找不到则报可行动错误——绝不带病跑完在断言处 ENOENT。
+const BASH_CANDIDATES = [
+  process.env.SANDCASTLE_E2E_BASH, // env 覆盖优先
+  "bash",                          // PATH（当前会话若已正确前置）
+  "C:/msys64/usr/bin/bash.exe",    // msys2 标准安装点（/ucrt64/bin 有 gcc）
+  "C:/Program Files/Git/bin/bash.exe", // Git bash（本测通常 gcc 缺失，探针会淘汰）
+].filter(Boolean);
+// 能力探针：gcc 在 PATH 上，或 msys2 fallback /ucrt64/bin/gcc.exe 存在。
+const bashCapable = (bash) =>
+  spawnSync(bash, ["-c", "command -v gcc >/dev/null 2>&1 || test -x /ucrt64/bin/gcc.exe"],
+    { encoding: "utf8" }).status === 0;
+function findBash() {
+  for (const c of BASH_CANDIDATES) {
+    if (bashCapable(c)) return c;
+  }
+  console.error(
+    "✗ 未找到可用的 msys 工具链 bash（需 gcc 直达或 msys2 /ucrt64/bin/gcc）。\n" +
+    "  修复方式之一：设 SANDCASTLE_E2E_BASH=<msys2 bash 路径> 后重跑，\n" +
+    "  例如：SANDCASTLE_E2E_BASH=C:/msys64/usr/bin/bash.exe node tests/sandcastle-e2e.mjs",
+  );
+  process.exit(1);
+}
+const BASH = findBash();
 const DRIVER = join(W, "drv.sh");
+// #30：非 login 启动的 msys bash 继承的 Windows PATH 不含其 /usr/bin，
+// `npx`（shebang `#!/usr/bin/env bash`）、uname、dirname 等全部不可执行。
+// 前置 bash 自身所在目录，让 bash 启动时转换出的 PATH 覆盖 /usr/bin。
+const BASH_BIN = dirname(BASH);
 const runBash = (script, args, opts = {}) => {
-  const r = spawnSync("bash", [script, ...args], { encoding: "utf8", ...opts });
+  const r = spawnSync(BASH, [script, ...args], {
+    encoding: "utf8",
+    ...opts,
+    env: { ...process.env, ...opts.env, PATH: `${BASH_BIN};${process.env.PATH}` },
+  });
   return { status: r.status, out: (r.stdout || "") + (r.stderr || "") };
 };
 
@@ -126,7 +175,7 @@ const runBash = (script, args, opts = {}) => {
       JSON.stringify({ number: Number(n), title: `fake #${n}`, body: b, labels: [{ name: "ready-for-agent" }] }),
     );
   }
-  writeFileSync(join(W, "bin", "gh.c"), GH_C);
+  writeFileSync(join(W, "bin", "gh.c"), ghC(BASH));
   // 队列
   writeFileSync(join(W, ".sandcastle", "night-queue.json"), JSON.stringify({ tickets: [101, 102, 103] }));
   // setup.sh：假仓 + gh.exe 编译
@@ -148,6 +197,12 @@ exec npx tsx "$@"
 `);
   const s = runBash(join(W, "setup.sh"), [W, TPL.replace(/\\/g, "/")]);
   check("搭台：假仓 + gh.exe shim 编译成功", s.status === 0);
+  // #30：搭台失败立即中止——后续所有断言都依赖 shim 产物，
+  // 带病跑完只会在 readFileSync ENOENT 处崩溃并误导诊断。
+  if (fail > 0) {
+    console.error(`\n搭台失败（setup.sh exit=${s.status}），保留现场：${W}\n${s.out}`);
+    process.exit(1);
+  }
 }
 
 const tsx = (args) => runBash(DRIVER, [W, ...args]);
