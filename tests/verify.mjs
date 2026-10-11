@@ -21,6 +21,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { bootHarness, parsePlugins, resolveLocalNames } from './preset-harness.mjs'
+import { childStarted, waitForFirstTurn } from '../handoff-tool.mjs'
 
 // Repo-relative: tests/verify.mjs -> the repo root, which IS the matt preset directory.
 const MATT_DIR = fileURLToPath(new URL('..', import.meta.url))
@@ -281,6 +282,30 @@ try {
   await handleD.dispose()
 } catch (error) {
   bad('harness run', String(error?.stack ?? error))
+}
+
+// ── Track E: first-turn verification helpers (#44, 2026-10-11 IRIS stall) ──
+// A healthy child shows turn/start; a stalled one (driver wake lost) shows
+// only the session header — waitForFirstTurn must time out and childStarted
+// must stay false.
+try {
+  const fakeStarted = []
+  const fakeHandle = (events) => ({ agent: { session: { snapshotEvents: () => events } } })
+  const started = { type: 'turn/start', seq: 2 }
+  if (childStarted(fakeHandle([started]))) ok('E. childStarted true on turn/start')
+  else bad('E. childStarted true on turn/start')
+  if (!childStarted(fakeHandle([{ type: 'session', seq: 1 }]))) ok('E. childStarted false on header-only (stall shape 0fee327b)')
+  else bad('E. childStarted false on header-only')
+  // timeoutMs=0 → single check against the (empty) live events → stall path.
+  if ((await waitForFirstTurn(fakeHandle([]), 0)) === false) ok('E. waitForFirstTurn times out on stall (timeoutMs=0)')
+  else bad('E. waitForFirstTurn times out on stall')
+  // A turn appearing after a later poll flips the verdict (healthy path).
+  setTimeout(() => fakeStarted.push(started), 100)
+  const polling = { agent: { session: { snapshotEvents: () => fakeStarted } } }
+  if (await waitForFirstTurn(polling, 2000)) ok('E. waitForFirstTurn true once turn appears')
+  else bad('E. waitForFirstTurn true once turn appears')
+} catch (error) {
+  bad('track E', String(error?.stack ?? error))
 }
 
 console.log('\n=== VERIFY RESULTS ===')

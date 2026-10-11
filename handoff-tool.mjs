@@ -115,6 +115,38 @@ export function forkSeed(session) {
   return { seed, seedLength: seed.length }
 }
 
+/**
+ * Verify the child's first turn ACTUALLY started (#44, 2026-10-11 IRIS
+ * incident): `followup()` queues the prompt and wakes the driver, but the
+ * wake can be lost — the child then sits header-only with a queued message
+ * while this tool claimed "已开始处理". Poll the child's live events for a
+ * `turn/start` until the deadline.
+ */
+export function childStarted(handle) {
+  // snapshotEvents() is the host's live, documented accessor (tests/verify.mjs
+  // tracks A/D read the child through it); `.events` is the raw live array
+  // forkSeed already consumes. Either is ascending-seq and unbounded for a
+  // just-spawned session — the early `turn/start` cannot be truncated away.
+  const events = handle.agent.session?.snapshotEvents?.() ?? handle.agent.session?.events ?? []
+  return events.some((ev) => ev?.type === 'turn/start')
+}
+
+// #44 bounds: turn/start is persisted BEFORE the first model call, so the wait
+// covers spawn+dispatch latency (the observed high-concurrency IRIS 22:48
+// scenario), not model latency.
+const FIRST_TURN_TIMEOUT_MS = 15_000
+const REWAKE_TIMEOUT_MS = 10_000
+const POLL_INTERVAL_MS = 250
+
+export async function waitForFirstTurn(handle, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (childStarted(handle)) return true
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+  }
+  return childStarted(handle)
+}
+
 /** One atomic handoff: write the file, spawn the child, start its first turn. */
 async function executeHandoff(ctx, args, exec) {
   const agent = exec?.agent
@@ -252,13 +284,52 @@ async function executeHandoff(ctx, args, exec) {
     promptError = String(error?.message ?? error)
   }
 
+  // 4. VERIFY the child's first turn actually started (#44 — never trust the
+  // queue). On a lost driver wake, re-wake ONCE with a marked probe message
+  // (the queued document is still first in the inbox, so the probe only ever
+  // runs AFTER the document turn, never instead of it).
+  let wakeRetry = false
+  let stalled = false
+  if (!promptError) {
+    if (!(await waitForFirstTurn(handle, FIRST_TURN_TIMEOUT_MS))) {
+      ctx.logger.warn(`handoff_tool: child '${handle.agent.session.id}' first turn not started within ${FIRST_TURN_TIMEOUT_MS}ms — re-waking once`)
+      wakeRetry = true
+      try {
+        handle.agent.followup({
+          id: randomUUID(),
+          role: 'user',
+          content: [{ type: 'text', text: '（唤醒探测：上一条 handoff 文档才是本会话任务。若尚未开工，按该文档开工；已在执行则忽略本条并继续。）' }],
+          source: { kind: 'user' },
+        })
+      } catch (error) {
+        ctx.logger.warn(`handoff_tool: re-wake failed: ${String(error?.message ?? error)}`)
+      }
+      stalled = !(await waitForFirstTurn(handle, REWAKE_TIMEOUT_MS))
+    }
+  }
+  if (stalled) {
+    ctx.logger.warn(`handoff_tool: child '${handle.agent.session.id}' STILL stalled after re-wake — human must open the session manually`)
+  }
+
+  // Tri-state report (#44 AC③). Attribution note: after a re-wake we know A
+  // turn started, not WHICH message went first — either way the handoff
+  // document sits in the child's history as the task.
+  const statusLine = promptError
+    ? `（注意：首条提示词投递失败 — ${promptError}；可手动打开会话后发送文档）`
+    : stalled
+      ? '⚠ 首条提示词已入队但补唤醒后仍未观测到子会话首 turn 启动（driver 唤醒疑似丢失，#44）。请 human 手动打开该子会话并发送任意消息续跑；【不要重复调用本工具】——会重复派单（可能重做已完成的票）。'
+      : wakeRetry
+        ? '首 turn 一度未启动，补唤醒一次后已观测到启动（文档与唤醒探测谁先行未区分，但 handoff 文档已在子会话历史中作为任务）。'
+        : '交接文档已投递，子会话首 turn 已确认真实启动（turn/start 已观测）。'
+
   return {
+    // stalled=true is the protocol-level anti-duplicate flag (#44 review):
+    // the model-facing text above is advisory, this field is checkable.
+    ...(stalled ? { stalled: true } : {}),
     text: [
       `Handoff 子会话已创建：${handle.agent.session.id}`,
       writeError ? `文件写入失败：${writeError}` : `可移植交接文档：${filePath}`,
-      promptError
-        ? `（注意：首条提示词投递失败 — ${promptError}；可手动打开会话后发送文档）`
-        : '交接文档已作为首条提示词投递，子会话已开始处理。',
+      statusLine,
       '请在侧边栏切换到新会话；本会话保持可恢复。',
     ].join('\n'),
   }
@@ -282,6 +353,9 @@ export function apply(ctx) {
         additionalProperties: false,
         properties: {
           text: { type: 'string' },
+          // #44: set ONLY on the still-stalled path — protocol-level
+          // anti-duplicate signal (text alone is advisory).
+          stalled: { type: 'boolean' },
         },
         required: ['text'],
       },
