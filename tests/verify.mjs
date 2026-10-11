@@ -123,6 +123,13 @@ try {
       } else {
         bad('A. handoff boundary section', '交接边界/不是本会话的任务指令 missing from document')
       }
+      // C1/#35: the artifact manifest section (path + sha256) must be present
+      // so the child can verify artifacts mechanically before starting.
+      if (text.includes('产物清单') && text.includes('sha256')) {
+        ok('A. handoff document carries the artifact manifest (path + sha256, machine-checkable)')
+      } else {
+        bad('A. handoff artifact manifest', '产物清单/sha256 missing from document')
+      }
     } else {
       bad('A. handoff child first user message', `events=${childEvents.map(ev => ev.type).join(',')}`)
     }

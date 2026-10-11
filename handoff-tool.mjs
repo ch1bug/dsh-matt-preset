@@ -54,7 +54,7 @@ const handoffSchema = {
     document: {
       type: 'string',
       description:
-        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section.',
+        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section. The tool appends the 环境快照, 产物清单 (path + sha256, child verifies mechanically — replace the placeholder entries with real ones), and 交接边界 sections; do not duplicate them.',
     },
     focus: {
       type: 'string',
@@ -151,6 +151,16 @@ async function executeHandoff(ctx, args, exec) {
     '- 已确认决策: ',
     '- 下一步: ',
   ].join('\n')
+  // 产物清单 (artifact manifest, C1/#35): each line is a path + sha256 the
+  // child can verify mechanically before starting (sha256sum / Get-FileHash).
+  // Template, like the snapshot: structure is tool-guaranteed, entries are
+  // the author's. Any mismatch → report and stop, never start on a bad
+  // manifest; a handoff with no artifacts deletes the section.
+  const artifacts = [
+    '## 产物清单（子会话逐条机械校验）',
+    '<!-- 每行格式：`<相对路径> sha256:<64位十六进制>`。子会话开工前逐条校验存在性+哈希（sha256sum / Get-FileHash）；任一缺失或不符 → 报告并停下，不开工。无产物 → 删除本节。 -->',
+    '- （替换本行：path/to/artifact sha256:0000…）',
+  ].join('\n')
   // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. A
   // document that carries a "## 本会话任务（human 已定向）" section is an
   // ASSIGNMENT — the child verifies the snapshot, restates understanding, and
@@ -191,7 +201,7 @@ async function executeHandoff(ctx, args, exec) {
     )
   }
   const invocation = isAssignment && skill !== 'none' ? `/${skill}` : ''
-  const documentText = [invocation, invocation ? '' : null, prefix, '', body, '', snapshot, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
+  const documentText = [invocation, invocation ? '' : null, prefix, '', body, '', snapshot, '', artifacts, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')

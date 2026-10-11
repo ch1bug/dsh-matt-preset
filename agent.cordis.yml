@@ -203,14 +203,22 @@
         EVERY issue from the process (A/B/C, created and updated); the push
         happens only after the human confirms that summary. The batch-end push
         is therefore NOT pre-authorized — it is the normal report → confirm →
-        push flow, with a mandatory full-issue summary first.
+        push flow, with a mandatory full-issue summary first. Every ticket
+        line in the wrap summary carries the three evidence elements (command,
+        exit code, evidence path — the test output itself counts); a line
+        missing any is BLOCKED, not done —
+        this adds evidence, it does NOT relax the CI confirmation (DONE and
+        the batch-end gate keep their full force).
       - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
         the next code push.
       - BATCH STATE IS EXPLICIT (this is what keeps batches from piling up):
         on declaration write .scratch/batch-state.md (members, end point,
-        progress, unpushed-commit list); update it after every ticket. You
-        must always know you are in a batch, what is left, and where the last
-        push checkpoint was.
+        progress, unpushed-commit list); update it after every ticket. Each
+        Progress row carries the evidence pointer — proving command + exit
+        code + evidence path (the test output itself counts; no separate
+        artifact needed); a row missing any element is BLOCKED, not done.
+        You must always know you are in a batch, what is left, and where the
+        last push checkpoint was.
       - Anti-pileup guardrails: (a) a batch contains only its declared
         members — adding a ticket requires an explicit human extension; (b)
         at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push

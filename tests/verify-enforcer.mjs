@@ -257,6 +257,10 @@ await emitSessionEvent(ctx, agent2.session, {
 const v14b = await render2()
 if (v14b.includes('AUTO-HANDOFF') && v14b.includes('batch-state.md')) ok('V14b. close-out with batch-state.md → AUTO-HANDOFF nudge (one-shot)')
 else bad('V14b. batch nudge missing', v14b.slice(-240))
+// C1/#35: the nudge must carry the evidence trio (command, exit code, evidence
+// path) and the BLOCKED rule — evidence is part of local closure.
+if (v14b.includes('exit code') && v14b.includes('evidence path') && v14b.includes('BLOCKED')) ok('V14b+. close-out nudge carries the evidence trio + BLOCKED rule')
+else bad('V14b+. evidence trio missing from close-out nudge', v14b.slice(-240))
 const v14c = await render2()
 if (!v14c.includes('AUTO-HANDOFF')) ok('V14c. batch nudge consumed after firing (no repeat)')
 else bad('V14c. batch nudge repeated', v14c.slice(-160))

@@ -38,6 +38,11 @@ everywhere, or change `marker:`.
 - A tool call matching the gate list gets a one-shot **⚠ High-risk action**
   line on the next assembly (consumed after firing). For `git push` it adds a
   CI-verification reminder, with the batch-end summary-confirmation flow noted.
+- A batch close-out (ticket reported done while `.scratch/batch-state.md`
+  exists) gets a one-shot **AUTO-HANDOFF** nudge, plus the close-out evidence
+  rule: the ticket's batch-state Progress row must carry the three evidence
+  elements — proving command, exit code, evidence path (the test output itself
+  counts); a row missing any element is BLOCKED, not done.
 
 ## Gate list
 

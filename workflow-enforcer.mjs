@@ -383,7 +383,11 @@ async function reminderText(agent, config, ctx, assembled) {
         'needs a human decision gate, the human asked to pause, or this was',
         'the batch end point → go to the batch-end wrap (summary → confirm →',
         'push). A "本会话收尾" is not a stop-and-wait when a successor is',
-        'named.',
+        'named. Close-out evidence is part of local closure: the ticket\'s',
+        'batch-state Progress row records the three evidence elements —',
+        'proving command, exit code, evidence path (the test output itself',
+        'counts; no separate artifact needed). A row missing any element is',
+        'BLOCKED, not done.',
       ].join(' '))
     }
   }

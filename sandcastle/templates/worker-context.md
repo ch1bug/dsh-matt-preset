@@ -29,3 +29,22 @@
 ## 输出
 
 代码优先。最多三行说明：跳过了什么、何时该加。`[code] → skipped: [X], add when [Y].`
+
+## check-runner 输出协议（验证输出可机械解析）
+
+验证命令的输出逐条落协议行，让编排者/审计只看输出尾部即可判定，不必信 worker 自述：
+
+- 每个验证一条：`[PASS] <验证名>` 或 `[FAIL] <验证名>`
+- `[FAIL]` 紧跟一行：`Next: <恢复动作>`（重跑命令 / 定位点——"修复"不是恢复动作，要可执行的下一步）
+- 结尾一条汇总：`[SUMMARY] <N> pass / <M> fail`
+
+示例：
+
+```
+[PASS] cargo test --workspace
+[FAIL] cargo clippy --all-targets -- -D warnings
+Next: cargo clippy --all-targets 2>&1 | Select-String "warning" — 3 处 unused import，修 src/lib.rs:42 起
+[SUMMARY] 3 pass / 1 fail
+```
+
+（exit code 说话——协议行是给人读的汇总，不自证通过；编排者仍以 exec exit code 为合并门。）
