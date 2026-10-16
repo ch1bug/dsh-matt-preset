@@ -59,10 +59,22 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 - **一次性编辑脚本的自校验要对「冻结基线」，不要对改前内容**：改前内容里还带着你正要删掉的
   marker，拿它比必然"失败"——#56 为此误报过一次 `rejoin is NOT byte-lossless`（实际无损），
   白烧一轮。仓库里已有注意源（`tests/fixtures/workflow-body-v1.txt`）就直接对，别另存备份。
-- **证明新守卫非空洞**：回退被守卫的实现，用例必须**红**（同义反复的用例是负债）。回退用
-  `git show HEAD:<file>` 写进临时副本再换回；**别用 `git stash push -- <file>`**——它同时重置
-  index（暂存态丢失）并按 autocrlf 把该文件重写成 CRLF（#66 会话实测：LF → 65 CRLF），事后要
-  重新 `git add` 并核对行尾。
+- **证明每条新断言非空洞**（不只是"守卫"：隔离 / 清理这类辅助环同样算）：把被断言的输入换成反例，
+  用例必须**红**——说不出"什么输入能让它红"就是同义反复（负债）。#75 实例：`--port 0` 下断言"分到的
+  端口不是保留口"**恒真**（复核才抓到），改成保留口前后占用快照后才可红。
+- **扰动要打在运行时真正读的那份上**：本仓 preset 装载读的是**生成的载体** `cordis.patch.yml`
+  （源 `agent.cordis.yml` 改了要经 `tests/verify-bundle-sync.mjs` 同步才生效）。#75 实测：扰动源文件
+  → **整跑全绿、零证明**，白一次实例跑 + 一次 52k 字符的载体通读。
+- **回退扰动的机械坑**：回退用 `git show HEAD:<file>` 写进临时副本再换回；**别用
+  `git stash push -- <file>`**——它同时重置 index（暂存态丢失）并按 autocrlf 把该文件重写成 CRLF
+  （#66 会话实测：LF → 65 CRLF），事后要重新 `git add` 并核对行尾。用 `git checkout -- <file>` 回退后
+  **编辑前要重新 `read`**（FS 版本守卫报 `file changed since it was read`）；`old_string` 在多处分叉处
+  重复时（如 `mountOrWarn(profile, …)` 在 install/upgrade 两处同形），带上相邻行做锚点。
+- **杀子进程后别立刻 `process.exit`**：等 `exit` 事件后再等 stdout/stderr 管道 `close`。否则 Windows 上
+  会撞 libuv 断言 `!(handle->flags & UV_HANDLE_CLOSING)`，**退出码变成崩溃码**（#75 实测
+  `-1073740791`），把"哪一环红"的读数埋掉；成功路径可能只因后面还有别的 `await` 而侥幸躲过。
+  （`tests/verify-live-tool-call.mjs` 旧注释把这条断言当"噪音、不影响结论"——**已实测证伪**；
+  收尾代码的修法随 #81 抽共享挂具时一并带过去。）
 - **installer 的 CLI 用例可以完全离线**：`--root <tmp>` 是纯存储模式（不碰 profile、不需要
   `dsh`）；fixture 里放 `node_modules/yaml/package.json` stub 即可满足运行时依赖解析
   （`createRequire` 锚在**来源包自身**，走不到仓外 node_modules），并用 `manifest.json` 的
@@ -138,9 +150,18 @@ $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-
 实测结果（2026-10-16，装上包装后）：`verify-installer.mjs` **11/11、零 loud skip**（此前 4 条 link
 断言 + e2e 全是 loud skip）；`node scripts/verify-all.mjs` 里 `verify-installer` 由 `PASS*` 变
 **`PASS`**（#67 时基线 20/21；#75 加入 `verify-clean-env-e2e.mjs` 后为 **21/22**，无 dsh 时 20/22）。
-`verify-clean-env-e2e.mjs` **16 环全绿、exit 0、零 loud skip**（#75；store 路径 /
-profile link / 载体 loader row 三处人为偏差分别使安装环、安装+启动+会话环、启动+turn 环变红）。
+`verify-clean-env-e2e.mjs` **16 环全绿、exit 0、零 loud skip**（#75）。非空洞四处（均已回退）：store
+路径偏差 → 安装环 A1/A2/A3 红；去掉 profile link → A3/B1/C1 红；去掉载体的 workflow-core loader row →
+B1/D1 红；把实例改到保留口 → B5 红。
 **有 dsh 那半边在本机可验证——别再默认"跳过了事"。**
+
+**profile 的"面"由初始化模板决定**（2026-10-16 实测，#75）：起 **web 面**的 profile 必须由 shipped
+web 模板初始化（`--profile <p> --from-default-profile web …`）。`dsh plugin --profile <p> add <store>`
+给**自建新名字**的 profile 只建出 `@deepseek-ai/dsh-base`（+ 挂进去的 preset），实例**不会**打印
+`dsh web:`（实测 60s 无该行 → 会被误读成"起不来"），stderr 出
+`preset-…: pending (waiting for service: agentPresets)`。用 shipped 名（如 `web`）时自建 layer 自带该
+模板的 bundles（`dsh-base` + `dsh-web-app`）——所以 `bin/install.mjs install`（默认 profile `web`）一条
+命令就能起 web 面（#75 的用例仍显式 bootstrap：它要的是**新名字** `matt-clean` 上的 web 面）。
 
 ## 4. 工具链结论（全部实测，别重复试错）
 

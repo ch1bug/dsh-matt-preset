@@ -95,7 +95,9 @@ let child
 const cleanup = async () => {
   if (child !== undefined) {
     // 等子进程真正退出再收尾：kill 后立刻 exit 会触发 libuv 的
-    // "UV_HANDLE_CLOSING" 断言噪音（实测），虽不影响结论但污染输出。
+    // "UV_HANDLE_CLOSING" 断言（实测）。**它不止是噪音**：#75 实测在失败路径下退出码会变成崩溃码
+    // （-1073740791），把"哪一环红"的读数埋掉——完整收尾还要等 stdout/stderr 管道 close；这一步的
+    // 修法随 #81 抽共享挂具时一并带过去（dev-environment §0.2 记了配方）。
     const exited = new Promise(r => child.once('exit', r))
     child.kill('SIGKILL')
     await Promise.race([exited, new Promise(r => setTimeout(r, 5000))])
