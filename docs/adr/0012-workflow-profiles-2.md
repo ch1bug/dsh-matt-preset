@@ -82,9 +82,27 @@ delta，覆盖粒度 = **空行分块**（当时 12 节）。#56 要在同一机
 - 骨架从 12 节变 **15 节**（`workflow-body.txt` 只多了 3 行 marker）；`standard`（默认档）
   仍是 #54 基线的逐字节副本 —— 加档零漂移（AC3）。
 - 加档成本保持 #55 的三件套：一个 `workflow-profile-<name>.txt` + `PROFILES` 一行 +
-  `package.json files` **显式条目**（文件名通配会被安装器静默展开成空，见 #66；
-  `verify-workflow-profiles-2.mjs` P7 断言「显式」、P8 用安装器自身的 `expandEntry`
-  校验覆盖）。
+  `package.json files` **显式条目**（`verify-workflow-profiles-2.mjs` P7 断言「显式」、
+  P8 用安装器自身的 `expandEntry` 校验覆盖）。
+  > 更新（2026-10-16，**#66**）：上面括号原写的理由是"文件名通配会被安装器静默展开成空"。
+  > #66 已修——`lib/payload.mjs` 按 npm 最小语义支持**文件名前缀通配**（`dir/name-*.txt`），
+  > 且任何零展开条目都响亮报错（安装器 die、不落 store）；守卫在
+  > `tests/verify-payload-manifest.mjs`（**该文件自有**的 P4–P10，与 profiles 系列的
+  > P5–P8 不同号）。
+  > 复核时实测修正了票面口径：旧实现**只有通配符占满第一段**的写法能用（`*.mjs`）——
+  > 拿 HEAD 版对临时包实测，`a*.mjs`、`dir/*`、`dir/name-*.txt` **全部**展开成空；
+  > 票面"目录前缀通配（前缀以 `/` 结尾）可用"并不成立，修法①按 dirname 取目录时顺带
+  > 把它们一并修正（`verify-payload-manifest.mjs` P6 因此断言的是**修正后**的目录通配，
+  > 不是"现有行为不变"）。
+  > 另一处票面 AC 冲突（本票按票面 Desired behavior 取 AC3）：显式条目**不存在**时，
+  > 行为从"静默丢弃"变成"响亮 die"——AC2 字面要求"精确路径的现有行为不变"，与修法②/
+  > AC3"任何解析出 0 个文件的条目都要响亮"互斥；取后者（`files` 是唯一发货契约）。
+  > 两条已知残余面（均实测）：①判据是"零展开"而非"少于预期"——部分命中的条目仍可能
+  > 发货不全（`files` 表达不了预期数量）；②最小子集以外的写法偏差各异：通配落在**目录段**
+  > （`dir*/a.txt`、`**/*.mjs`）与 `?`/`{a,b}`（被当字面量、展开成不存在的路径）都零命中 →
+  > **响亮装不上**（无逃生阀；`files` 由本仓自己维护），而 `dir/**` 会**静默退化成
+  > `dir/*`**（不递归、不报错，直接把直接子目录当条目一起发货）——这一条才是静默的语义
+  > 偏差。显式条目仍是本仓的约定与断言（P7），但不再是绕开缺陷的手段。
 - 验证：`tests/verify-workflow-profiles-2.mjs`（T1–T5 机制 / AC3 标准零漂移与拆分组连续 /
   AC1 ptc 结构与 **PTC 目标形态挂载** + marker 守卫 / AC2 minimal 比例、结构与 marker 守卫 /
   P5–P8 注册与打包）。目标形态是**真实行**：`dsh-ptc-runtime-node` + `dsh-workflow-ptc` +

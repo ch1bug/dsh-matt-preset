@@ -2,8 +2,8 @@
  * verify-payload-manifest.mjs — package.json `files` 白名单的**离线**守卫
  * （retro 2026-10-16 第 1 项；对应 issue #66 那类"清单对、货少发"）。
  *
- * 为什么存在：展开规则原在 bin/install.mjs 内部，而该文件 import 即执行 CLI
- * （无 main 守卫）→ 无法单测。于是 #55 实测到的缺陷默认套件全绿：
+ * 为什么存在：展开规则原在 bin/install.mjs 内部，而该文件当时 import 即执行 CLI
+ * （main 守卫是同一 retro 才补上的）→ 无法单测。于是 #55 实测到的缺陷默认套件全绿：
  * `workflow-profile-*.txt` 这类**文件名前缀通配**被 expandEntry 静默展开成空数组，
  * payload 少发货，而清单 / manifest / 安装日志全都正常；唯一的防线是环境门禁
  * （DSH_MATT_INSTALLER）下的 verify-installer，常规 `pnpm test` 看不到。
@@ -11,8 +11,21 @@
  * 本用例用**安装器自己的实现**（lib/payload.mjs，单一事实源；不重写一份语义），
  * 离线断言每个白名单条目至少解析出一个现存文件——#66 落地前它保证缺陷变红，
  * 落地后它保证没有条目再被静默吞掉。
+ *
+ * #66 落地后分两层覆盖（都在临时包上离线复现，不需要环境门禁）：
+ *   - 展开规则（P4–P6）：文件名前缀通配命中、目录通配、`*.mjs` 不回归；
+ *   - 响亮失败（P7–P9）：零展开条目（通配没命中 / 显式条目不存在）报错并点名条目，
+ *     安装器 CLI 退出非 0 且不落 store（宁可不装，也不装一半）；
+ *   - 正向端到端（P10）：CLI 真装一次，通配命中的文件落进 store、manifest.files 一致
+ *     （fixture 自带 `node_modules/yaml` stub，所以不依赖仓外依赖、fresh clone 也不会红）。
+ *
+ * 本文件的 P 编号是**自有序列**（P1–P10）：与 `tests/verify-workflow-profiles.mjs`
+ * （P1–P4）和 `tests/verify-workflow-profiles-2.mjs`（P5–P8）各自独立，引用时带文件名。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expandEntry, payloadOf } from '../lib/payload.mjs'
@@ -24,22 +37,20 @@ const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
-// ── P1: 没有条目被静默吞掉 ──────────────────────────────────────────────────
-const expansions = await Promise.all(
-  PKG.files.map(async (entry) => ({ entry, files: await expandEntry(REPO, entry) })),
-)
-const silent = expansions.filter(({ files }) => !files.some((f) => existsSync(join(REPO, f))))
-if (Array.isArray(PKG.files) && PKG.files.length > 0 && silent.length === 0) {
+// ── P1–P3: 本仓清单的断言（用安装器自己的实现，不重写一份语义） ─────────────
+// payloadOf 已把"条目零展开"升级为抛错（#66），所以这里**不再手抄一遍检测逻辑**：
+// 捕获到的错误就是 P1 的判据，消息里已列出全部未解析条目（诊断不丢；裸 await 会让
+// 真回归以未捕获栈退出，连结果表和条目名一起丢掉）。
+let payload = null
+let payloadError = null
+try { payload = await payloadOf(REPO) } catch (error) { payloadError = String(error?.message ?? error) }
+if (payload !== null) {
   ok('P1. every files entry resolves to at least one existing file', `${PKG.files.length} entries`)
 } else {
-  bad(
-    'P1. files entry resolves to NOTHING (installer would silently ship without it)',
-    silent.length > 0 ? silent.map(({ entry }) => entry).join(', ') : 'package.json has no files whitelist',
-  )
+  bad('P1. files entry resolves to NOTHING (installer dies instead of shipping short)', payloadError)
 }
 
-// ── P2: 展开结果就是安装器要拷的 payload ─────────────────────────────────────
-const { entries } = await payloadOf(REPO)
+const entries = payload?.entries ?? []
 if (entries.length >= 10 && new Set(entries).size === entries.length) {
   ok('P2. payloadOf() yields a non-empty, duplicate-free payload', `${entries.length} paths`)
 } else {
@@ -54,6 +65,88 @@ if (patchPath !== undefined && entries.includes(patchPath)) {
 } else {
   bad('P3. bundle patch in payload', `declared=${String(patchPath)} present=${String(entries.includes(patchPath))}`)
 }
+
+// ── P4–P6: 展开规则本身（#66 的票面现象，在临时包上离线复现） ────────────────
+// 为什么要临时包：本仓的 files 清单**不含文件名通配**（#66 明确不改清单；它唯一的通配
+// 是根级 `*.mjs`），所以只有造一个写成通配的包，才能把"文件名前缀通配被静默展开成空"
+// 变成默认套件下的红灯。
+const FX = await mkdtemp(join(tmpdir(), 'dsh-payload-'))
+// 中途抛出也要清干净（真回归时别把 tmp 留一地）：exit 钩子做同步 best-effort 清理。
+process.on('exit', () => { try { rmSync(FX, { recursive: true, force: true }) } catch { /* already gone */ } })
+await mkdir(join(FX, 'deltas'), { recursive: true })
+for (const n of ['name-a.txt', 'name-b.txt', 'other.txt']) await writeFile(join(FX, 'deltas', n), n)
+await writeFile(join(FX, 'root-a.mjs'), '')
+
+const filenameGlob = (await expandEntry(FX, 'deltas/name-*.txt')).sort()
+if (JSON.stringify(filenameGlob) === JSON.stringify(['deltas/name-a.txt', 'deltas/name-b.txt']))
+  ok('P4. a file-name prefix glob expands to the files it matches (#66)', filenameGlob.join(', '))
+else bad('P4. file-name prefix glob', `got ${JSON.stringify(filenameGlob)} — #66: npm 语义下应为 name-a/name-b`)
+
+const rootGlob = (await expandEntry(FX, '*.mjs')).sort()
+if (JSON.stringify(rootGlob) === JSON.stringify(['root-a.mjs']))
+  ok('P5. the root `*.mjs` glob still expands (AC: existing behaviour unchanged)')
+else bad('P5. root glob regression', JSON.stringify(rootGlob))
+
+const dirGlob = (await expandEntry(FX, 'deltas/*')).sort()
+if (JSON.stringify(dirGlob) === JSON.stringify(['deltas/name-a.txt', 'deltas/name-b.txt', 'deltas/other.txt']))
+  ok('P6. a directory glob lists that directory (npm semantics; name prefix may be empty)')
+else bad('P6. directory glob', JSON.stringify(dirGlob))
+
+// ── P7–P8: 零展开必须响亮（#66 修法②：files 是唯一发货契约） ────────────────
+// 两个入口都要覆盖：文件名通配没命中、以及显式条目不存在——后者 #66 之前是
+// payloadOf 按条目名 existsSync 后**静默丢弃**，正是"清单对、货少发"。
+await writeFile(join(FX, 'package.json'),
+  JSON.stringify({ files: ['root-a.mjs', 'deltas/gone-*.txt', 'missing.txt'] }))
+let loud = null
+try { await payloadOf(FX) } catch (error) { loud = String(error?.message ?? error) }
+const bothNamed = loud !== null && loud.includes('deltas/gone-*.txt') && loud.includes('missing.txt')
+if (bothNamed)
+  ok('P7. every entry resolving to nothing is a loud error naming the entry (#66)')
+else bad('P7. zero-resolution entry',
+  loud === null ? 'payloadOf() returned silently — the payload would ship short' : `message incomplete: ${loud}`)
+
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['root-a.mjs', 'deltas/name-*.txt'] }))
+let good = null
+try { good = (await payloadOf(FX)).entries.slice().sort() } catch (error) { good = `threw: ${String(error?.message ?? error)}` }
+if (Array.isArray(good) && JSON.stringify(good) === JSON.stringify(['deltas/name-a.txt', 'deltas/name-b.txt', 'root-a.mjs']))
+  ok('P8. a fully-resolving whitelist still yields exactly its payload (no false alarm)')
+else bad('P8. payloadOf on a good whitelist', JSON.stringify(good))
+
+// ── P9: 安装器 CLI 上的可见失败（真正的"货不对板"防线） ─────────────────────
+// 库层抛错只是手段；契约是**安装器不能再静默少发货**。`--root` = 纯存储模式（不碰
+// profile、也不需要 dsh），所以离线套件里就能断言：退出码非 0、消息点名那条条目、
+// 且 store 根本没落盘（宁可不装，也不装一半）。
+// 这条断言依赖 installTo 的语句顺序——先 `payloadOfOrDie`、后 `rm/mkdir(target)`
+// （bin/install.mjs 里 payload 解析在清空目标之前）；若顺序变了，"不落 store" 会失效。
+const store = join(FX, 'store')
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['root-a.mjs', 'deltas/gone-*.txt'] }))
+const cli = spawnSync(process.execPath, [join(REPO, 'bin', 'install.mjs'), 'install', '--root', store, '--from', FX], { encoding: 'utf8' })
+if (cli.status !== 0 && /deltas\/gone-\*\.txt/.test(cli.stderr ?? '') && !existsSync(store))
+  ok('P9. the installer CLI dies loudly (no store written) on an unresolved files entry (#66)')
+else bad('P9. installer CLI loudness', `exit=${cli.status} store=${existsSync(store)} stderr=${(cli.stderr ?? '').trim().slice(0, 160)}`)
+
+// ── P10: 正向端到端——通配命中的文件**真的落进 store**（#66 症状的正面证明） ──
+// P4/P8 只证明"规则层"能展开；票面症状是"装完 store 里没有那个文件"，所以这里真装一次。
+// fixture 自带 `node_modules/yaml` stub：安装器的运行时依赖解析锚在来源包自身，有 stub
+// 就走不到仓外 node_modules——因此这条用例在 fresh clone 上也成立（不引入环境门禁）。
+// `manifest.dependencies.yaml` 等于 stub 版本，同时证明"用的正是 fixture 里的 stub"。
+await mkdir(join(FX, 'node_modules', 'yaml'), { recursive: true })
+await writeFile(join(FX, 'node_modules', 'yaml', 'package.json'),
+  JSON.stringify({ name: 'yaml', version: '0.0.0-stub' }))
+await writeFile(join(FX, 'package.json'),
+  JSON.stringify({ name: 'fx', version: '9.9.9', files: ['root-a.mjs', 'deltas/name-*.txt'] }))
+const okRoot = join(FX, 'store-ok')
+const fresh = spawnSync(process.execPath, [join(REPO, 'bin', 'install.mjs'), 'install', '--root', okRoot, '--from', FX], { encoding: 'utf8' })
+const okStore = join(okRoot, 'matt')
+const landed = ['deltas/name-a.txt', 'deltas/name-b.txt'].every((f) => existsSync(join(okStore, f)))
+const manifest = existsSync(join(okStore, 'manifest.json'))
+  ? JSON.parse(await readFile(join(okStore, 'manifest.json'), 'utf8')) : {}
+const expectedFiles = ['deltas/name-a.txt', 'deltas/name-b.txt', 'root-a.mjs']
+const manifestMatches = JSON.stringify((manifest.files ?? []).slice().sort()) === JSON.stringify(expectedFiles.slice().sort())
+if (fresh.status === 0 && landed && manifestMatches && manifest.dependencies?.yaml === '0.0.0-stub')
+  ok('P10. the installer really ships every glob-matched file (store + manifest.files agree)', (manifest.files ?? []).join(', '))
+else bad('P10. installer positive glob case',
+  `exit=${fresh.status} landed=${landed} files=${JSON.stringify(manifest.files)} yaml=${String(manifest.dependencies?.yaml)} stderr=${(fresh.stderr ?? '').trim().slice(0, 160)}`)
 
 console.log('\n=== PAYLOAD MANIFEST VERIFY (offline) ===')
 console.log(results.join('\n'))

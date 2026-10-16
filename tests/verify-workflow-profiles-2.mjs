@@ -428,9 +428,10 @@ else bad('AC2m. minimal marker scope guard', minimalMarkerless.slice(0, 200))
 
 // ── packaging: every profile delta ships with the plugin ───────────────────
 // Coverage is checked with the INSTALLER'S OWN rule (lib/payload.mjs), and the
-// two new files are required as EXPLICIT entries: #66 proved a file-name glob
-// entry expands to nothing, so a profile can be silently left out of the
-// payload unless the entry is literal.
+// two new files are required as EXPLICIT entries: a literal shipping manifest is
+// this repo's convention for `files`. #66 has since made a file-name glob expand
+// correctly AND made a zero-match entry a loud error, so the explicit entry these
+// assertions require is now a convention (P7), not a workaround for a silent bug.
 const PKG = JSON.parse(readFileSync(REPO + '/package.json', 'utf8'))
 const shipped = readdirSync(REPO).filter(f => /^workflow-profile-.+\.txt$/.test(f)).sort()
 const expectedDeltas = ['workflow-profile-creative.txt', 'workflow-profile-minimal.txt', 'workflow-profile-ptc.txt']
@@ -440,7 +441,7 @@ else bad('P6. shipped delta files', `found: ${shipped.join(', ') || 'none'}`)
 
 const literal = expectedDeltas.filter(f => (PKG.files ?? []).includes(f))
 if (literal.length === expectedDeltas.length)
-  ok('P7. every delta is an explicit package.json files entry (no glob — #66)')
+  ok('P7. every delta is an explicit package.json files entry (repo convention; #66 fixed the silent glob)')
 else bad('P7. explicit files entries', `missing: ${expectedDeltas.filter(f => !literal.includes(f)).join(', ')}`)
 
 const covered = new Set((await Promise.all((PKG.files ?? []).map(entry => expandEntry(REPO, entry)))).flat())
