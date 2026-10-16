@@ -10,7 +10,7 @@
 - **job-runner 插件** — 拟在 matt preset 挂载的定时任务执行器（形态待访谈确定）。
 - **standing mount** — preset 的常驻挂载，随 DSH 进程存活（首个会话加入时创建）；它存续期间插件可在进程内跑定时器。
 - **~~两阶段 bootstrap（two-phase bootstrap）~~（已废弃，见 D17）** — 曾试验：会话首轮按内置 minimal 预设裁剪（单行 persona + bash + str_replace_editor、输出封顶 1024），首个持久化工具调用后 promote 到全量。理据（上游 dsh-anchored-standard 系）不适用于本部署的模型面，2026-08-18 实测后取消。
-- **完整人设 persona** — persona（系统提示词）直接承载完整 ask-matt 工作流文本（{{model}}/{{cwd}} 渲染时插值）；不再有独立 workflow section（D18）。
+- **完整人设 persona** — ~~persona（系统提示词）直接承载完整 ask-matt 工作流文本（{{model}}/{{cwd}} 渲染时插值）；不再有独立 workflow section（D18）~~——已被 D42/ADR-0010 取代：persona 只留导语句，工作流正文由 workflow-core 插件注入（verbatim-identical）。
 - **handoff 首条提示词** — handoff 文档作为子会话的**第一个 user 消息**投递（`followup()` 立即触发首轮）；子会话随即非 blank、侧边栏立即可见。与旧"文档注入（inbox 合成上下文）"是两种机制。
 - **工作区初始化（workspace initialization）** — 会话早期对无 CONTEXT.md 的 cwd 做自主探测（git/docs/语言信号），建 CONTEXT.md 骨架（"未初始化"标记 + 已核实事实）与空 docs/adr/；只做本地非破坏性步骤，领域决策与外部系统（issue tracker）仍问人。
 - **进度快照（progress snapshot）** — 强制 setup 打断流程前写往 `.scratch/progress.md` 的当前进度摘要（状态/决策/指针），防压缩丢失。
@@ -79,6 +79,8 @@
 - **D40（2026-10-11，#37）** — **Changelog/RELEASE 条目规范（comet 借入 adopt C3）**：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意到**（正例：命令/插件行为/安装方式/persona 门禁变化、破坏性变化+迁移路径；反例：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作）。条目在打 tag 时写、不逐票更新——与 ADR-0002「docs 本地 commit 随批末 push」天然兼容。模板落 docs/RELEASE.md；本仓暂无 CHANGELOG.md，首个 tag 时按模板创建。详见 [docs/adr/0007-changelog-release-convention.md](docs/adr/0007-changelog-release-convention.md)。
 
 - **D41（2026-10-16，#39 拍板）** — **PTC 采纳面与 implement-spec 复评**：① PTC 不进默认路径，作为独立执行形态引入（dsh-ptc-runtime-node + dsh-workflow-ptc，工作流经 #56 ptc profile 适配，七门语义零改动）；② **matt 工作流与 shell-host 是两个独立插件，不得默认用户具备 shell-host**——PTC profile 必须基于默认路径改出，shell-host 用户迁移由 shell-host 侧主导；③ implement-spec 维持 ADR-0005 不 port 全量，采纳面（干跑预检 + ready frontier）独立建票 #61 跟踪。Gotchas（实测）：`plugins` 覆盖=整体替换，patch overlay 会产出 pending 残缺 entry，挂载组合必须单源 patch 合并；workflow `agent()` 的 model 覆盖必须 provider+model 成对传，编排面内 agent 不可再嵌套，schema 子集保持浅层。详见 [docs/adr/0009-ptc-adoption-and-implement-spec.md](docs/adr/0009-ptc-adoption-and-implement-spec.md)。
+
+- **D42（2026-10-16，#54 落地）** — **workflow-core 插件化**：ask-matt 工作流正文（MAIN FLOW + 七门 + BATCH MODE + 辅助节）抽出 persona，改由本仓 `workflow-core.mjs` 经 system-prompt/assemble 注入（`workflow:core` 节，order 10），渲染后与 persona 承载版 verbatim-identical（L1 断言）；persona 前缀只留导语句（含 `ask-matt` 标记，同时喂 enforcer 与 workflow-core 的 marker scope 守卫）。任何 preset 单行挂载 `dsh-matt-preset/workflow-core.mjs`（subpath exports 解析）即得工作流；非 matt preset 显式 `scope: 'all'`。Spike 结论：{{model}}/{{cwd}} 在注入节内照常插值——waterfall 先于 renderPrompt、变量由 agent-loop 每次组装注册；注入文本内任何 `{{…}}` 都走严格校验（malformed/unknown 即抛）。取代 D18 的"全文承载在 persona"形态。详见 [docs/adr/0010-workflow-core-plugin.md](docs/adr/0010-workflow-core-plugin.md)。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 

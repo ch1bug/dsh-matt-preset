@@ -17,6 +17,8 @@
     "agent.cordis.yml",
     "cordis.patch.yml",
     "workflow-gates.yml.example",
+    "workflow-core.mjs",
+    "workflow-body.txt",
     "*.mjs",
     "skills",
     "lang-packs",

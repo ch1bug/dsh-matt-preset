@@ -62,12 +62,17 @@ try {
   results.push('harness A booted (smoke root)')
 
   // ── C2/#36: persona carries test-scope tiering + recovery discipline ────
+  // (#54: the workflow body moved to workflow-core — check the injected
+  // workflow text alongside the persona intro.)
   {
-    const yml = (await readFile(join(MATT_DIR, 'agent.cordis.yml'), 'utf8')).replace(/\r\n/g, '\n')
-    const flat = yml.replace(/\s+/g, ' ')
+    const [yml, body] = await Promise.all([
+      readFile(join(MATT_DIR, 'agent.cordis.yml'), 'utf8'),
+      readFile(join(MATT_DIR, 'workflow-body.txt'), 'utf8'),
+    ])
+    const flat = (yml + '\n' + body).replace(/\r\n/g, '\n').replace(/\s+/g, ' ')
     const has = s => flat.includes(s.replace(/\s+/g, ' '))
     if (has('TEST SCOPE TIERING') && has('RECOVERY DISCIPLINE') && has('not run locally') && has('per-issue done still = local verification + code-review'))
-      ok('A0. persona carries TEST SCOPE TIERING + RECOVERY DISCIPLINE (no-conflict clause intact)')
+      ok('A0. persona/workflow carries TEST SCOPE TIERING + RECOVERY DISCIPLINE (no-conflict clause intact)')
     else
       bad('A0. persona tiering/recovery sections', 'missing TEST SCOPE TIERING / RECOVERY DISCIPLINE / not-run declaration / no-conflict clause')
   }
