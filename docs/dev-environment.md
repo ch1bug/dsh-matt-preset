@@ -48,6 +48,10 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 - **同一类陷阱：`\"` 也不是 pwsh 的转义**（反引号才是）。给 CLI 传含引号/空格的多词正文时，
   `gh issue close --comment "…\"six hard gates\"…"` 会被拆成多个参数
   （报 `accepts 1 arg(s), received 4`）；用 here-string 变量（`$c = @'…'@`）或 `--body-file`。
+  **反引号与 `$` 在双引号里同样会被吃掉**：`gh issue create
+  --title "…\`dir/**\`…"` 会把 markdown 反引号写成 `\`（#66 会话实测，随后用 `gh issue edit`
+  的单引号标题修回，白一往返）——带反引号 / `$` 的标题或正文一律走**单引号**、here-string 或
+  `--body-file`，写完**回读一遍**。
 - **worktree 文本文件是 CRLF**（`core.autocrlf=true`，index 里存 LF）：`edit` 的**多行**
   `old_string`（`\n` 连接）匹配不到 CRLF 内容——用**单行锚点**；插入的新行是 LF，`git add`
   时归一化，仓库无碍。只有**逐字节敏感**的正文（骨架 `workflow-body.txt` 这类要被解析器
@@ -55,6 +59,16 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 - **一次性编辑脚本的自校验要对「冻结基线」，不要对改前内容**：改前内容里还带着你正要删掉的
   marker，拿它比必然"失败"——#56 为此误报过一次 `rejoin is NOT byte-lossless`（实际无损），
   白烧一轮。仓库里已有注意源（`tests/fixtures/workflow-body-v1.txt`）就直接对，别另存备份。
+- **证明新守卫非空洞**：回退被守卫的实现，用例必须**红**（同义反复的用例是负债）。回退用
+  `git show HEAD:<file>` 写进临时副本再换回；**别用 `git stash push -- <file>`**——它同时重置
+  index（暂存态丢失）并按 autocrlf 把该文件重写成 CRLF（#66 会话实测：LF → 65 CRLF），事后要
+  重新 `git add` 并核对行尾。
+- **installer 的 CLI 用例可以完全离线**：`--root <tmp>` 是纯存储模式（不碰 profile、不需要
+  `dsh`）；fixture 里放 `node_modules/yaml/package.json` stub 即可满足运行时依赖解析
+  （`createRequire` 锚在**来源包自身**，走不到仓外 node_modules），并用 `manifest.json` 的
+  `dependencies.yaml === <stub 版本>` 反证"走的是 stub，不是环境里恰好有的 yaml"。实例：
+  `tests/verify-payload-manifest.mjs` 的 P9（反向：不落 store）/ P10（正向：命中的文件真落
+  store）——这条也是 #67（无 dsh 时 verify-installer 硬崩）的修法方向。
 
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 
