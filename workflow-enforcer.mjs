@@ -40,6 +40,9 @@
  * field (shell tools → `arguments.command`; `plugin_manager` →
  * `arguments.action`) and matches the gate words at the COMMAND POSITION of
  * that action's argv — never as a substring over the whole serialized call.
+ * The ticket-lifecycle nudges (关票 / 建票, #82) are judged on the SAME
+ * structured surface: `TICKET_LIFECYCLE` declares their faces (command-position
+ * word runs, plus the `gh api` face as an explicit declaration).
  * A tool with no declared action field (write / edit / pty_send / …) is
  * explicitly NOT covered, so prose that merely mentions `git push` can no
  * longer arm the gate (a false stop costs time and dilutes a reminder the
@@ -91,18 +94,20 @@ const lastCall = new WeakMap()
  * human can verify the claim. */
 const foldIntent = new WeakMap()
 
-/** Sessions that just closed a ticket (`gh issue close` / state=closed).
- * Armed by the tool/call event hook, consumed by the next assemble, which
+/** Sessions that just closed a ticket (`gh issue close`, or the declared
+ * `gh api … state=closed` face). Armed by the tool/call event hook on the
+ * call's structured action surface (#82), consumed by the next assemble, which
  * then nudges ONE fresh-subagent quality spot check: self-assessment runs
  * in the same context it would be judging, so it cannot see its own
  * degradation (O5). */
 const ticketClosed = new WeakMap()
 
 /** Sessions that just CREATED a ticket (`gh issue create`). Armed by the
- * tool/call event hook, consumed by the next assemble, which then reminds
- * the agent that a new ticket is its own session's work (D20) — never
- * chain it into the current session (observed: #498 session built+fixed+
- * closed #517 inline while its own ticket #498 was still open). */
+ * tool/call event hook on the same structured surface (#82), consumed by the
+ * next assemble, which then reminds the agent that a new ticket is its own
+ * session's work (D20) — never chain it into the current session (observed:
+ * #498 session built+fixed+closed #517 inline while its own ticket #498 was
+ * still open). */
 const ticketCreated = new WeakMap()
 
 /** Sessions whose latest assistant text reports a batch ticket close-out
@@ -128,18 +133,59 @@ const GRILL_SKILL_NAMES = ['grilling', 'grill-with-docs', 'grill-me', 'triage']
 /** Prompt prefixes that start a grill/triage session (directed handoffs). */
 const GRILL_PROMPT_PREFIXES = ['/grill', '/triage']
 
-/** Matches an issue-close tool call: `gh issue close N` or a PATCH that
- * sets state=closed on issues/N. */
-const CLOSE_PATTERNS = [
-  /\bgh\s+issue\s+close\b/,
-  /issues\/\d+[^"]*state[=:]["']?closed["']?/i,
-  /["']state["']\s*[:=]\s*["']closed["']/i,
-]
+/** Ticket-lifecycle nudge detections (#82): the arming decision for the 关票
+ * (fresh-subagent spot check, O5) and 建票 (ONE ISSUE PER SESSION, D20) nudges.
+ *
+ * These are NOT ⚠ gates — a project's `dropExternal` must not silently switch
+ * off the D20 reminder — but they are judged by the SAME structured core as the
+ * gates: the call's declared action surface (#79 `actionSurface`), with word
+ * runs matched at a command position (`matchesSurface`). Free text can never
+ * arm a nudge: a `write` / `edit` / `str_replace_editor` body, an `echo`, a
+ * commit message, `--grep`, an inline `--body` or an API-shaped note in a file
+ * are all inert (#82 — the replaced `JSON.stringify(data)` scan armed on every
+ * one of them).
+ *
+ * Every face is DECLARED:
+ *   - `words` — word runs at a command position. Covers `sudo gh issue close
+ *     429`, `cd repo && gh issue close 429` and `bash -c "gh issue create …"`
+ *     (the same wrappers / separators / executed payloads as the gate list).
+ *   - `api` — the 关票 API form. It still rides a shell tool's
+ *     `arguments.command` (the `gh api …` command line); what is DECLARED here
+ *     is its judgement face: command position `gh api` + a declared method flag
+ *     (`-X` / `--method`, value PATCH) + a declared payload flag (`-f` /
+ *     `--raw-field`, `-F` / `--field`, value `state=closed`) + an `issues/<n>`
+ *     path token. Everything else about `gh api` is explicitly NOT covered — a
+ *     stdin body (`--input -`), another method, another payload field, an
+ *     endpoint that sits directly after an undeclared flag (it may be that
+ *     flag's value, e.g. `--hostname`) — and is left to #71's fact probe, never
+ *     to a fuzzy fallback.
+ *
+ * The flag lists live HERE (not in separate constants) so the documented 🗺 in
+ * `docs/workflow-enforcer.md` can be asserted against them (V23c). */
+export const TICKET_LIFECYCLE = {
+  close: {
+    words: ['gh issue close'],
+    api: {
+      command: 'gh',
+      subcommand: 'api',
+      methodFlags: ['-X', '--method'],
+      method: 'PATCH',
+      // `-f`/`--raw-field` (string) and `-F`/`--field` (typed) alike set one
+      // body field; this judgement reads the field KEY=VALUE either way.
+      fieldFlags: ['-f', '--raw-field', '-F', '--field'],
+      field: 'state=closed',
+      path: /issues\/\d+/,
+    },
+  },
+  create: {
+    words: ['gh issue create'],
+  },
+}
 
-/** Matches an issue-create tool call: `gh issue create` (bare or with args). */
-const CREATE_PATTERNS = [
-  /\bgh\s+issue\s+create\b/,
-]
+/** Armed-state flag per lifecycle kind; written by the arming judgement and
+ * consumed by the next assembly. Keys mirror `TICKET_LIFECYCLE` (a kind without
+ * a sink is warned about at runtime and reddens V23 — never silently dropped). */
+const TICKET_ARMED = { close: ticketClosed, create: ticketCreated }
 
 /** Keywords that mark a fold-in claim (lowercased match). */
 /** Keywords that arm context evidence: fold-in claims (agent) or
@@ -453,6 +499,72 @@ export function gateMatches(gate, call) {
   return matchesSurface(gate, actionSurface(call))
 }
 
+/** The value of the declared flag token at `i`: `--flag=value` inline, else the
+ * next argv word (`skip` reports how many words the flag consumed). null when
+ * the token names none of `names` (case-insensitive). */
+function declaredFlagValue(argv, i, names) {
+  const tok = String(argv[i])
+  const eq = tok.indexOf('=')
+  const flag = (eq === -1 ? tok : tok.slice(0, eq)).toLowerCase()
+  if (!names.some(n => n.toLowerCase() === flag)) return null
+  return eq === -1
+    ? { value: String(argv[i + 1] ?? ''), skip: 1 }
+    : { value: tok.slice(eq + 1), skip: 0 }
+}
+
+/** Whether one command segment IS the declared `gh api` face of a
+ * ticket-lifecycle nudge — command position `gh api`, the declared method flag
+ * carrying the declared method, the declared payload flag carrying the declared
+ * field, and a path token matching the declared pattern. Read off argv
+ * positions; never off the serialized call.
+ *
+ * An ENDPOINT candidate must not sit directly after an UNDECLARED flag: that
+ * token may be the flag's value (`gh api --hostname H issues/429`), and reading
+ * it would be reading an undeclared field. Such forms are declared uncovered
+ * (see `TICKET_LIFECYCLE`), the established "declared rather than silent" 口径. */
+function apiFaceMatches(seg, face) {
+  if (seg.command !== face.command || commandToken(seg.primary[1]) !== face.subcommand) return false
+  const argv = seg.primary
+  let method = null
+  let field = false
+  let hasPath = false
+  let afterUndeclaredFlag = false
+  for (let i = 2; i < argv.length; i++) {
+    const m = declaredFlagValue(argv, i, face.methodFlags ?? [])
+    if (m !== null) { method = m.value; i += m.skip; afterUndeclaredFlag = false; continue }
+    const f = declaredFlagValue(argv, i, face.fieldFlags ?? [])
+    if (f !== null) {
+      if (f.value.replace(/\s+/g, '').toLowerCase() === face.field) field = true
+      i += f.skip
+      afterUndeclaredFlag = false
+      continue
+    }
+    const tok = String(argv[i])
+    if (tok.startsWith('-') && tok !== '-') { afterUndeclaredFlag = true; continue }
+    if (afterUndeclaredFlag || !face.path.test(tok)) { afterUndeclaredFlag = false; continue }
+    hasPath = true
+    afterUndeclaredFlag = false
+  }
+  return String(method ?? '').toLowerCase() === face.method.toLowerCase() && field && hasPath
+}
+
+/** Which ticket-lifecycle nudges a tool call arms, judged on its declared
+ * action surface (the #79 core). A tool WITHOUT an action field (write / edit /
+ * str_replace_editor / pty_send / run_code / …) has no surface → arms nothing,
+ * by construction — that is the deliberate "not covered" declaration, not a
+ * silent fallback. */
+function ticketLifecycleHits(call) {
+  const surface = actionSurface(call)
+  if (surface === null) return []
+  const hits = []
+  for (const [kind, face] of Object.entries(TICKET_LIFECYCLE)) {
+    const wordHit = (face.words ?? []).some(word => matchesSurface(word, surface))
+    const apiHit = face.api !== undefined && surface.segments.some(seg => apiFaceMatches(seg, face.api))
+    if (wordHit || apiHit) hits.push(kind)
+  }
+  return hits
+}
+
 /**
  * Effective gates for one agent: project file wins (optionally merged with
  * the default), else default + row-config extras/drops.
@@ -693,13 +805,26 @@ export function apply(ctx, config = {}) {
   ctx.on('session/event', (session, event) => {
     if (event?.type !== 'tool/call') return
     const data = event.data ?? {}
-    lastCall.set(session, { name: data.name, arguments: callArgs(data.arguments) })
-    const surface = JSON.stringify(data)
-    if (CLOSE_PATTERNS.some(re => re.test(surface))) ticketClosed.set(session, true)
-    if (CREATE_PATTERNS.some(re => re.test(surface))) ticketCreated.set(session, true)
+    const call = { name: data.name, arguments: callArgs(data.arguments) }
+    lastCall.set(session, call)
+    // Ticket-lifecycle nudges (#82): judged on the call's declared action
+    // surface — the same structured core as the ⚠ gates. The old
+    // `JSON.stringify(data)` + CLOSE_PATTERNS/CREATE_PATTERNS scan armed on any
+    // prose that mentioned the command (write/edit bodies, echo, commit
+    // messages, --grep), i.e. on text that is not an action at all.
+    for (const kind of ticketLifecycleHits(call)) {
+      const armed = TICKET_ARMED[kind]
+      // A declared kind without a sink is a bug in the declaration; warn
+      // loudly instead of dropping it silently (and V23 reddens).
+      if (armed === undefined) {
+        ctx.logger(name).warn(`ticket-lifecycle kind "${kind}" has no armed-state sink`)
+        continue
+      }
+      armed.set(session, true)
+    }
     // Grill/triage family skill call → interview mode for the whole session.
-    if (String(data.name ?? '').toLowerCase() === 'skill'
-        && GRILL_SKILL_NAMES.includes(String(callArgs(data.arguments).name ?? '').toLowerCase())) {
+    if (String(call.name ?? '').toLowerCase() === 'skill'
+        && GRILL_SKILL_NAMES.includes(String(call.arguments?.name ?? '').toLowerCase())) {
       grillMode.set(session, true)
     }
   })

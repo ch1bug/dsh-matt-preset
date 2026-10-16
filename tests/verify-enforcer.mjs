@@ -1,6 +1,7 @@
 /**
- * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V20; the
- * structured gate-matching block added by #79 is V18–V20).
+ * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V23; the
+ * structured gate-matching block added by #79 is V18–V20, the structured
+ * ticket-lifecycle nudge arming added by #82 is V21–V23).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -482,10 +483,10 @@ else caseDown('V19k. path-gate name lookalike fired', lookalike.includes('High-r
 // (`gh issue close` is deliberately absent: it is NOT a declared gate in
 // DEFAULT_GATES — measured on HEAD, `gh issue close 429` never fired the ⚠ gate
 // (V11 asserts the close NUDGE only), so ticket AC2's positive listing is a
-// 口径 correction to record on #79, not a regression of this change. Whether the
-// missing 关票 gate — and the CLOSE_PATTERNS/CREATE_PATTERNS nudge arming, which
-// still reads the whole serialized call — should be collected in this ticket is
-// a scope decision for the human: both are reported, not silently extended.)
+// 口径 correction recorded on #79, not a regression of this change. The nudge
+// arming that this comment used to flag as still reading the whole serialized
+// call was collected in #82 and is judged on the same structured surface now —
+// see V21–V23 below.)
 const CANONICAL = {
   'git push': { name: 'bash', arguments: { command: 'git push origin main' } },
   'git push --force': { name: 'bash', arguments: { command: 'git push --force origin main' } },
@@ -516,7 +517,180 @@ if (unreachable.length === 0 && unproven.length === 0)
   ok('V20. every declared gate is reachable from its canonical invocation', `${declaredGates.length} gates`)
 else bad('V20. dead / unproven gate', `unreachable: ${unreachable.join(', ') || '—'} | unproven: ${unproven.join(', ') || '—'}`)
 
+// ── V21 (#82): the ticket-lifecycle nudges (关票 fresh-subagent 抽查 / 建票
+// D20) arm on the SAME structured surface as the ⚠ gates — the #79 core
+// (`actionSurface` + `matchesSurface`). A call that merely MENTIONS
+// `gh issue close` / `gh issue create` / `state=closed` in its free text (doc
+// body, `echo`, commit message, `--grep`, an API-shaped note in a file) must
+// arm NEITHER nudge. Non-vacuous: V21a–V21g go red when the arming is widened
+// back to the whole-string scan (`JSON.stringify(data)` + the old CLOSE /
+// CREATE regex scans) — perturbation recorded on #82.
+const NUDGE_TEXT = { close: 'fresh-subagent quality', create: 'New ticket created' }
+const closesText = (text) => text.includes(NUDGE_TEXT.close)
+const createsText = (text) => text.includes(NUDGE_TEXT.create)
+const noNudge = (text) => !closesText(text) && !createsText(text)
+const nudgeDown = (label, text) => bad(label, (text.split('\n').find(l =>
+  closesText(l) || createsText(l)) ?? text.slice(-200)))
+
+const q1 = await afterCall('write', { file_path: 'notes.md', content: '下一步 gh issue close 429，然后收尾' }, 201)
+if (noNudge(q1)) ok('V21a. write body mentioning gh issue close → no 关票 nudge')
+else nudgeDown('V21a. write body armed the close nudge', q1)
+
+const q2 = await afterCall('edit', { file_path: 'notes.md', old_string: 'a', new_string: '跑 gh issue create --title x 建票' }, 202)
+if (noNudge(q2)) ok('V21b. edit body mentioning gh issue create → no 建票 nudge')
+else nudgeDown('V21b. edit body armed the create nudge', q2)
+
+const q3 = await afterCall('str_replace_editor', { command: 'str_replace', path: 'notes.md', file_text: 'gh issue create --title x' }, 203)
+if (noNudge(q3)) ok('V21c. str_replace_editor body mentioning gh issue create → no 建票 nudge')
+else nudgeDown('V21c. str_replace_editor body armed the create nudge', q3)
+
+const q4 = await afterCall('bash', { command: 'git commit -m "note: gh issue create 之后再谈"' }, 204)
+if (noNudge(q4)) ok('V21d. git commit -m "…gh issue create…" → no 建票 nudge (message payload)')
+else nudgeDown('V21d. commit message armed the create nudge', q4)
+
+const q5 = await afterCall('bash', { command: 'echo "gh issue close 429"' }, 205)
+if (noNudge(q5)) ok('V21e. echo "gh issue close 429" → no 关票 nudge (text argument)')
+else nudgeDown('V21e. echo armed the close nudge', q5)
+
+const q6 = await afterCall('bash', { command: 'git log --grep="gh issue create"' }, 206)
+if (noNudge(q6)) ok('V21f. git log --grep="gh issue create" → no 建票 nudge (pattern payload)')
+else nudgeDown('V21f. --grep armed the create nudge', q6)
+
+const q7 = await afterCall('write', { file_path: 'api.md', content: 'gh api -X PATCH repos/o/r/issues/429 -f state=closed' }, 207)
+if (noNudge(q7)) ok('V21g. write body documenting the gh api close face → no 关票 nudge')
+else nudgeDown('V21g. API-shaped prose armed the close nudge', q7)
+
+// V21h is a PIN, not a widening case (same role as V18f): the text layer never
+// armed these nudges, and #79/#82's Out of scope keeps `foldIntent` /
+// `batchClose` / `grillMode` — the text-layer observations — out of the
+// judgement. Only text events arming tool/call would redden it.
+await emitSessionEvent(ctx, agent.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 208, message: { role: 'assistant', content: [{ type: 'text', text: '我会 gh issue close 429，并 gh issue create 一张新票' }] } },
+})
+const q8 = await render()
+if (noNudge(q8)) ok('V21h. assistant text mentioning close/create → no nudge (text layer never judged)')
+else nudgeDown('V21h. text layer armed a nudge', q8)
+
+// ── V22 (#82): the structured judgement must not OVER-tighten either — this
+// pins the reach `TICKET_LIFECYCLE` declares (wrapper / command separator /
+// executed payload / the DECLARED `gh api` face), and the faces it explicitly
+// does NOT cover. Red scene for (a)–(c) is judging only a line's first command
+// or reading the raw argument blob; for (d)–(e) it is dropping the API face;
+// for (f)–(i) it is widening back to a substring / reading a payload as an
+// action / accepting any method / any token as the endpoint.
+const r1 = await afterCall('bash', { command: 'sudo gh issue close 429' }, 216)
+if (closesText(r1)) ok('V22a. sudo gh issue close 429 → 关票 nudge (wrapper skipped)')
+else bad('V22a. wrapper hid the close command', r1.slice(-200))
+
+const r2 = await afterCall('bash', { command: 'cd repo && gh issue close 429 --comment done' }, 217)
+if (closesText(r2)) ok('V22b. cd repo && gh issue close 429 → 关票 nudge (per-command position)')
+else bad('V22b. command separator hid the close command', r2.slice(-200))
+
+const r3 = await afterCall('bash', { command: 'bash -c "gh issue create --title x"' }, 218)
+if (createsText(r3)) ok('V22c. bash -c "gh issue create …" → 建票 nudge (executed payload)')
+else bad('V22c. executed payload lost the create command', r3.slice(-200))
+
+const r4 = await afterCall('bash', { command: 'gh api -X PATCH repos/o/r/issues/429 -f state=closed' }, 219)
+if (closesText(r4)) ok('V22d. gh api -X PATCH …issues/429 -f state=closed → 关票 nudge (declared API face)')
+else bad('V22d. declared API face uncovered', r4.slice(-200))
+
+const r5 = await afterCall('bash', { command: 'gh api --method=PATCH /repos/o/r/issues/429 --field state=closed' }, 220)
+if (closesText(r5)) ok('V22e. gh api --method=PATCH … --field state=closed → 关票 nudge (inline = and long flags)')
+else bad('V22e. long-flag API form uncovered', r5.slice(-200))
+
+const r6 = await afterCall('bash', { command: 'gh issue create --title "记得 gh issue close 429"' }, 221)
+if (createsText(r6) && !closesText(r6)) ok('V22f. gh issue create carrying a 关票-shaped title → 建票 only (payload is text)')
+else bad('V22f. create payload dragged in the close nudge', r6.slice(-200))
+
+const r7 = await afterCall('bash', { command: 'gh api -X PATCH repos/o/r/issues/429 --input -' }, 222)
+if (!closesText(r7)) ok('V22g. gh api … --input - (stdin body) → no 关票 nudge (declared not covered)')
+else bad('V22g. stdin-body API form matched', r7.slice(-200))
+
+const r8 = await afterCall('bash', { command: 'gh api -X GET repos/o/r/issues/429 -f state=closed' }, 223)
+if (!closesText(r8)) ok('V22h. gh api -X GET … → no 关票 nudge (method must be the declared PATCH)')
+else bad('V22h. non-PATCH API call matched', r8.slice(-200))
+
+// (i) the mirror of (f): a 关票 command whose --body mentions the 建票 command
+// stays a 关票 nudge — the docs promise `--body`/`--title` are text.
+const r9 = await afterCall('bash', { command: 'gh issue close 429 --body "记得 gh issue create --title x"' }, 224)
+if (closesText(r9) && !createsText(r9)) ok('V22i. gh issue close … --body "…gh issue create…" → 关票 only (body is text)')
+else bad('V22i. close payload dragged in the create nudge', r9.slice(-200))
+
+// (j) the endpoint token must not be an UNDECLARED flag's value: `--header`
+// takes a value, so `issues/429` there is not the API path (declared uncovered).
+const r10 = await afterCall('bash', { command: 'gh api -X PATCH -f state=closed --header "issues/429"' }, 225)
+if (!closesText(r10)) ok('V22j. endpoint-shaped value of an undeclared flag → no 关票 nudge (declared not covered)')
+else bad('V22j. undeclared flag value read as the endpoint', r10.slice(-200))
+
+// ── V23 (#82): every DECLARED ticket-lifecycle face must be reachable from a
+// real invocation. Turning a face into a dead entry is not a tightening, it is
+// lost coverage — and the declared `gh api` face is exactly the one a
+// command-position-only judgement would kill. Driven through the REAL seam
+// (the `apply` session/event hook → the next assembly), never through an
+// exported thin wrapper: perturbing only a wrapper leaves this matrix green
+// (perturbation discipline; the same trap #79 recorded). Iterates
+// `TICKET_LIFECYCLE` itself, so a future face without a canonical invocation —
+// or a declared kind without a known nudge — fails here.
+import { TICKET_LIFECYCLE } from '../workflow-enforcer.mjs'
+const NUDGE_CANONICAL = {
+  'close/words:gh issue close': { name: 'bash', arguments: { command: 'gh issue close 7 --comment done' } },
+  'close/api:gh api': { name: 'bash', arguments: { command: 'gh api -X PATCH repos/o/r/issues/7 -f state=closed' } },
+  'create/words:gh issue create': { name: 'bash', arguments: { command: 'gh issue create --title t' } },
+}
+const faces = []
+for (const [kind, decl] of Object.entries(TICKET_LIFECYCLE)) {
+  for (const word of decl.words ?? []) faces.push({ kind, key: `${kind}/words:${word}`, label: `word run ${word}` })
+  if (decl.api !== undefined) faces.push({ kind, key: `${kind}/api:${decl.api.command} ${decl.api.subcommand}`, label: `declared API face ${decl.api.command} ${decl.api.subcommand}` })
+}
+const unprovenFaces = faces.filter(f => NUDGE_CANONICAL[f.key] === undefined).map(f => f.label)
+const unknownKind = Object.keys(TICKET_LIFECYCLE).filter(k => NUDGE_TEXT[k] === undefined)
+const deadFaces = []
+for (const [i, face] of faces.entries()) {
+  const canonical = NUDGE_CANONICAL[face.key]
+  if (canonical === undefined) continue
+  const text = await afterCall(canonical.name, canonical.arguments, 220 + i)
+  if (!text.includes(NUDGE_TEXT[face.kind])) deadFaces.push(face.label)
+}
+if (unprovenFaces.length === 0 && unknownKind.length === 0 && deadFaces.length === 0)
+  ok('V23. every declared ticket-lifecycle face is reachable from its canonical invocation', `${faces.length} faces`)
+else bad('V23. dead / unproven ticket-lifecycle face',
+  `unproven: ${unprovenFaces.join(', ') || '—'} | unknown kind: ${unknownKind.join(', ') || '—'} | dead: ${deadFaces.join(', ') || '—'}`)
+
+// V23b (#82 AC3): the arming READS that declaration — add a word run at runtime
+// and it arms; remove it again and it stops. A hand-copied third matcher (or any
+// hard-coded path that bypasses the declaration) leaves this green, so this is
+// the non-vacuous pin for "single source of truth" — unlike a source-text scan
+// for the retired identifier, whose only red scene was re-using that exact name.
+TICKET_LIFECYCLE.close.words.push('echo lifecycle-probe')
+const mutated = await afterCall('bash', { command: 'echo lifecycle-probe' }, 230)
+TICKET_LIFECYCLE.close.words.pop()
+const unmutated = await afterCall('bash', { command: 'echo lifecycle-probe' }, 231)
+if (closesText(mutated) && !closesText(unmutated))
+  ok('V23b. arming reads the declaration (runtime-added word arms, removal disarms — AC3)')
+else bad('V23b. declaration is not the arming single source',
+  `add → ${closesText(mutated) ? 'armed' : 'did NOT arm'} | remove → ${closesText(unmutated) ? 'still armed' : 'disarmed'}`)
+
+// V23c (#82): the documented 判定面 row must not drift from the declaration —
+// the same doc↔code guard the gate table has (V17). One-directional by nature
+// (that row is prose, not a list): every declared element must appear in it), so
+// a newly declared word/flag/method/field that nobody documented reddens here.
+const docTick = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
+  .split('\n').find(l => l.includes('TICKET_LIFECYCLE')) ?? ''
+const declaredElements = Object.values(TICKET_LIFECYCLE).flatMap(face => [
+  ...(face.words ?? []),
+  ...(face.api === undefined ? [] : [
+    face.api.command, face.api.subcommand, face.api.method, face.api.field,
+    ...(face.api.methodFlags ?? []), ...(face.api.fieldFlags ?? []),
+  ]),
+])
+const missingInDoc = declaredElements.filter(s => !docTick.includes(s))
+if (docTick !== '' && missingInDoc.length === 0)
+  ok('V23c. 判定面 row documents every declared lifecycle element (no doc↔code drift)', `${declaredElements.length} elements`)
+else bad('V23c. doc/declaration drift',
+  docTick === '' ? 'no 判定面 row mentioning TICKET_LIFECYCLE' : `missing from the row: ${missingInDoc.join(', ')}`)
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V20) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V23) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

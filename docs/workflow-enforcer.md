@@ -73,6 +73,7 @@ a reminder the model is supposed to obey.
 | `bash` / `pwsh` / `sh` / `zsh` / `dash` / `powershell` / `cmd` | `arguments.command` | argv[0] 先归一化（basename、去 `.exe`/`.cmd`/`.bat`/`.ps1`：`/usr/bin/git push`、`git.exe push` 同 `git push`）；按命令分隔符（`&&` `\|\|` `;` `\|` `&`）**逐条命令**判各自命令位置（`cd repo && git push`、`git status; git push` 命中）；跳过 `sudo` / `doas` / `command` / `nohup` / `env` / `time` 包装、shell 关键字（`if`/`while`/`!`…）与 `VAR=…` 赋值；附着的重定向与 `$(…)`/反引号不藏命令（`git push>log.txt`、`$(git push)` 命中）；**执行载荷** flag 值递归判定（`bash -c "git push"`、`bash -lc …`），shell 只读首个操作数之前的**前导选项簇**（`bash deploy.sh -c "…"` 是脚本参数、不算执行载荷），SQL 客户端全串扫描（`psql -h host -c "delete from …"`）；递归上限 2 层 |
 | `plugin_manager` | `arguments.action` | 工具名 + action 两词序列（`plugin_manager install_bundle`） |
 | 单个词的门（`sandcastle` / `run-ticket`） | 同上 | 调用链（`RUNNERS`：`npx`/`pnpm`/`tsx`/`node`/`python`/`sh`/`bash`/`pwsh`…）上目标的**名字**匹配：basename 去扩展名或任一路径组件等于该门——`.sandcastle/run-ticket.mts` 命中 `sandcastle`/`run-ticket`；`sandcastle-notes.mjs`、`run-ticket-helpers.mjs` 不命中（名字相等，不是子串） |
+| **票生命周期 nudge**（关票 fresh-subagent 抽查 O5 / 建票 D20，`TICKET_LIFECYCLE`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（#82）：关票 = 命令位置词串 `gh issue close`；**关票的 API 形态**仍走 shell 的 `command` 字段，但其判定面**显式声明**为 `gh api`（命令位置 + 子命令）+ 声明的方法 flag（`-X`/`--method` = `PATCH`）+ 声明的载荷 flag（`-f`/`--raw-field`、`-F`/`--field` = `state=closed`）+ `issues/<n>` 路径 token；建票 = 命令位置词串 `gh issue create`。`write`/`edit`/`str_replace_editor` 正文、`echo`、commit 消息、`--grep`、`--body`/`--title` 里提到这些命令**永不** arm；`gh api` 的其余面显式不覆盖（`--input -` 读 stdin、非 `PATCH` 方法、其它字段、紧跟未声明 flag 的 endpoint——那个 token 可能是该 flag 的值——交 #71 事实探测） |
 | `write` / `edit` / `str_replace_editor` / `pty_send` / `pty_open` / `run_code` / 其它工作区工具面 | — | **显式不覆盖**：带正文、分片写入或**程序正文**的参数永不命中，不用模糊匹配弥补（PTC 下经 SDK 的嵌套调用是真实 `tool/call`，仍按该调用的动作字段照常判定） |
 
 Which flag values are executed is **declared** (`EXEC_FLAGS`: shell `-c`,
@@ -84,7 +85,13 @@ declared rather than silent: positional SQL (`sqlite3 db "delete from …"`),
 judged, so `docker compose -f prod.yml down -v`, `git -c k=v reset --hard`,
 `gh --repo o/r issue create`, `git -C <dir> push` and `npm --prefix <dir> publish`
 do not match (the flags are not modelled), executed-payload nesting past 2
-levels, PTY fragment writes, and script/`xargs`-mediated pushes. The fact probe
+levels, PTY fragment writes, and script/`xargs`-mediated pushes. The ticket
+lifecycle nudges share these declared limits (they ride the same judgement), and
+add their own: the `gh api` face needs the declared method flag and payload flag,
+so a stdin body (`gh api … --input -`), another method or another payload key
+does not arm it, and neither does an endpoint that sits directly after an
+undeclared flag (that token may be the flag's value, e.g. `--hostname`). The fact
+probe
 that backstops those is #71's concern; this plugin does not grow a fuzzy matcher
 to cover them.
 
@@ -95,6 +102,15 @@ to cover them.
 > (executed payload / invocation target / wrapper / argv[0] normalization /
 > attached punctuation), V20 that every declared gate is still reachable from a
 > canonical invocation (no silently dead gate).
+> V21 pins the ticket-lifecycle nudge false positives (#82 negatives: write/edit
+> body, `echo`, commit message, `--grep`, an API-shaped note in a file),
+> V22 the declared reach of `TICKET_LIFECYCLE` (wrapper / separator / executed
+> payload / the declared `gh api` face) plus the faces it does not cover,
+> V23 that every declared lifecycle face — including the `gh api` one — is still
+> reachable from a canonical invocation through the real hook seam, V23b that the
+> arming really reads `TICKET_LIFECYCLE` (a runtime-added word run arms, removing
+> it disarms), V23c that this 判定面 row documents every declared element (the
+> doc↔code drift guard, same idea as V17).
 
 ### Per-project override: `workflow-gates.yml`
 
