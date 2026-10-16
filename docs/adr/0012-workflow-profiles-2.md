@@ -112,8 +112,8 @@ delta，覆盖粒度 = **空行分块**（当时 12 节）。#56 要在同一机
   ptcRuntime**（它由 ptc-runtime-node 自己提供，抢注会与 stub 冲突）。
 - #55 的 `tests/verify-workflow-profiles.mjs` **未改动**即保持全绿（其 P4 用安装器自身的
   `expandEntry` 扫盘，新 delta 自动纳入覆盖断言）；`verify-installer.mjs` 的 payload 清单补上
-  两个新文件（该用例 opt-in，本机无 dsh 时 4 条 profile-link 用例按 #67 既有缺陷硬崩，
-  payload 那条已实跑通过）。
+  两个新文件（该用例 opt-in，本机无 dsh 时 4 条 profile-link 用例曾按 #67 既有缺陷硬崩；
+  #67 已修 → 同一环境改为响亮跳过，store/payload 那条仍实跑通过）。
 
 ## Known leftovers（不在本票）
 

@@ -7,7 +7,7 @@
  *
  * 用法：node scripts/verify-all.mjs   （等价：pnpm test / npm test）
  * 环境变量（未设置时对应项响亮跳过，不阻塞常规套件）：
- *   DSH_MATT_INSTALLER=1   跑 verify-installer.mjs（需要本机有 dsh profile 布局）
+ *   DSH_MATT_INSTALLER=1   跑 verify-installer.mjs（store 侧离线实跑；profile-link 断言需本机 dsh）
  *   DSH_MATT_E2E=1         跑 sandcastle-e2e.mjs（需要 podman）
  *   DSH_MATT_LIVE_CLI      live 用例的门禁（见 README「环境侧用例的门禁」）
  *   DSH_MATT_LIVE_HOME     同上（安装/配置/会话环）
@@ -23,7 +23,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** 非用例文件（共享挂具）与需要外部环境、默认跳过的用例。 */
 const NOT_A_TEST = new Set(['preset-harness.mjs'])
 const OPT_IN = new Map([
-  ['verify-installer.mjs', { flag: 'DSH_MATT_INSTALLER', why: '需要本机存在 dsh profile 布局' }],
+  ['verify-installer.mjs', { flag: 'DSH_MATT_INSTALLER', why: 'installer 用例（store 侧离线可跑；profile-link 断言需本机 dsh）' }],
   ['sandcastle-e2e.mjs', { flag: 'DSH_MATT_E2E', why: '需要 podman' }],
 ])
 

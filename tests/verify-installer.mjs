@@ -7,6 +7,10 @@
  * install 拒绝、--force、upgrade（原地替换）、uninstall（连 profile link
  * 一起摘）、--version、--from tarball；外加整链 e2e：隔离 DSH_HOME 上
  * `dsh --dump-config` 出现 preset-matt 行 + 安装副本插件可 import。
+ *
+ * #67：store 侧（payload / 版本戳 / 清单 / 重复拒绝 / --version）不需要 dsh，照常实跑；
+ * 依赖 profile link 的断言（装载的产物）与 e2e 共用同一 `dshOnPath` 守卫——PATH 无 dsh 时
+ * 响亮跳过（`SKIP (loud)`，verify-all 记为 PASS*），不硬崩 ENOENT、也不静默当 pass。
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -22,15 +26,26 @@ const BIN = join(REPO, 'bin', 'install.mjs')
 const tmp = await mkdtemp(join(tmpdir(), 'dsh-matt-installer-'))
 
 let passed = 0
+let totalSkips = 0
+/** 当前用例内的 loud skip 计数：让 per-case 读数也如实（绿色 ≠ 该用例全验过）。
+ *  e2e 那条在 test() 之外调用，只计入 totalSkips（stdout/stderr 分流时行序不定，故标记不带方向）。 */
+let skipsInCase = 0
+/** 环境侧断言缺席的统一出口：`SKIP (loud)` 是 scripts/verify-all.mjs 识别 PASS* 的约定字符串。 */
+function loudSkip(what) {
+  skipsInCase++; totalSkips++
+  console.warn(`  !! SKIP (loud) - ${what} — evidence absent on this machine`)
+}
 const test = async (name, fn) => {
-  try { await fn(); passed++; console.log(`  ok - ${name}`) }
+  skipsInCase = 0
+  try { await fn(); passed++; console.log(`  ok - ${name}${skipsInCase > 0 ? ` [${skipsInCase} 条 loud skip]` : ''}`) }
   catch (e) { console.error(`  FAIL - ${name}\n${e?.stack ?? e}`); process.exitCode = 1 }
 }
 
 const pkg = JSON.parse(await readFile(join(REPO, 'package.json'), 'utf8'))
 const pkgVersion = pkg.version
 
-/** dsh on PATH? The e2e (profile + dump-config) needs it; unit tests don't. */
+/** dsh on PATH? 装载（mountOrWarn）与 e2e 都需要它：无 dsh 时 install 不建 profile
+ *  link，link 相关断言必须响亮跳过（assertLink），而不是去读不存在的 profile 层。 */
 const dshOnPath = spawnSync('dsh', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' }).status === 0
 
 /** Run the installer CLI with args; each test gets its own DSH_HOME. */
@@ -46,9 +61,23 @@ const readStamp = async (dshHome) => JSON.parse(await readFile(join(storeOf(dshH
 const profileDeps = async (dshHome, profile = 'web') =>
   JSON.parse(await readFile(join(dshHome, 'profiles', profile, 'package.json'), 'utf8')).dependencies ?? {}
 
-/** Is the store linked into the profile (pnpm link: dependency)? */
+/** Is the store linked into the profile (pnpm link: dependency)?
+ *  **严格读取**：profile 层缺失即抛 ENOENT，所以只许从 assertLink 的 dsh 分支进来
+ *  （无 dsh 时装载本就不建 link，那条路必须先走响亮跳过，而不是到这里抛）。 */
 const linked = async (dshHome, profile = 'web') =>
   String((await profileDeps(dshHome, profile))['dsh-matt-preset'] ?? '').includes('.')
+
+/** profile-link 断言：装载（mountOrWarn）的产物，只有 dsh 在场才存在（#67）。
+ *  无 dsh → install 不建 link、profile 层根本不存在，读依赖表是 ENOENT 而非断言失败；
+ *  所以这里**响亮跳过**（打印原因、不置非零退出），store 侧断言照常实跑。
+ *  有 dsh 时走上面那条严格读取：profile 层缺失即真失败，不吞成 pass。 */
+async function assertLink(dshHome, want, what) {
+  if (!dshOnPath) {
+    loudSkip(`profile-link proof needs dsh on PATH (#67): ${what}`)
+    return
+  }
+  assert.equal(await linked(dshHome), want, what)
+}
 
 await test('install: copies payload to the stable store, stamps version + manifest', async () => {
   const home = join(tmp, 'h1')
@@ -83,7 +112,7 @@ await test('install: copies payload to the stable store, stamps version + manife
 await test('install: links the store into the profile as a bundle', async () => {
   const home = join(tmp, 'h2')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
-  assert.ok(await linked(home), 'store not linked into profile deps')
+  await assertLink(home, true, 'store linked into profile deps')
 })
 
 await test('install: refuses to overwrite an existing install', async () => {
@@ -99,7 +128,7 @@ await test('install --force: overwrites in place, link survives', async () => {
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   const r = run(['install', '--profile', 'web', '--force'], home)
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-  assert.ok(await linked(home))
+  await assertLink(home, true, 'link survives --force')
 })
 
 await test('upgrade: in-place replace, stamp advances, stale files removed, link kept', async () => {
@@ -110,7 +139,7 @@ await test('upgrade: in-place replace, stamp advances, stale files removed, link
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
   assert.ok(!existsSync(join(storeOf(home), 'stale-old-plugin.mjs')), 'stale file survived upgrade')
   assert.equal((await readStamp(home)).version, pkgVersion)
-  assert.ok(await linked(home), 'link lost across upgrade')
+  await assertLink(home, true, 'link kept across upgrade')
   const manifest = JSON.parse(await readFile(join(storeOf(home), 'manifest.json'), 'utf8'))
   assert.equal(manifest.previousVersion, pkgVersion)
 })
@@ -128,7 +157,7 @@ await test('uninstall: removes store and the profile link', async () => {
   const r = run(['uninstall', '--profile', 'web'], home)
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
   assert.ok(!existsSync(storeOf(home)), 'store survived uninstall')
-  assert.ok(!(await linked(home)), 'profile link survived uninstall')
+  await assertLink(home, false, 'profile link removed on uninstall')
   assert.notEqual(run(['uninstall', '--profile', 'web'], home).status, 0)
 })
 
@@ -138,10 +167,10 @@ await test('--version: prints package version', () => {
   assert.ok(r.stdout.includes(pkgVersion), `stdout: ${r.stdout}`)
 })
 
-await test('--root: store-only mode — no profile touched even with dsh present', async () => {
+await test('--root: store-only mode — no profile layer created', async () => {
   const home = join(tmp, 'h9')
   const root = join(tmp, 'custom-root')
-  const r = run(['install', '--root', root], home) // dshAvailable()=true on this machine
+  const r = run(['install', '--root', root], home) // storeOnly 分支不调 mountOrWarn：与 PATH 上有没有 dsh 无关
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
   assert.ok(existsSync(join(root, 'matt', 'VERSION.json')), 'store not written')
   assert.ok(!existsSync(join(home, 'profiles')), 'profile layer created despite --root')
@@ -194,9 +223,9 @@ if (dshOnPath) {
   })
 } else {
   // AC1 的证明性 e2e 需要 dsh；缺席时响亮降级并计入汇总，绝不静默当 pass
-  console.warn('  !! SKIP (loud) - e2e mount proof needs dsh on PATH; AC1 evidence absent on this machine')
+  loudSkip('e2e mount proof needs dsh on PATH (AC1 evidence)')
 }
 
-console.log(`\n${process.exitCode ? 'FAILED' : `all ${passed} tests passed`}`)
+console.log(`\n${process.exitCode ? 'FAILED' : `all ${passed} tests passed${totalSkips > 0 ? `（含 ${totalSkips} 条 loud skip：其环境侧断言未验证）` : ''}`}`)
 if (process.exitCode) console.log(`tmp kept: ${tmp}`)
 else await rm(tmp, { recursive: true, force: true })

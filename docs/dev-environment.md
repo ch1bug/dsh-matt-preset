@@ -68,7 +68,7 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   （`createRequire` 锚在**来源包自身**，走不到仓外 node_modules），并用 `manifest.json` 的
   `dependencies.yaml === <stub 版本>` 反证"走的是 stub，不是环境里恰好有的 yaml"。实例：
   `tests/verify-payload-manifest.mjs` 的 P9（反向：不落 store）/ P10（正向：命中的文件真落
-  store）——这条也是 #67（无 dsh 时 verify-installer 硬崩）的修法方向。
+  store）——#67 已修、方向同此：无 dsh 时 4 条 profile-link 断言响亮跳过（`SKIP (loud)`），store 侧照跑。
 
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 
