@@ -4,6 +4,18 @@
 # 绕过（明确知道自己在跳什么时）：SKIP_HOOKS=1 git commit …
 [ -n "$SKIP_HOOKS" ] && { echo "pre-commit: SKIP_HOOKS set — 跳过 verify-all"; exit 0; }
 
+# 提交记录的是 INDEX，而 verify-all 跑的是工作树：两者脱节时门禁为"将要提交的内容"背书，
+# 而提交里根本没有它（#82 会话实测：复核后又改了 3 个文件，commit 记下复核前的快照，
+# 283/30 vs 347/32，只有事后 git status 才发现，靠两次 amend 补救）。在最便宜的一层先拦：
+# 便宜、确定性、且不必先烧一遍套件。判据与逃生口由 tests/verify-precommit-hook.mjs H1–H3 钉住。
+UNSTAGED=$(git diff --name-only)
+if [ -n "$UNSTAGED" ]; then
+  echo "pre-commit: 工作树有未 staged 的改动 —— 本次提交不会包含它们："
+  echo "$UNSTAGED" | sed 's/^/  /'
+  echo "  复核后请重新 git add -A；确要有意部分暂存则 SKIP_HOOKS=1 git commit …"
+  exit 1
+fi
+
 # 找 node：PATH → 常见安装位（msys 的 bash 与 Windows 侧 node 各自 PATH 不同，
 # 缺工具链时**响亮跳过**而不是阻断提交 —— 与套件的 loud-skip 惯例一致）。
 NODE=$(command -v node 2>/dev/null)

@@ -61,6 +61,11 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 跑命令的是**模型 shell**，它的 PATH 与登录 shell 不同——以下都是实测教训
 （retro 2026-10-16、#56 会话）：
 
+- **`node tests/<file>.mjs` 的依赖锚点是 `tests/node_modules/`，不是仓根**：`@deepseek-ai`（+ `yaml`）
+  是 junction → 本机 dsh 安装的 `node_modules/@deepseek-ai`；新 clone / 换机器用
+  `node scripts/link-runtime-deps.mjs` 一条命令补齐（D43）。仓根 `node_modules` 只有 `yaml`
+  （供插件自身的 `import 'yaml'`）——**据此判"套件跑不了"是误读**：#82 会话的复核轴就因此退化成只读码，
+  4 条发现里 2 条本可自己跑用例钉死。
 - **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。验证走
   `node scripts/verify-all.mjs`（唯一入口，不需要 pnpm）；确实要 pnpm / python / node 的
   绝对路径时，用 DSH harness 的 `load_workspace_dependencies`（返回随包分发的路径），

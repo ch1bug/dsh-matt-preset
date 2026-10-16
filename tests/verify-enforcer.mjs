@@ -9,8 +9,9 @@
  *     assembly carries a one-shot "High-risk action detected" line.
  *  V4 no noise: a benign tool/call adds no ⚠ line; baseline stays single.
  *
- * Run with the same dep wiring as the deployment (node_modules/@deepseek-ai
- * pointing at the dsh install), like the matt-preset verify suite.
+ * Run with the same dep wiring as the deployment (`tests/node_modules/@deepseek-ai`
+ * is a junction to the dsh install's `node_modules/@deepseek-ai`; wire it with
+ * `node scripts/link-runtime-deps.mjs`), like the matt-preset verify suite.
  */
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'

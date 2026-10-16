@@ -10,6 +10,10 @@
 - 默认固定点 = **`HEAD`**（起手快照）。
 - 工作还没提交：先 `git add -A`，再用 `git diff --staged`——否则**新增文件不出现**在 diff 里
   （本次 #55 有 4 个新增文件，漏掉就等于审了个残缺面）。
+- **复核后必须重新 `git add -A` 再 commit**：index 是"复核前"的快照，复核产生的修改只落在工作树，
+  而 pre-commit 的 verify-all 跑的是**工作树**——它会为提交里根本没有的内容背书。`#82` 实测：
+  提交记 `283/30`、树里是 `347/32`，只有事后 `git status` 才发现，靠两次 amend 补救。
+  `.githooks/pre-commit` 现在会**响亮拒绝**这种脱节（`tests/verify-precommit-hook.mjs` H1）。
 - 已提交：`git diff <fixed-point>...HEAD`（三点，对 merge-base）。
 - 先验固定点可解析、diff 非空，再派 subagent——坏 ref 要在这一层炸，不要炸在两个 subagent 里。
 
@@ -31,6 +35,12 @@
    （负债）。#66 实例：回退 `lib/payload.mjs` 后 P4/P6/P7/P9/P10 全红，P10 复现票面症状
    （`exit=0`、store 少发）。#75 实例：`--port 0` 下"分到的端口不是保留口"**恒真**（复核才抓到），改为
    保留口前后占用快照才可红；**扰动要打在运行时真正读的那份上**（生成载体，不是源文件）。
+   **三条硬约束（#82 会话踩过全部三条）**：① 扰动前先自检 **needle 命中数 > 0**
+   （`$src.Contains()` / `grep -c`）——0 命中是**假证据**，不是"没漂移"（本次一条文档探针静默 0 命中，
+   差点把"守卫有效"当结论）；② 回退用 `git show HEAD:<file>` 写临时副本
+   （`git stash push` 会重置 index 并按 autocrlf 改行尾），回退后**编辑前重新 `read`**
+   （FS 版本守卫报 `file changed since it was read`，本次白读两次）；③ 探针里拼 `\n` 会撞 CRLF
+   工作树（`-Raw` 读进的是 `\r\n`）——按 `\r?\n` 切分或用显式 `$nl`，否则替换静默不生效。
 
 ## 3. standards 源（本仓）
 
@@ -49,6 +59,11 @@ subagent 没有你的上下文（不会自带基线）。别复述成一句话�
 ## 5. 两轴 brief 模板
 
 两个 subagent **同时**发（一条消息两个调用），各给"diff 命令 + 提交列表 + 该轴材料 + 它的 brief"：
+
+- **两轴都要真跑被测用例**：reviewer 收到 diff、没有探索成本，正是该自己确认"这条断言非空洞"的一轴。
+  `node tests/<file>.mjs`。依赖接线锚在 **`tests/node_modules/`**（`@deepseek-ai` junction → 本机 dsh
+  安装；一条 `node scripts/link-runtime-deps.mjs` 补齐，D43）——仓根 `node_modules` 只有 `yaml`，
+  **别据此判"套件跑不了"**（#82 会话的 Standards 轴就这么退化成只读码，4 条发现里 2 条本可自证）。
 
 - **Standards 轴**：diff 命令 + 第 3 节清单 + 粘好的 smell 基线 + 要求
   "逐文件/逐 hunk 报：违反哪条文档化标准（指名文件 + 规则）；命中哪条 smell（引用 hunk）；
