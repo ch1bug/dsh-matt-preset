@@ -35,7 +35,8 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 
 ## 0.2 agent shell 的工具链与内联脚本
 
-跑命令的是**模型 shell**，它的 PATH 与登录 shell 不同——两条实测教训（retro 2026-10-16）：
+跑命令的是**模型 shell**，它的 PATH 与登录 shell 不同——以下都是实测教训
+（retro 2026-10-16、#56 会话）：
 
 - **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。验证走
   `node scripts/verify-all.mjs`（唯一入口，不需要 pnpm）；确实要 pnpm / python / node 的
@@ -44,6 +45,16 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 - **带正则或多行的 `node -e` 内联脚本别硬塞进 pwsh 参数**：PowerShell 的转义符是反引号，
   `\$` 不是转义（正则被原样传下去、静默不匹配），而 `@'…'@` here-string 里的 `$` 仍会被
   展开。写临时 `.mjs` 跑、自检通过后删掉——本会话为此白烧过一轮往返。
+- **同一类陷阱：`\"` 也不是 pwsh 的转义**（反引号才是）。给 CLI 传含引号/空格的多词正文时，
+  `gh issue close --comment "…\"six hard gates\"…"` 会被拆成多个参数
+  （报 `accepts 1 arg(s), received 4`）；用 here-string 变量（`$c = @'…'@`）或 `--body-file`。
+- **worktree 文本文件是 CRLF**（`core.autocrlf=true`，index 里存 LF）：`edit` 的**多行**
+  `old_string`（`\n` 连接）匹配不到 CRLF 内容——用**单行锚点**；插入的新行是 LF，`git add`
+  时归一化，仓库无碍。只有**逐字节敏感**的正文（骨架 `workflow-body.txt` 这类要被解析器
+  逐字节复原的文件）才值得写一次性脚本并保持原行尾（`split('\n')` → 改 → `join(nl)`）。
+- **一次性编辑脚本的自校验要对「冻结基线」，不要对改前内容**：改前内容里还带着你正要删掉的
+  marker，拿它比必然"失败"——#56 为此误报过一次 `rejoin is NOT byte-lossless`（实际无损），
+  白烧一轮。仓库里已有注意源（`tests/fixtures/workflow-body-v1.txt`）就直接对，别另存备份。
 
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 

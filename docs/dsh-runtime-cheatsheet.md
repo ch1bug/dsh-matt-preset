@@ -78,6 +78,22 @@ mock 说 Anthropic SSE：`message_start` → `content_block_start`（`text` 或
 临时实例一律 `--port 0`（OS 临时端口）+ `os.tmpdir()` 下的临时 `DSH_HOME`：零端口冲突、
 零凭据残留；`kill` 后要等子进程 exit，否则 libuv 打 `UV_HANDLE_CLOSING` 断言噪音。
 
+## 挂载级测试的 stub 配方（真实插件行 → mount harness）
+
+要把**真实插件行**（不是 persona + workflow-core 这种自带服务的最小行）挂进
+`tests/preset-harness.mjs`：`ensurePresetMountable(ctx, id)` 按诊断里的 `waiting for X`
+**逐个盲补**惰性 stub，但一行**自己提供**某服务的插件不能等到被 stub——被 stub 过的服务
+名再被真 provider 注册时报 `service "X" has been registered at <root>`，挂载失败。
+
+- **不要预置该行自己提供的服务**：`dsh-ptc-runtime-node` 提供 `ptcRuntime`，
+  `dsh-workflow-ptc` 提供 `workflowEngine`。
+- **只预置宿主确实缺的服务**：PTC 形态（`dsh-ptc-runtime-node` + `dsh-workflow-ptc` +
+  `dsh-tool-workflow`）实测先 `ctx.provide(name, inertService())` 补
+  `fs` / `sandbox` / `sandboxPolicy` / `subagents` 四项，再交 `ensurePresetMountable` 即可。
+- stub 形状用挂具导出的 **`inertService()`**（单一事实源），别就地再写一个 Proxy。
+
+实例：[tests/verify-workflow-profiles-2.mjs](tests/verify-workflow-profiles-2.mjs) 的 ptc 形状。
+
 ## 权威来源（要更细就读这些）
 
 - `packages/api/session-controller/src/index.ts`（`@Remote` 方法）、`.../types.ts`（请求/响应形状）

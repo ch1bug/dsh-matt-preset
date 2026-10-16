@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { payloadOf } from '../lib/payload.mjs'
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
 const BIN = join(REPO, 'bin', 'install.mjs')
@@ -55,7 +56,13 @@ await test('install: copies payload to the stable store, stamps version + manife
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
   const stamp = await readStamp(home)
   assert.equal(stamp.version, pkgVersion)
-  // payload 完整：bundle 载体、插件、skills、lang-packs、sandcastle
+  // 单一事实源：store 必须与安装器自己的 payload 规则（lib/payload.mjs 的 payloadOf，
+  // installTo 逐条拷贝的就是它）一致——手写清单只作可读的类别代表；加档/加文件不再需要
+  // 改它（#55、#56 各漏改过一次，而本用例 opt-in，漏改时默认套件全绿、静默）。
+  const { entries } = await payloadOf(REPO)
+  const absent = entries.filter((f) => !existsSync(join(storeOf(home), f)))
+  assert.deepEqual(absent, [], `payload entries missing from the store: ${absent.join(', ')}`)
+  // payload 完整：类别代表（bundle 载体 / 插件 / skills / lang-packs / sandcastle）
   for (const f of ['preset.yml', 'agent.cordis.yml', 'cordis.patch.yml',
     'workflow-core.mjs', 'workflow-body.txt', 'workflow-profile-creative.txt',
     'workflow-profile-ptc.txt', 'workflow-profile-minimal.txt',
