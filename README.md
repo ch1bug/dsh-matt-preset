@@ -66,7 +66,7 @@ ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@dee
 node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + workspace attach
 node tests/verify-persona.mjs      # persona 导语：{{model}}/{{cwd}} 渲染插值
 node tests/verify-workflow-core.mjs  # workflow-core 插件（#54）：注入点插值 spike + L1 verbatim + 单行挂载 + scope 守卫
-node tests/verify-workflow-core-render.mjs  # 真实 composition 渲染面：persona 无正文 / 注入节完整 / 插值 / verbatim + subpath 契约
+node tests/verify-workflow-core-render.mjs  # 真实 composition 渲染面：persona 无正文 / 注入节完整 / 插值 / verbatim + subpath 契约（R1–R5 离线可跑；L1–L2 环境侧需门禁，见下）
 node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
 node tests/verify-lang-count.mjs   # 注入次数计数：GATES 每轮 1 / LANGBASE 会话 1 / LANGTRIGGER 触发 1
@@ -75,6 +75,17 @@ node tests/verify-lang-asm.mjs     # 语言包系统提示词组装（真实 mat
 node tests/workflow-enforcer-grill-contract.mjs  # enforcer × grill 模式契约
 node tests/verify-bundle-sync.mjs  # cordis.patch.yml 字节级锁（agent.cordis.yml 唯一手改源）
 node tests/sandcastle-e2e.mjs      # sandcastle 三命令端到端（33 断言：审计/重叠/夜跑/幂等/simplify/model-lane）
+```
+
+**环境侧用例的门禁（loud skip）**：`verify-workflow-core-render.mjs` 的 L1–L2
+断言需要真实 profile 实例；未设置门禁时**响亮跳过**（打印原因、不静默当 pass），
+常规套件在无环境下仍全绿。开启方式（源码部署实例）：
+
+```bash
+export DSH_MATT_LIVE_HOME=/home/<user>/dsh-matt-home        # 独立 DSH_HOME
+export DSH_MATT_LIVE_PROFILE=matt-dev                      # profile 名
+export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts   # 源码检出 CLI 入口
+node tests/verify-workflow-core-render.mjs                 # R1–R5 + L1–L2
 ```
 
 ## 目录

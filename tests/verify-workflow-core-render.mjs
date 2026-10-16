@@ -101,6 +101,44 @@ if (coreRow === null) bad('R5. composition carries the workflow-core row', 'row 
 else if (coreRow[1] === 'dsh-matt-preset/workflow-core.mjs') ok('R5. workflow-core addressed via package subpath export', coreRow[1])
 else bad('R5. workflow-core entry path', coreRow[1] + ' (expected dsh-matt-preset/workflow-core.mjs — never a ./ profile-relative path)')
 
+// ── LIVE 段（环境侧，门禁开启）─────────────────────────────────────────────
+// 环境侧验证：在真实 profile home 上跑 launcher 的 --dump-config，确认
+// workflow-core 行真的进了**实例组合树**（不是靠 "pnpm add 成功" 推断）。
+// 门禁与仓库既有的 loud-skip 惯例同构：未设置 DSH_MATT_LIVE_HOME 时响亮
+// 跳过（打印原因，绝不静默当 pass），常规 `pnpm test` 在无环境时仍全绿。
+const liveHome = process.env.DSH_MATT_LIVE_HOME
+const liveProfile = process.env.DSH_MATT_LIVE_PROFILE ?? 'matt-dev'
+const liveCli = process.env.DSH_MATT_LIVE_CLI
+
+if (!liveHome) {
+  console.warn(
+    '  !! SKIP (loud) - live instance proof needs DSH_MATT_LIVE_HOME ' +
+      '(e.g. /home/<user>/dsh-matt-home); instance-side dump evidence absent here',
+  )
+} else if (!liveCli) {
+  console.warn(
+    '  !! SKIP (loud) - DSH_MATT_LIVE_HOME is set but DSH_MATT_LIVE_CLI is not ' +
+      '(path to the source checkout CLI entry, e.g. <src>/apps/cli/src/bin.ts)',
+  )
+} else {
+  const { spawnSync } = await import('node:child_process')
+  const dump = spawnSync(process.execPath, ['--import', 'tsx/esm', liveCli, '--profile', liveProfile, '--dump-config'], {
+    encoding: 'utf8',
+    env: { ...process.env, DSH_HOME: liveHome },
+    cwd: liveCli.replace(/[\\/]apps[\\/]cli[\\/]src[\\/]bin\.ts$/, ''),
+  })
+  if (dump.status !== 0) {
+    bad('L1. live --dump-config succeeds', `exit ${dump.status}: ${(dump.stderr ?? '').slice(0, 300)}`)
+  } else {
+    ok('L1. live --dump-config succeeds', `profile ${liveProfile} @ ${liveHome}`)
+    if (dump.stdout.includes('dsh-matt-preset/workflow-core.mjs')) {
+      ok('L2. workflow-core row present in the LIVE composed tree')
+    } else {
+      bad('L2. workflow-core row in live composed tree', 'row missing — mount did not take effect')
+    }
+  }
+}
+
 console.log('\n=== WORKFLOW-CORE RENDER VERIFY (real composition) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
