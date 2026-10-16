@@ -34,6 +34,27 @@ Create a GitHub issue.
 
 Read it as in **Read an issue** above.
 
+## Ready frontier（可开工票集合）
+
+排批 / 预检的输入 = **open + `ready-for-agent` + 无 open 阻塞 + 无 assignee**。现算，不读票面文字：
+
+```sh
+node scripts/frontier.mjs              # 默认 ready-for-agent（当前 18 张）
+node scripts/frontier.mjs --label ready-for-human
+node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理由)
+```
+
+它只走 **GitHub 原生依赖边**（`.../issues/<n>/dependencies/blocked_by`）。两个读图陷阱：
+
+- `issue_dependencies_summary.blocked_by` **只计 open 阻塞**——已关闭的阻塞（历史边）读数是 0，
+  但边仍在（看 `total_blocked_by`）。2026-10-16 曾据此把"已满足的历史边"误判成"缺边"。
+- 正文里的 `## Blocked by` 段只是叙述，会过期（#61 曾正文写 `None.` 而边是 `← #59`）。
+  改阻塞关系 = 改**边**，正文顺手对齐。
+
+纯逻辑（label 命中 / open 阻塞 / assignee / 大小写 state）由 `tests/verify-frontier.mjs`
+离线断言；CLI 那半截需要 PATH 上有已登录的 `gh`，任何 gh 失败都响亮退出——绝不把
+"接口挂了"伪装成"没有阻塞"。
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.
