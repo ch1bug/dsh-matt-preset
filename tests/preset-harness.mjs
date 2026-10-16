@@ -148,6 +148,19 @@ export function disableRows(rows, ids) {
 }
 
 /**
+ * Inert service stub for mount-level harnesses: own props pass through,
+ * anything else reads as a no-op function (rows calling
+ * `ctx.<name>.register(…)` survive). Exported because a test sometimes must
+ * PRE-SEED a stub before ensurePresetMountable stubs the rest (e.g. the PTC
+ * shape, whose own row provides ptcRuntime — letting the stub round claim it
+ * first makes the real provider's registration conflict); a second copy of
+ * this shape would drift from the harness silently.
+ */
+export function inertService() {
+  return new Proxy({}, { get: (t, p) => (p in t ? t[p] : () => {}) })
+}
+
+/**
  * Pre-flight a full-preset mount: the 0.2.0-rc registry refuses to mount a
  * preset whose rows still wait for Host services (old runtime tolerated
  * pending injects). The mount-level harness cannot supply the real host
@@ -166,10 +179,7 @@ export async function ensurePresetMountable(ctx, id, maxRounds = 6) {
     const stubbed = new Set()
     for (const name of waiting) {
       if (ctx.get(name) === undefined) {
-        // Inert service stub: own props pass through, anything else reads as
-        // a no-op function (rows calling ctx.<name>.register(...) survive).
-        const stub = new Proxy({}, { get: (t, p) => (p in t ? t[p] : () => {}) })
-        ctx.provide(name, stub)
+        ctx.provide(name, inertService())
         stubbed.add(name)
       }
     }

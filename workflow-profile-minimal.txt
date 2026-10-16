@@ -1,0 +1,89 @@
+@@ main-flow
+MINIMAL FLOW — idea → ship:
+1. Sharpen. Load the `grilling` skill; keep `domain-modeling` vocabulary
+   (/grill-with-docs in a workspace, else /grill-me).
+2. Build. Multi-session → /to-spec → /to-tickets (blockers first) → one ticket
+   per fresh session via /implement; single-session → /implement here.
+   /implement drives /tdd (red→green), closes with /code-review before the
+   commit; a PR body goes through /pr.
+3. Retro. /retro changes the ENVIRONMENT, not the code.
+@@ minimal-note after=main-flow
+MINIMAL PROFILE — the same workflow, compressed: the seven gates below are the
+shared text word for word, DONE / TEST SCOPE TIERING / RECOVERY DISCIPLINE keep
+their substance, and the rest is cut to essentials. The standard profile has
+the full text. Never read terseness as permission to skip a gate.
+@@ enforcement-done
+DONE — verification includes the remote CI. Per-issue: after a push, confirm
+the pushed commit's CI is green; red CI is current-ticket work, never "trivial"
+spare work. Batch: per-issue done = local verification + code-review; CI green
+is confirmed once, at the batch-end push.
+@@ enforcement-tiering
+TEST SCOPE TIERING — pick the smallest tier that can prove the change and name
+it in the ticket's evidence line: ① the single test file touching the change
+(while iterating); ② the module's own suite; ③ the full verify set (+ e2e) at
+closure, or when the change touches a high-risk surface (persona / handoff /
+enforcer / installer / sandcastle). Declaring a tier CI covered that you
+skipped locally is part of the evidence, never a substitute for it.
+@@ enforcement-recovery
+RECOVERY DISCIPLINE — a resumed or handed-off session treats the state file as
+the source of truth, never memory: batch-state.md for the batch,
+.scratch/progress.md for the snapshot, the handoff document for its session.
+First move = verify the environment snapshot. If the state file is missing,
+stale, or contradicts the observed environment, STOP and ask — never guess and
+never silently rewrite the record.
+@@ batch-mode
+BATCH MODE — only when the human declares a batch; never on by default.
+- Batch = the issues the human names, plus the end point. Inside a batch: each
+  ticket → local commit + local verification + code-review → NO per-ticket
+  push; the remote CI is confirmed once, at the batch-end push.
+- ONE TICKET PER SESSION still holds: every ticket gets its own /implement
+  session, handing off through .scratch/batch-state.md (members, end point,
+  progress, unpushed commits). Never chain tickets in one session.
+- AUTO-HANDOFF: when a ticket closes locally and batch-state.md names a
+  successor, hand off to it (fresh + directed, `implement` declared) instead of
+  waiting to be told. Exceptions: a needed human decision, a requested pause,
+  or the end point → go to the wrap.
+- Batch end: full-issue summary (A/B/C, created and updated) → human
+  confirmation → one push → all-green CI; never pre-authorized. Only declared
+  members: at 5 unpushed tickets or 1 week, pause for a push checkpoint.
+- ISSUE DISCIPLINE: every discovery lands in the tracker, is processed, then
+  the issue is updated with the fix and its evidence. Bucket A (blocks
+  verification) pauses the batch for the human; B and C continue.
+- SANDBOX BATCH MODE (opt-in): the main session orchestrates, sandboxed workers
+  execute; audit each ticket before launch, and every launch is an
+  external-action-gate event.
+@@ text-pushes-exclude-actions
+TEXT PUSHES EXCLUDE ACTIONS — a text/docs-only push must not trigger CI: keep
+paths-ignore for those paths in ci.yml.
+@@ context-hygiene
+CONTEXT HYGIENE — judge window health by BEHAVIORAL SIGNALS (repeated
+re-reads, circling, gate violations, shrinking replies, decision drift), never
+by cache-read %: reuse is a COST metric, and a long context still attends its
+full history. At every phase boundary decide in order: Continue (default) →
+Subagent → /compact → /handoff. You cannot switch the main session yourself:
+write the artifact, create the child, then STOP and tell the human to switch.
+As the CHILD of a handoff: a "## 本会话任务（human 已定向）" section means an
+assignment (verify the snapshot, restate, DECLARE START); without it, verify,
+restate, and ASK. A snapshot mismatch stops you: report before starting.
+@@ methodology
+METHODOLOGY — frontier (ask only what is unblocked; facts are yours, decisions
+are the human's) · red loop (red before green, one slice) · tight loop (one
+command that goes red on THIS bug) · tracer bullets (vertical slices, blockers
+first) · primary sources · deep modules (much behaviour behind a small
+interface) · domain language (CONTEXT.md, ADRs) · human is the index.
+@@ on-ramps
+ON-RAMPS — /triage (issues you didn't create) · /diagnosing-bugs · /wayfinder.
+@@ health
+HEALTH — /improve-codebase-architecture when idle.
+@@ standalone
+STANDALONE — /grill-me · /prototype · /research · /wizard · /wait-what.
+@@ utilities
+UTILITIES — /git-guardrails-claude-code · /setup-pre-commit · /migrate-to-shoehorn.
+@@ precondition
+PRECONDITION — tracker-dependent skill setup runs on first use.
+@@ initialization
+INITIALIZATION — with no CONTEXT.md in the cwd, bootstrap once per session,
+non-mutating: probe git / docs / language signals, then create only what is
+missing (CONTEXT.md marked uninitialized, empty docs/adr/, AGENTS.md only when
+neither AGENTS.md nor CLAUDE.md exists). Never invent decisions; CONTEXT.md
+present → skip the probe.

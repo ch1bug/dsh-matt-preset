@@ -22,7 +22,7 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具
 | 组件 | 说明 |
 | --- | --- |
 | persona（`agent.cordis.yml`） | 系统提示词导语：identity + 路由前提（`{{model}}`/`{{cwd}}` 渲染时插值，`tests/verify-persona.mjs` 断言）+ `ask-matt` 标记（同时喂 workflow-core 与 workflow-enforcer 的 scope 守卫）。#54 起工作流正文不再承载在 persona（见下行 workflow-core）。 |
-| `workflow-core.mjs`（+ `workflow-body.txt` / `workflow-profile-*.txt`） | ask-matt 工作流正文插件（#54）：MAIN FLOW（sharpen / prototype / build / **retro**，build 含 /pr model-invoked 路由，#10）+ **WORKFLOW ENFORCEMENT 七门**（见 `CONTEXT.md` D19–D38）+ **BATCH MODE（攒批）**（批次宣告 / 一票一会话 / 批末总结确认门 / issue 纪律 / **批内票完成自动 handoff 下一票** / 排批 model-lane 分级）。经 system-prompt/assemble 注入 `workflow:core` 节，渲染后与原 persona 承载版 **verbatim-identical**（`tests/verify-workflow-core.mjs` L1 断言）；`{{model}}`/`{{cwd}}` 在注入节内照常插值（spike 实证，ADR-0010）。**任何 preset 单行挂载** `dsh-matt-preset/workflow-core.mjs`（subpath exports 解析，随安装位可移植）即得工作流；scope 守卫默认 marker（`ask-matt`，绝不泄漏到非工作流会话），非 matt preset 显式 `config.scope: 'all'`（挂载即 opt-in）。**#55 profile 机制**：正文 = 共享骨架（按 `@@ <id>` 分节，七门只此一处）+ 每 profile delta（同 id 覆盖 / `after=<anchor>` 插入）；**`profile: standard`**（默认；= 骨架 verbatim，与 #54 基线逐字节一致）与 **`profile: creative`**（创作者 preset：`plugin_manager` 变更纳入外部动作门 + cordis inspect-first，七门措辞零改动）——见 [ADR-0011](docs/adr/0011-workflow-profiles.md) 与 `tests/verify-workflow-profiles.mjs`（AC1/AC2/AC3）。 |
+| `workflow-core.mjs`（+ `workflow-body.txt` / `workflow-profile-*.txt`） | ask-matt 工作流正文插件（#54）：MAIN FLOW（sharpen / prototype / build / **retro**，build 含 /pr model-invoked 路由，#10）+ **WORKFLOW ENFORCEMENT 七门**（见 `CONTEXT.md` D19–D38）+ **BATCH MODE（攒批）**（批次宣告 / 一票一会话 / 批末总结确认门 / issue 纪律 / **批内票完成自动 handoff 下一票** / 排批 model-lane 分级）。经 system-prompt/assemble 注入 `workflow:core` 节，渲染后与原 persona 承载版 **verbatim-identical**（`tests/verify-workflow-core.mjs` L1 断言）；`{{model}}`/`{{cwd}}` 在注入节内照常插值（spike 实证，ADR-0010）。**任何 preset 单行挂载** `dsh-matt-preset/workflow-core.mjs`（subpath exports 解析，随安装位可移植）即得工作流；scope 守卫默认 marker（`ask-matt`，绝不泄漏到非工作流会话），非 matt preset 显式 `config.scope: 'all'`（挂载即 opt-in）。**#55 profile 机制**：正文 = 共享骨架（按 `@@ <id>` 分节，七门只此一处）+ 每 profile delta（同 id 覆盖 / `after=<anchor>` 插入）；**`profile: standard`**（默认；= 骨架 verbatim，与 #54 基线逐字节一致）与 **`profile: creative`**（创作者 preset：`plugin_manager` 变更纳入外部动作门 + cordis inspect-first，七门措辞零改动）——见 [ADR-0011](docs/adr/0011-workflow-profiles.md) 与 `tests/verify-workflow-profiles.mjs`（AC1/AC2/AC3）。**#56 起再加两档 + `tight` 紧连接分节**：marker 扩为 `@@ <id>` / `@@ <id> tight` / `@@ <id> after=<anchor>`（三选一；`tight` = 与前一节**单换行**粘连，描述的是该节之前的分隔符、因而属骨架**位置**，delta 声明即抛）；`workflow-enforcement`（七门）拆出紧连接的 `enforcement-done` / `enforcement-tiering` / `enforcement-recovery` 而变得可分（骨架 15 节，**standard 仍与 #54 基线逐字节一致**）——**`profile: ptc`**（PTC 执行形态：工具面即程序面 `run_code` + 生成 SDK、one-shot 程序与状态落文件、`agent()` 编排契约、门按**效果**判定；只增不改、**不引用 shell-host**，D41）与 **`profile: minimal`**（七门节 verbatim，其余全压：**34.8% = 7266/20892 字符**）——见 [ADR-0012](docs/adr/0012-workflow-profiles-2.md) 与 `tests/verify-workflow-profiles-2.mjs`（T1–T5 / AC1–AC3 / P5–P8：注册与打包均为显式条目；P1–P4 在 #55 的文件里）。 |
 | `handoff-tool.mjs` | 写可移植交接文档 → 创建子会话（`fork` 带历史 / `fresh` 全新）→ 文档作为子会话**首条 user 提示词**，首轮立即开始；子会话自动 attach workspace。子会话**模型取部署默认选择**（`agentDefaultModel.currentSelection()`，不继承父会话当前路由——如需指定模型，在定向节写明让子会话对齐）。交接文档含工具保证的**交接边界段**：定向交接（「## 本会话任务（human 已定向）」节 → 子会话声明开工，免逐次确认，D35）/ 候选交接（无定向节 → 问 human）；外部操作定义固定对齐 enforcer 高危清单（容器 up 等常规操作不得列入「先报告等确认」）。 |
 | `workflow-enforcer.mjs` | WORKFLOW GATES 提醒注入（D21 外部动作门）：每 turn 基线 + 高危 tool/call 后一次性 ⚠ 追加 + **常规操作白名单**（docker compose up / cargo build / 本地 commit / 只读查询**无需确认**）；**#55 起 `plugin_manager` 的 install_bundle / set_plugin / set_bundle 属外部动作事件**（只读 list_* 不触发——与 creative profile 的声明同口径，D23 高危清单只此一处）；关票后 fresh-subagent 质量抽查提醒（O5）；`gh issue create` → 一会话一 issue 提醒（D20）；批内收尾文本 + `.scratch/batch-state.md` → AUTO-HANDOFF 提醒；fold-in 上下文证据（`context_status` 工具）。项目可放 `workflow-gates.yml` 覆盖清单（见 `docs/workflow-enforcer.md`）。 |
 | INITIALIZATION 人设段 | 工作区无 `CONTEXT.md` 时自主探测（git/docs/语言信号）并建**双骨架**：`CONTEXT.md`（领域）+ 空 `docs/adr/` + `AGENTS.md`（行为指南，含 Agent skills 段；与 CLAUDE.md 绝不双建）；tracker 首次用时由 setup 补齐。 |
@@ -95,9 +95,11 @@ node scripts/verify-all.mjs
 dsh-matt-preset/
 ├── preset.yml                    # roster 元数据（name/description/order）
 ├── agent.cordis.yml              # cordis 组合（persona 导语 + workflow-core/enforcer/lang-enforcer + 全量工具）
-├── workflow-core.mjs             # ask-matt 工作流正文注入插件（#54；#55 profile 机制：骨架 + delta）
-├── workflow-body.txt             # 共享骨架（`@@ <id>` 分节；standard profile = 去 marker 的 verbatim，ADR-0010/0011）
+├── workflow-core.mjs             # ask-matt 工作流正文注入插件（#54；#55 骨架 + delta；#56 加 ptc/minimal 与 tight 紧连接分节）
+├── workflow-body.txt             # 共享骨架（`@@ <id>` / `@@ <id> tight` 分节；standard = 去 marker 的 verbatim，ADR-0010/0011/0012）
 ├── workflow-profile-creative.txt # creative profile delta（创作者 preset 适配；七门零改动）
+├── workflow-profile-ptc.txt      # ptc profile delta（PTC 执行形态适配；只增不改、七门零改动）
+├── workflow-profile-minimal.txt  # minimal profile delta（压缩版；七门节不覆盖、例子裁掉，约 standard 1/3）
 ├── handoff-tool.mjs              # 交接工具（fork/fresh 子会话 + 环境快照段）
 ├── workflow-enforcer.mjs         # WORKFLOW GATES 提醒注入
 ├── workflow-gates.yml.example    # 项目级高危清单模板
@@ -105,7 +107,7 @@ dsh-matt-preset/
 ├── sandcastle/                   # 沙箱批跑（opt-in）：模板 + 接入文档
 │   ├── README.md
 │   └── templates/                # Dockerfile / dsh.ts adapter / audit-ticket / run-ticket / night-run / lib / worker-context
-├── CONTEXT.md                    # 术语表 + 决策（D1–D44）
+├── CONTEXT.md                    # 术语表 + 决策（D1–D45）
 ├── AGENTS.md                     # steering 入口（导航指针）
 ├── docs/adr/                     # 架构决策记录
 ├── docs/agents/                  # issue-tracker / triage-labels / domain 约定

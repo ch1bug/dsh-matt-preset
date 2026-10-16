@@ -24,6 +24,8 @@
     "workflow-core.mjs",
     "workflow-body.txt",
     "workflow-profile-creative.txt",
+    "workflow-profile-ptc.txt",
+    "workflow-profile-minimal.txt",
     "*.mjs",
     "skills",
     "lang-packs",

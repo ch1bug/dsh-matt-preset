@@ -20,17 +20,33 @@
  * mounts this plugin renders a prompt verbatim-identical to the old
  * persona-carried version (L1 assertion).
  *
- * Profiles (#55, ADR-0011): the body is one SHARED SKELETON
+ * Profiles (#55, ADR-0011; #56, ADR-0012): the body is one SHARED SKELETON
  * (workflow-body.txt) sectioned by `@@ <id>` marker lines, plus per-profile
  * DELTA files (workflow-profile-<name>.txt) written in the same marker
- * syntax:
- *   - a delta id matching a skeleton section REPLACES that section;
+ * syntax. A marker carries exactly one optional clause — `tight` or
+ * `after=<anchor>`:
+ *   - a delta id matching a skeleton section REPLACES that section (keeping
+ *     its skeleton position);
  *   - a new id is inserted where its `after=<anchor>` says, and appended
  *     when no anchor is given.
  * `standard` carries no delta — it is the skeleton verbatim, byte-identical
- * to the #54 body (AC1 in tests/verify-workflow-profiles.mjs). An adapting
+ * to the #54 body (AC1 in tests/verify-workflow-profiles.mjs). `creative`
+ * (creator preset), `ptc` (PTC execution shape) and `minimal` (compressed
+ * token-budget text) each adapt the workflow from a delta. An adapting
  * profile therefore never copies shared text: the seven gates exist in
  * exactly one place, and the marker lines themselves never reach the model.
+ *
+ * Tight-joined sections (#56, ADR-0012): `@@ <id> tight` glues a section to
+ * the PREVIOUS one with a single newline instead of the blank separator, so
+ * text that #54 connected with single newlines (the enforcement block: the
+ * seven gates, then DONE / TEST SCOPE TIERING / RECOVERY DISCIPLINE) can be
+ * SPLIT without changing a byte of the standard render — and therefore
+ * without copying the gates into a profile delta. The flag describes the
+ * separator BEFORE the section, so it is a property of the skeleton POSITION:
+ * a delta declaring `tight` is a bug (loud), because an override keeps its
+ * skeleton position and an insert is always blank-separated. A line starting
+ * with `@@` that does not match the grammar is loud too — a typo must never
+ * turn into prompt prose.
  *
  * Scope guard: injection must never leak into non-workflow sessions, so the
  * default scope is marker-based — the section is only added when the
@@ -39,10 +55,12 @@
  * `scope: 'all'` to receive the workflow text regardless of a marker.
  *
  * Config:
- *   - profile: 'standard' (default) or 'creative' (creator preset: plugin
- *              authoring adaptations, gates unchanged). An unknown name
- *              falls back to the default with one warn per mount — a typo
- *              must never cost a session its workflow text.
+ *   - profile: 'standard' (default), 'creative' (creator preset: plugin
+ *              authoring adaptations), 'ptc' (PTC execution shape: program
+ *              surface vocabulary, gates unchanged) or 'minimal' (compressed
+ *              token-budget text, gates unchanged). An unknown name falls back
+ *              to the default with one warn per mount — a typo must never cost
+ *              a session its workflow text.
  *   - scope:  'marker' (default — inject only when the marker is present)
  *             or 'all' (inject on every assembly of a mounting preset).
  *   - marker: the scope-guard marker (default 'ask-matt').
@@ -70,10 +88,14 @@ export const DEFAULT_PROFILE = 'standard'
 export const PROFILES = {
   standard: null,
   creative: new URL('./workflow-profile-creative.txt', import.meta.url),
+  ptc: new URL('./workflow-profile-ptc.txt', import.meta.url),
+  minimal: new URL('./workflow-profile-minimal.txt', import.meta.url),
 }
 
-/** `@@ <id>` or `@@ <id> after=<anchor>` — a section delimiter line. */
-const DELIMITER = /^@@\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+after=([A-Za-z0-9][A-Za-z0-9._-]*))?\s*$/
+/** `@@ <id>`, `@@ <id> tight` or `@@ <id> after=<anchor>` — a delimiter line.
+ * Exactly one optional clause: `tight` describes the separator before the
+ * section (skeleton only), `after=` where a delta section is inserted. */
+const DELIMITER = /^@@\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+(tight|after=([A-Za-z0-9][A-Za-z0-9._-]*)))?\s*$/
 
 /** Whether `name` names a registered profile. */
 function knownProfile(name) {
@@ -81,11 +103,12 @@ function knownProfile(name) {
 }
 
 /**
- * Split a sectioned text into `{ id, after, text }` sections.
+ * Split a sectioned text into `{ id, after, tight, text }` sections.
  * Line endings are normalized; the caller keeps `trailingNewline` so the
  * recomposition can reproduce the source bytes exactly. Loud on malformed
- * input: text before the first marker or a duplicate id is a packaging bug,
- * not something to paper over.
+ * input: text before the first marker, a `@@`-prefixed line the grammar does
+ * not accept, a duplicate id, or a tight flag on the first section is a
+ * packaging bug, not something to paper over.
  */
 export function parseSections(text) {
   const normalized = String(text).replace(/\r\n/g, '\n')
@@ -96,9 +119,18 @@ export function parseSections(text) {
   for (let i = 0; i < lines.length; i++) {
     const hit = DELIMITER.exec(lines[i])
     if (hit !== null) {
-      current = { id: hit[1], after: hit[2] ?? null, body: [] }
+      const tight = hit[2] === 'tight'
+      // The flag says "glue me to the previous section"; section 0 has none.
+      if (tight && collected.length === 0) {
+        throw new Error(`workflow section "${hit[1]}" is tight-joined but is the FIRST section — there is nothing to glue it to (line ${i + 1})`)
+      }
+      current = { id: hit[1], after: hit[3] ?? null, tight, body: [] }
       collected.push(current)
       continue
+    }
+    // A marker-shaped line that does not parse is a typo, never body text.
+    if (lines[i].startsWith('@@')) {
+      throw new Error(`malformed workflow section marker (line ${i + 1}): ${JSON.stringify(lines[i])} — expected "@@ <id>", "@@ <id> tight" or "@@ <id> after=<anchor>"`)
     }
     if (current === null) {
       throw new Error(`workflow text before the first "@@ <id>" marker (line ${i + 1}): ${JSON.stringify(lines[i])}`)
@@ -116,19 +148,20 @@ export function parseSections(text) {
     }
   }
   return {
-    sections: collected.map(section => ({ id: section.id, after: section.after, text: section.body.join('\n') })),
+    sections: collected.map(section => ({ id: section.id, after: section.after, tight: section.tight, text: section.body.join('\n') })),
     trailingNewline,
   }
 }
 
 /**
  * Apply `deltas` to `skeleton` sections. Overrides keep their skeleton
- * position; inserts land right after their anchor, in delta order.
+ * position (and with it the position's separator); inserts land right after
+ * their anchor, in delta order.
  */
 export function composeSections(skeleton, deltas = []) {
   if (!Array.isArray(skeleton)) throw new TypeError('composeSections: skeleton must be a section array')
   if (!Array.isArray(deltas)) throw new TypeError('composeSections: deltas must be a section array')
-  const composed = skeleton.map(section => ({ id: section.id, text: section.text }))
+  const composed = skeleton.map(section => ({ id: section.id, text: section.text, tight: section.tight === true }))
   const byId = new Map(composed.map(section => [section.id, section]))
   const overridden = new Set()
   /** anchor id → id of the last section inserted after it (keeps delta order). */
@@ -136,6 +169,10 @@ export function composeSections(skeleton, deltas = []) {
   for (const delta of deltas) {
     const id = delta?.id
     if (typeof id !== 'string' || id === '') throw new TypeError('composeSections: every delta section needs an id')
+    // `tight` describes a skeleton position; a delta neither owns nor moves one.
+    if (delta.tight === true) {
+      throw new Error(`workflow delta "${id}" declares tight — the tight-join flag belongs to the skeleton section it sits at, not to a delta`)
+    }
     const target = byId.get(id)
     if (target !== undefined) {
       if (delta.after != null) throw new Error(`workflow delta "${id}" both overrides a skeleton section and declares after=${delta.after}`)
@@ -155,14 +192,17 @@ export function composeSections(skeleton, deltas = []) {
       at = found + 1
       lastInsertedAfter.set(anchor, id)
     }
-    composed.splice(at, 0, { id, text: delta.text })
+    composed.splice(at, 0, { id, text: delta.text, tight: false })
   }
   return composed
 }
 
-/** Join sections back into one text (the "\n\n" boundary the split restored). */
+/** Join sections back into one text: a blank line between sections, or the
+ * single newline a `tight` section was split out of (#56). */
 export function joinSections(sections, trailingNewline = true) {
-  return sections.map(section => section.text).join('\n\n') + (trailingNewline ? '\n' : '')
+  return sections
+    .map((section, i) => (i === 0 ? '' : section.tight === true ? '\n' : '\n\n') + section.text)
+    .join('') + (trailingNewline ? '\n' : '')
 }
 
 /**

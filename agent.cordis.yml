@@ -37,14 +37,18 @@
       model-invoked) — to follow one that is not in your
       skill catalog, read its instructions at ~/.dsh/skills/<name>/SKILL.md and
       follow them. Facts are your job; decisions are the human's.
-# workflow-core（内置插件，随 preset 分发；#54 工作流插件化 + #55 profile 机制）：
+# workflow-core（内置插件，随 preset 分发；#54 工作流插件化 + #55 profile 机制 + #56 两档）：
 # ask-matt 工作流正文拆为**共享骨架 + 每 profile delta**——骨架 workflow-body.txt 按
-# `@@ <id>` 分节（七门只此一处，DRY），delta 文件 workflow-profile-<name>.txt 同语法：
-# 同 id 覆盖该节、新 id 按 `after=<anchor>` 插入（marker 行永不出现在注入文本里）。
-# 本 preset 显式挂 profile: standard（= 骨架 verbatim，与 #54 基线逐字节一致——AC1 见
-# tests/verify-workflow-profiles.mjs）；creative profile（创作者 preset：plugin_manager
-# 变更纳入外部动作门 + inspect-first 契约，七门措辞零改动）见
-# workflow-profile-creative.txt 与 ADR-0011。注入经 system-prompt/assemble 为
+# `@@ <id>` / `@@ <id> tight` 分节（七门只此一处，DRY；tight = 与前一节单换行粘连，描述的
+# 是「该节之前」的分隔符、属骨架**位置**——故七门可与 DONE/TIERING/RECOVERY 拆开而不动一字），
+# delta 文件 workflow-profile-<name>.txt 同语法：同 id 覆盖该节、新 id 按 `after=<anchor>`
+# 插入（marker 行永不出现在注入文本里）。本 preset 显式挂 profile: standard（= 骨架 verbatim，
+# 与 #54 基线逐字节一致——AC1 见 tests/verify-workflow-profiles.mjs；现 15 节）。另三档：
+# #55 creative（创作者 preset：plugin_manager 变更纳入外部动作门 + inspect-first 契约）；
+# #56 ptc（PTC 执行形态：工具面即程序面 run_code + 生成 SDK、one-shot 程序状态落文件、
+# agent() 编排契约、门按效果判定；只增不改、不引用 shell-host——D41）与 #56 minimal
+# （七门节 verbatim、其余压缩到 ~1/3）；各有 workflow-profile-<name>.txt 与
+# ADR-0011 / ADR-0012。注入经 system-prompt/assemble 为
 # workflow:core 节（order 10，紧随 persona 前缀）——渲染后与 persona 承载版
 # verbatim-identical（tests/verify-workflow-core.mjs L1 断言）。{{model}}/{{cwd}} 在注入节内
 # 照常插值（spike 实证：waterfall 先于 renderPrompt 插值，agent-loop 每次组装注册变量）。

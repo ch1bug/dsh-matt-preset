@@ -1,0 +1,47 @@
+@@ ptc-execution-shape after=enforcement-recovery
+PTC EXECUTION SHAPE — this profile is mounted where the agent's tool surface
+IS a program surface: instead of issuing one command per step, the agent writes
+a program and runs it (`run_code`), and the tool registry is handed to that
+program as a generated SDK. Everything above still applies — the map, the seven
+gates, batch mode. Two adaptations follow this section: how the shared text's
+command vocabulary reads on this surface, and the orchestration shape for
+multi-step work. The seven gates themselves are unchanged: this profile ADDS to
+the shared workflow, it never rewrites it, and it assumes only the program
+surface — no extra host plugin is required.
+@@ ptc-loop-surface after=ptc-execution-shape
+PTC LOOP SURFACE — read the shared text's command vocabulary through this
+surface. "One command that goes red on THIS bug" (the tight loop) = one program
+that fails on this bug: make the program assert the case and fail loudly, then
+re-run that same program while you edit, so the loop stays tight. A program is
+ONE-SHOT: every call runs in a fresh Node process with no retained state, so
+anything the next step needs must be written to a file — the state file, not
+the program's memory, is the source of truth (RECOVERY DISCIPLINE above is
+unchanged), and the initialization probe is a read-only program under the same
+non-mutating rule. Evidence lines name the program and its outcome (captured
+output plus the returned value), not a shell exit status. A program that calls
+a tool does so through the SDK binding (`tools.<name>(...)`): that nested call
+keeps the registry's visibility, ordering and approval rules, so treat it
+exactly like a call made natively.
+@@ ptc-orchestration after=ptc-loop-surface
+PTC ORCHESTRATION — multi-step and batch work is orchestrated inside one
+program through the workflow hooks (`agent()`, `parallel()`, `pipeline()`,
+`phase()`, `log()`), not by nesting sessions. Three contracts, all from the
+PTC assessment: an `agent()` model override must pass provider AND model
+together; an orchestration run must not nest another orchestration inside its
+children; a child's structured-output schema stays shallow. Values crossing the
+orchestration boundary must be lossless JSON, and an ordinary child failure
+resolves to `null` — the parent script decides (retry, record, or fail the
+run), so a failure never silently becomes a success. Concurrency and
+total-agent caps are cooperative: they bound fan-out, they do not relax any
+gate.
+@@ ptc-gate-scope after=ptc-orchestration
+PTC GATE SCOPE — gate 6 keys on the EFFECT, not on how the call is spelled.
+Running a program inside the sandbox is not itself an external action, but a
+program whose effect is one of gate 6's actions — push, PR/issue/release,
+publish, a plugin-profile install, a destructive reset or delete — IS one:
+report the target and wait, exactly as the gates above require. A program that
+asks for wider sandbox permissions goes through the tool's own approval path
+(the justification is required before the program starts); that is the gate's
+mechanism, never a replacement for report-and-wait. Read-only programs
+(inspect, search, measure) need no confirmation, and this profile adds no
+checkpoint beyond the list the enforcer states.

@@ -1,4 +1,4 @@
-@@ creator-context after=workflow-enforcement
+@@ creator-context after=enforcement-recovery
 CREATOR CONTEXT — this profile is mounted by a preset whose work is DSH
 plugin/preset authoring: the artifact is an extension of the agent runtime, so
 the map above still applies (idea → ship, the seven gates, batch mode) while the
