@@ -52,6 +52,10 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   --title "…\`dir/**\`…"` 会把 markdown 反引号写成 `\`（#66 会话实测，随后用 `gh issue edit`
   的单引号标题修回，白一往返）——带反引号 / `$` 的标题或正文一律走**单引号**、here-string 或
   `--body-file`，写完**回读一遍**。
+- **回读自检本身也可能撒谎：`Select-String` 的 `-SimpleMatch` 别与 `[regex]::Escape()` 拼用**——
+  Escape 把 `#79` 变成 `\#79`，而 `-SimpleMatch` 按**字面**去找那个反斜杠串 → **静默 0 命中**。#75
+  会话实测代价：探测刚写的交接文档标记时，3 个明明在的标记报"0 处"，差点把"文档缺内容"上报出去
+  （换 grep 工具复核才发现是探测侧错）。纯字面探测别 Escape；要正则就别加 `-SimpleMatch`。
 - **worktree 文本文件是 CRLF**（`core.autocrlf=true`，index 里存 LF）。**2026-10-16 复测更正：多行锚点可用**（在 230/230 CRLF 的 `tests/verify-installer.mjs` 上用两行锚点成功改注释，11 次 `edit` 后该文件仍 230/230 CRLF）。旧记的"多行
   `old_string`（`\n` 连接）匹配不到 CRLF 内容——**这条 2026-10-16 已复测证伪，别再为此退回单行锚点**；插入的新行是 LF，`git add`
   时归一化，仓库无碍。只有**逐字节敏感**的正文（骨架 `workflow-body.txt` 这类要被解析器
