@@ -4,8 +4,15 @@
 # exists it REPLACES the plugin's default list; set includeDefault: true in
 # the plugin config to merge with the defaults instead.
 #
-# Match rule: every word of an item must appear (case-insensitive) in the
-# serialized tool call — so "git push" also matches "git push --force origin".
+# Match rule (structured, #79): an item's words must sit at a COMMAND POSITION
+# of the call's declared action field — shell tools are judged per command of
+# the line (arguments.command argv; "git push" covers "git push --force origin",
+# "cd repo && git push"; sudo/env wrappers are skipped), plugin_manager matches
+# its action verb. A one-word item also matches an invocation target BY NAME, so
+# "run-ticket" covers "npx tsx .sandcastle/run-ticket.mts" while name lookalikes
+# (sandcastle-notes.mjs) do not. Bodies never match: echo arguments, commit
+# messages, --body/--grep payloads are text, not actions. Declared surfaces and
+# the not-covered ones: docs/workflow-enforcer.md 判定面.
 
 external:
   - "git push"

@@ -35,6 +35,18 @@
  *   - `system-prompt/assemble` (prepend) — resolve gates for this agent,
  *     match the remembered call, and inject one `workflow:gates` section:
  *     baseline + the matched high-risk call (consumed, so it fires once).
+ *
+ * Gate matching is STRUCTURED (#79): the judgement reads a declared ACTION
+ * field (shell tools → `arguments.command`; `plugin_manager` →
+ * `arguments.action`) and matches the gate words at the COMMAND POSITION of
+ * that action's argv — never as a substring over the whole serialized call.
+ * A tool with no declared action field (write / edit / pty_send / …) is
+ * explicitly NOT covered, so prose that merely mentions `git push` can no
+ * longer arm the gate (a false stop costs time and dilutes a reminder the
+ * model must obey). The other face of the same root cause — indirect
+ * execution that cannot be judged structurally (nested scripts, PTY writes) —
+ * stays uncovered by design and is left to #71's fact probe, not to fuzzy
+ * matching.
  */
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -46,7 +58,10 @@ export const name = 'workflow-enforcer'
 /** The prompt registry this plugin contributes to. */
 export const inject = ['systemPrompt', 'tools']
 
-/** Default gate list. Match = case-insensitive substring over the call. */
+/** Default gate list. Match = structured, over the call's declared ACTION
+ * field only (see `gateMatches`): case-insensitive gate words at the command
+ * position of a shell argv / the tool+action pair — never a substring over the
+ * call's free text. */
 export const DEFAULT_GATES = {
   external: [
     'git push', 'gh pr create', 'gh issue create',
@@ -171,10 +186,271 @@ function callArgs(value) {
   return value ?? {}
 }
 
-/** Whether a gate (space-separated words) appears in the call surface. */
-function gateHit(gate, surface) {
-  const haystack = surface.toLowerCase()
-  return gate.toLowerCase().split(' ').every(part => haystack.includes(part))
+/** Shell tools whose `arguments.command` is a shell command line. One source for
+ * the declared shell set (the aliases share the shape; a preset may mount a
+ * differently-named shell tool). */
+const SHELL_TOOLS = ['bash', 'pwsh', 'sh', 'zsh', 'dash', 'powershell', 'cmd']
+
+/** Which argument carries a tool's ACTION (never its free text). Declared per
+ * tool, so a call that merely CARRIES a body mentioning a gate can never arm
+ * it:
+ *
+ *   - shell tools → `arguments.command`, a shell command line. Gates match at
+ *     the COMMAND POSITION of its argv (`argv[0] === 'git' && argv[1] ===
+ *     'push'`), plus the executed payload of a declared `-c`/`-e`-style flag.
+ *   - `plugin_manager` → `arguments.action`, the mutation verb; gate
+ *     `plugin_manager install_bundle` reads as the tool+action pair.
+ *
+ * A tool NOT declared here (write / edit / str_replace_editor / pty_send /
+ * pty_open / run_code / …) has NO action surface: nothing about it can match,
+ * by construction. That is the deliberate "not covered" declaration of #79 — a
+ * silent substring fallback is exactly the bug it replaces. */
+export const ACTION_FIELDS = {
+  ...Object.fromEntries(SHELL_TOOLS.map(tool => [tool, 'command'])),
+  plugin_manager: 'action',
+}
+
+/** Leading wrappers, shell keywords and env assignments skipped before the
+ * command position: `sudo git push`, `FOO=1 git push`, `env FOO=1 git push` and
+ * `if git push; then …` all land on `git`. */
+const TRANSPARENT_PREFIXES = new Set([
+  'sudo', 'doas', 'command', 'nohup', 'env', 'time',
+  'if', 'then', 'else', 'elif', 'while', 'until', 'do', 'done', 'fi', '!',
+])
+
+/** Commands that INVOKE another program: their non-flag arguments are
+ * invocation targets, so a single-word script/path gate (`run-ticket`,
+ * `sandcastle`) matches there — `npx tsx .sandcastle/run-ticket.mts` fires
+ * while `echo ".sandcastle/run-ticket.mts"` (text) does not. */
+const RUNNERS = new Set([
+  'npx', 'bunx', 'pnpm', 'yarn', 'npm', 'tsx', 'ts-node', 'node', 'deno', 'bun',
+  'python', 'python3', 'py', 'sh', 'bash', 'zsh', 'dash', 'pwsh', 'powershell',
+  'cmd', 'dsh',
+])
+
+/** Flags whose VALUE is executed (code / SQL statement), per command: the
+ * payload's primary position is matched recursively, so `bash -c "git push"`
+ * and `psql -c "delete from users"` stay covered. Deliberately absent:
+ * `echo -e` (escapes), `psql -e` (echo queries), `git commit -m` / `gh --body`
+ * / `git log --grep` — their values are TEXT, and matching them is the false
+ * positive #79 removes. Positional SQL (`sqlite3 db "delete from …"`) is not
+ * covered — declared, with #71's fact probe as the fallback. */
+const EXEC_FLAGS = {
+  bash: ['-c'], sh: ['-c'], zsh: ['-c'], dash: ['-c'],
+  pwsh: ['-c', '-command', '--command'], powershell: ['-c', '-command', '--command'],
+  cmd: ['/c', '/k'],
+  psql: ['-c', '--command'],
+  mysql: ['-e', '--execute'], mariadb: ['-e', '--execute'],
+}
+
+/** Declared CAP on executed-payload recursion: 2 levels covers `bash -c "git
+ * push"` (1) and `bash -c 'bash -c "git push"'` (2). Deeper indirection is
+ * declared uncovered rather than guessed at. */
+const MAX_PAYLOAD_DEPTH = 2
+
+/** Shell control operators that START A NEW COMMAND: each side is judged at its
+ * own command position, so `cd repo && git push` fires (a direct push — red if
+ * only the line's first command were judged), while `echo a; git log
+ * --grep="git push"` still does not. Quoted operators never reach here:
+ * `shellWords` keeps a quoted payload as one token. */
+const COMMAND_SEPARATORS = new Set(['&&', '||', ';', ';;', '|', '|&', '&'])
+
+/** The single characters `shellWords` treats as operators while UNQUOTED (see
+ * `COMMAND_SEPARATORS` for the token forms it emits). */
+const COMMAND_OPERATOR_CHARS = new Set([';', '&', '|'])
+
+/** Split a shell command line into words, honouring quotes so a quoted payload
+ * stays ONE token (`--grep="git push"` is not two words). Quotes are dropped.
+ * Unquoted control operators end the current word and become their own token
+ * (`git status; git push` → `;` splits the line); unquoted redirects/`$`/
+ * backticks/parens end or drop out of the word (`git push>log.txt` is still the
+ * push it is, `$(git push)` still reads as the push it is). A QUOTED operator
+ * stays inside its token — `echo "a; rm -rf /"` is text, not a second
+ * command. */
+function shellWords(text) {
+  const words = []
+  let cur = ''
+  let quote = null
+  const flush = () => { if (cur !== '') { words.push(cur); cur = '' } }
+  for (const ch of String(text)) {
+    if (quote !== null) {
+      if (ch === quote) quote = null
+      else cur += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue }
+    if (/\s/.test(ch)) { flush(); continue }
+    if (COMMAND_OPERATOR_CHARS.has(ch)) {
+      flush()
+      const prev = words[words.length - 1]
+      if (prev !== undefined && /^[;&|]+$/.test(prev)) words[words.length - 1] = prev + ch
+      else words.push(ch)
+      continue
+    }
+    // Redirects and command-substitution punctuation: terminate the word, stay
+    // out of the word list (they never carry an action of their own).
+    if (ch === '>' || ch === '<' || ch === '$' || ch === '`' || ch === '(' || ch === ')') { flush(); continue }
+    cur += ch
+  }
+  flush()
+  return words
+}
+
+/** argv[0] normalized for matching: basename, Windows executable suffix and a
+ * leading path dropped — `/usr/bin/git push` and `git.exe push` are the same
+ * command as `git push` (the raw form still reaches the display line). */
+function commandToken(word) {
+  const base = String(word ?? '').split(/[\\/]/).pop() ?? ''
+  return base.replace(/\.(exe|cmd|bat|ps1)$/i, '').toLowerCase()
+}
+
+/** Drop leading wrappers and `VAR=value` assignments. */
+function skipPrefixes(words) {
+  let i = 0
+  while (i < words.length) {
+    const tok = commandToken(words[i])
+    if (TRANSPARENT_PREFIXES.has(tok) || /^[a-z_][a-z0-9_]*=/.test(tok)) { i++; continue }
+    break
+  }
+  return words.slice(i)
+}
+
+/** Command position + invocation chain of one shell segment. */
+function segment(words) {
+  const head = skipPrefixes(words)
+  if (head.length === 0) return { primary: [], chain: [], command: '' }
+  const primary = [commandToken(head[0]), ...head.slice(1)]
+  const command = primary[0]
+  const chain = [command]
+  let last = command
+  let i = 1
+  while (i < primary.length && RUNNERS.has(commandToken(last))) {
+    const tok = primary[i]
+    i++
+    if (String(tok).startsWith('-')) continue // a flag is not an invocation target
+    // The RAW token (not the basename): a single-word gate may legitimately
+    // match a path component (`.sandcastle/run-ticket.mts`).
+    chain.push(String(tok))
+    last = tok
+  }
+  return { primary, chain, command }
+}
+
+/** The executed payload of the declared exec flag at `i`, or null. Handles
+ * `-c "…"`, `--command="…"`, and clustered short flags (`bash -lc "…"` = `-l
+ * -c`, whose value still executes). */
+function execPayload(primary, i, execFlags) {
+  const tok = String(primary[i])
+  if (!tok.startsWith('-') && !tok.startsWith('/')) return null
+  const eq = tok.indexOf('=')
+  const flag = (eq === -1 ? tok : tok.slice(0, eq)).toLowerCase()
+  const value = (() => {
+    if (execFlags.includes(flag)) return eq === -1 ? primary[i + 1] : tok.slice(eq + 1)
+    if (eq !== -1 || !/^-[a-z]{2,}$/i.test(tok)) return null
+    const short = execFlags.find(f => f.length === 2 && f.startsWith('-') && tok.toLowerCase().includes(f[1].toLowerCase()))
+    return short === undefined ? null : primary[i + 1]
+  })()
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+/** Every segment a gate may judge: each command of the line in turn, then the
+ * executed payload of its declared exec flags, recursively (bounded depth). */
+function addSegments(words, depth, out) {
+  for (const part of splitCommands(words)) {
+    const seg = segment(part)
+    if (seg.primary.length === 0) continue
+    out.push(seg)
+    const execFlags = EXEC_FLAGS[String(seg.command).toLowerCase()] ?? []
+    if (execFlags.length === 0 || depth >= MAX_PAYLOAD_DEPTH) continue
+    // A SHELL reads its own options before the first operand, so `bash deploy.sh
+    // -c "…"` is a script argument, not an executed payload (SQL clients keep
+    // full scanning: `psql -h host -c "delete from …"` is real).
+    const optionsFirst = SHELL_TOOLS.includes(String(seg.command).toLowerCase())
+    for (let i = 1; i < seg.primary.length; i++) {
+      const tok = String(seg.primary[i])
+      if (optionsFirst && !tok.startsWith('-') && !tok.startsWith('/')) break
+      const payload = execPayload(seg.primary, i, execFlags)
+      if (payload !== null) addSegments(shellWords(payload), depth + 1, out)
+    }
+  }
+  return out
+}
+
+/** Split a word list on shell control operators (`&&`, `;`, `|`, …). */
+function splitCommands(words) {
+  const out = []
+  let cur = []
+  for (const w of words) {
+    if (COMMAND_SEPARATORS.has(String(w))) {
+      if (cur.length > 0) out.push(cur)
+      cur = []
+      continue
+    }
+    cur.push(w)
+  }
+  if (cur.length > 0) out.push(cur)
+  return out
+}
+
+/** Structured action surface of a call: `{ display, segments }`, or null when
+ * the tool declares no action field (explicitly not covered). `display` is what
+ * the ⚠ line shows — the real action, never the bare tool name. */
+function actionSurface(call) {
+  const name = String(call?.name ?? '').toLowerCase()
+  const field = ACTION_FIELDS[name]
+  if (field === undefined) return null
+  const args = call?.arguments ?? {}
+  const raw = args[field]
+  if (field === 'action') {
+    if (typeof raw !== 'string' || raw === '') return null
+    const pair = [name, raw.toLowerCase()]
+    return { display: `${name} ${raw}`, segments: [{ primary: pair, chain: pair, command: name }] }
+  }
+  if (typeof raw !== 'string' || raw === '') return null
+  const segments = addSegments(shellWords(raw), 0, [])
+  return segments.length === 0 ? null : { display: raw, segments }
+}
+
+/** A gate word matches an argv word: exact (case-insensitive), or — for flag
+ * words — a prefix, so the declared `git clean -f` also reaches `git clean -fd`
+ * (the same reach the old substring matcher had). */
+function wordMatches(gateWord, argvWord) {
+  const g = gateWord.toLowerCase()
+  const a = String(argvWord ?? '').toLowerCase()
+  if (a === g) return true
+  return g.startsWith('-') && a.startsWith(g)
+}
+
+/** A script/path gate matches an invocation TARGET by NAME — the basename with
+ * its extension stripped, or a path component: `sandcastle` covers
+ * `.sandcastle/run-ticket.mts`, while `sandcastle-notes.mjs` and
+ * `run-ticket-helpers.mjs` (which the old substring scan fired on) do not. */
+function targetMatches(gateWord, token) {
+  const raw = String(token ?? '').replace(/^["']|["']$/g, '')
+  if (raw === '') return false
+  const parts = raw.split(/[\\/]/).filter(p => p !== '' && p !== '.')
+  const candidates = parts.length > 0 ? parts : [raw]
+  const stem = candidates[candidates.length - 1].replace(/\.[^.]+$/, '')
+  const want = gateWord.toLowerCase()
+  return [...candidates, stem].some(c => c.toLowerCase().replace(/^\.+/, '') === want)
+}
+
+/** Whether a gate matches an already-built surface: its word run at a primary
+ * position (command position of a command in the line, or the start of an
+ * executed payload), or — for a single-word script/path gate — a name match on
+ * an invocation target. */
+function matchesSurface(gate, surface) {
+  const words = String(gate).trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (words.length === 0 || surface === null) return false
+  const single = words.length === 1
+  return surface.segments.some(seg =>
+    words.every((w, i) => wordMatches(w, seg.primary[i]))
+    || (single && seg.chain.some(tok => targetMatches(words[0], tok))))
+}
+
+/** Whether one gate matches a call (structured; builds the surface itself). */
+export function gateMatches(gate, call) {
+  return matchesSurface(gate, actionSurface(call))
 }
 
 /**
@@ -344,15 +620,22 @@ async function reminderText(agent, config, ctx, assembled) {
   const call = lastCall.get(agent.session)
   if (call !== undefined) {
     lastCall.delete(agent.session) // consume: fires once per matched call
-    const gates = await resolveGates(agent, config)
-    const surface = JSON.stringify(call)
-    const hit = [...gates.external, ...gates.destructive].find(gate => gateHit(gate, surface))
-    if (hit !== undefined) {
-      const cmd = call.arguments.command ?? call.name
-      parts.push(`⚠ High-risk action detected: ${String(cmd).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
-      if (gateHit('git push', surface)) {
-        parts.push('After the push, check the remote CI run for the pushed commit — done means local checks pass, pushed, AND CI green.')
-        parts.push('If this is a batch-end push (BATCH MODE declared), it follows the batch-end summary — list every issue, get the human\'s confirmation, then push and verify CI.')
+    // Structured judgement (#79): build the call's declared action surface ONCE
+    // (display + gate matching + the push sub-judgement read the same object),
+    // then match gate words at a command position — a body that mentions a gate
+    // never matches. No surface (write/edit/pty_send/…) → nothing to judge.
+    const surface = actionSurface(call)
+    if (surface !== null) {
+      const gates = await resolveGates(agent, config)
+      const hit = [...gates.external, ...gates.destructive].find(gate => matchesSurface(gate, surface))
+      if (hit !== undefined) {
+        parts.push(`⚠ High-risk action detected: ${String(surface.display).slice(0, 120)} — report the outcome and WAIT for confirmation.`)
+        // The push-specific follow-ups read the SAME surface (a document that
+        // mentions `git push` must not drag them in).
+        if (matchesSurface('git push', surface)) {
+          parts.push('After the push, check the remote CI run for the pushed commit — done means local checks pass, pushed, AND CI green.')
+          parts.push('If this is a batch-end push (BATCH MODE declared), it follows the batch-end summary — list every issue, get the human\'s confirmation, then push and verify CI.')
+        }
       }
     }
   }
