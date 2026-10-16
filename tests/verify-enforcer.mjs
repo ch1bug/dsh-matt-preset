@@ -1,7 +1,8 @@
 /**
- * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V23; the
+ * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V24; the
  * structured gate-matching block added by #79 is V18–V20, the structured
- * ticket-lifecycle nudge arming added by #82 is V21–V23).
+ * ticket-lifecycle nudge arming added by #82 is V21–V23, and V24 pins the
+ * doc's「What it injects」+ config block against `INJECTIONS`).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -691,7 +692,27 @@ if (docTick !== '' && missingInDoc.length === 0)
 else bad('V23c. doc/declaration drift',
   docTick === '' ? 'no 判定面 row mentioning TICKET_LIFECYCLE' : `missing from the row: ${missingInDoc.join(', ')}`)
 
+// ── V24 (#82 review follow-up): 「What it injects」 is the user-facing contract
+// of this plugin and it HAD gone stale — the ticket nudges, the fold-in evidence
+// and the grill contract were all missing, and the per-row config block lacked
+// seven knobs. Every declared injection must be named in that section, and every
+// declared knob must appear in the config block. One-directional by nature (both
+// are prose), the same shape as V17/V23c; the red scene is deleting a bullet or
+// a knob line from the doc, or adding an injection nobody documented.
+import { INJECTIONS } from '../workflow-enforcer.mjs'
+const docAll = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
+const injectSection = docAll.split(/^## /m).find(s => s.startsWith('What it injects')) ?? ''
+const configSection = docAll.split(/^### /m).find(s => s.startsWith('Per-row config')) ?? ''
+const missingInject = INJECTIONS.filter(i => !injectSection.includes(i.marker)).map(i => i.id)
+const knobs = INJECTIONS.map(i => i.config).filter(Boolean)
+const missingKnobs = knobs.filter(k => !configSection.includes(k))
+if (injectSection !== '' && configSection !== '' && missingInject.length === 0 && missingKnobs.length === 0)
+  ok('V24. 文档「What it injects」+ config block cover every declared injection', `${INJECTIONS.length} injections / ${knobs.length} knobs`)
+else bad('V24. injection documentation drift',
+  `${injectSection === '' ? 'no "What it injects" section' : ''}${configSection === '' ? ' no "Per-row config" section' : ''}` +
+  ` | missing injections: ${missingInject.join(', ') || '—'} | missing knobs: ${missingKnobs.join(', ') || '—'}`)
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V23) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V24) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

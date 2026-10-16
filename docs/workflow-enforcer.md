@@ -31,8 +31,17 @@ everywhere, or change `marker:`.
 
 ## What it injects
 
-- Every prompt assembly gets a short **baseline** reminder (external/destructive
-  actions → report + wait for confirmation; corrections → acknowledge + write down;
+Seven sections, each with its own switch in the per-row config below (the ⚠ line
+has none). The baseline and the grill contract re-render on every assembly; the
+rest fire once and are consumed. Three judge an **action** through the structured
+判定面 below — the ⚠ high-risk line, the ticket close, the ticket create — while
+three are **conversation observations** armed by text keywords (batch close-out,
+fold-in/capacity evidence, grill/triage mode), so those never fire from a tool
+call alone; the baseline is unconditional.
+
+- Every prompt assembly gets a short **baseline** reminder (`WORKFLOW GATES`:
+  external/destructive actions → report + wait for confirmation; corrections →
+  acknowledge + write down; routine actions whitelisted; one issue per session;
   batch mode → the batch-end push follows a batch-end summary confirmed by the
   human; mid-batch out-of-scope pushes still wait).
 - A tool call matching the gate list gets a one-shot **⚠ High-risk action**
@@ -40,11 +49,28 @@ everywhere, or change `marker:`.
   **structurally** on the call's declared action field (#79 — see 判定面 below).
   For `git push` it adds a CI-verification reminder, with the batch-end
   summary-confirmation flow noted.
+- A ticket **close** (`gh issue close`, or the declared `gh api … state=closed`
+  face) gets a one-shot **fresh-subagent quality spot check** nudge (O5):
+  self-assessment runs in the same context it would be judging, so it cannot see
+  its own degradation — the fresh view can.
+- A ticket **create** (`gh issue create`) gets a one-shot **ONE ISSUE PER SESSION**
+  reminder (D20): the new ticket is its own session's work — create it
+  and continue the current ticket only, never fix/close/fold it inline (TICKET
+  EXIT).
 - A batch close-out (ticket reported done while `.scratch/batch-state.md`
   exists) gets a one-shot **AUTO-HANDOFF** nudge, plus the close-out evidence
   rule: the ticket's batch-state Progress row must carry the three evidence
   elements — proving command, exit code, evidence path (the test output itself
   counts); a row missing any element is BLOCKED, not done.
+- A fold-in or context-capacity claim in the conversation (关键词：
+  并入/评估/容量/上下文/窗口…, see `FOLD_KEYWORDS`) gets the **measured context
+  evidence** line (`context: 62k used / 1000k (6%) · cache-read 38% (latest-request)`).
+  The same numbers are available on demand: the model-invoked **`context_status`**
+  tool returns them whenever the agent asks (or the human asks about the window).
+- A grill/triage session (a skill call in the grill family, or a prompt starting
+  `/grill` / `/triage`) gets the **GRILL QUESTION CONTRACT** re-injected on every
+  assembly: one decision per message, status line, four-piece block, time
+  estimate, opt-in batch only on request.
 
 ## Gate list
 
@@ -110,7 +136,8 @@ to cover them.
 > reachable from a canonical invocation through the real hook seam, V23b that the
 > arming really reads `TICKET_LIFECYCLE` (a runtime-added word run arms, removing
 > it disarms), V23c that this 判定面 row documents every declared element (the
-> doc↔code drift guard, same idea as V17).
+> doc↔code drift guard, same idea as V17), V24 that 「What it injects」and the
+> per-row config block cover every entry of `INJECTIONS`.
 
 ### Per-project override: `workflow-gates.yml`
 
@@ -135,7 +162,14 @@ free text.
 
 ```yaml
 config:
+  scope: all                     # inject everywhere (default: only where the marker appears)
+  marker: ask-matt               # the marker string that scopes injection (default)
   baseline: true                 # baseline reminder on every assembly (default true)
+  grillContract: true            # GRILL QUESTION CONTRACT in grill/triage sessions (default true)
+  contextEvidence: true          # measured context line on a fold-in / capacity claim (default true)
+  ticketClosedCheck: true        # fresh-subagent spot check after a ticket close (default true)
+  ticketCreatedCheck: true       # ONE ISSUE PER SESSION after a ticket create (default true)
+  batchCloseCheck: true          # AUTO-HANDOFF nudge on a batch close-out (default true)
   gatesFile: workflow-gates.yml  # project file name/path (default)
   includeDefault: false          # merge project file with the default list
   extraExternal: ["./release.sh"]
@@ -143,6 +177,10 @@ config:
   dropExternal: ["npm publish"]
   dropDestructive: ["truncate table"]
 ```
+
+> The 「What it injects」 list above and this block are asserted against
+> `INJECTIONS` by `tests/verify-enforcer.mjs` V24 — a new injection or knob that
+> nobody documents goes red, the same doc↔code discipline as V17/V23c.
 
 ## Notes
 

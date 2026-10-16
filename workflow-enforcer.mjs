@@ -713,6 +713,22 @@ function sanitizePrompt(text) {
   return String(text).replace(/\{\{/g, '[[').replace(/\}\}/g, ']]')
 }
 
+/** Every section `reminderText` can emit, as documentation metadata: the MARKER
+ * phrase `docs/workflow-enforcer.md`「What it injects」must name, and the config
+ * knob that switches it off (`null` = always on when it matches). One
+ * declaration, so the user-facing list and the code cannot drift silently — the
+ * #54-era list had lost the ticket nudges, the fold-in evidence and the grill
+ * contract, and the per-row config block was missing seven knobs; V24 pins it. */
+export const INJECTIONS = [
+  { id: 'baseline', marker: 'WORKFLOW GATES', config: 'baseline' },
+  { id: 'high-risk', marker: 'High-risk action', config: null },
+  { id: 'ticket-closed', marker: 'fresh-subagent quality', config: 'ticketClosedCheck' },
+  { id: 'ticket-created', marker: 'ONE ISSUE PER SESSION', config: 'ticketCreatedCheck' },
+  { id: 'batch-close', marker: 'AUTO-HANDOFF', config: 'batchCloseCheck' },
+  { id: 'context-evidence', marker: 'context:', config: 'contextEvidence' },
+  { id: 'grill-contract', marker: 'GRILL QUESTION CONTRACT', config: 'grillContract' },
+]
+
 /** The reminder section text for one request, or null when nothing applies. */
 async function reminderText(agent, config, ctx, assembled) {
   // Scope: by default inject only where the ask-matt workflow persona is
