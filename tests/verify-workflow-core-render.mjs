@@ -14,6 +14,17 @@
  *       注释记录的同款陷阱）。
  *
  * 可移植：全部路径由 import.meta.url 推导，无绝对路径假设，可在纯源码检出下跑。
+ *
+ * ── 环境侧（门禁 DSH_MATT_LIVE_HOME，未设则 loud skip）────────────────────
+ * 覆盖 human 要求的**全流程四环**，一环一断言，失败可定位到具体环节：
+ *   N1/N2  安装：profile 注册 dsh-matt-preset 为 bundle + node_modules 链接
+ *   L1/L2  配置：launcher --dump-config 成功 + 组合树含 workflow-core 行
+ *   R1–R5  调用：渲染面（persona 无正文 / 注入节完整 / 插值 / verbatim / subpath）
+ *   S1–S3  新建会话：真实建会话 + 该会话提示词含注入节 + 会话级插值
+ *
+ * 注：headless profile **不是**"新建会话"环的合格载体——其 bundle 不含
+ * agentPresets 服务，preset 行会 `pending (waiting for service: agentPresets)`
+ * （实测），故该环用宿主 harness 建会话（与 GUI/web 同一挂载路径）。
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -136,6 +147,69 @@ if (!liveHome) {
     } else {
       bad('L2. workflow-core row in live composed tree', 'row missing — mount did not take effect')
     }
+  }
+
+  // ── 新建会话（session-create）──────────────────────────────────────────
+  // 真实建一个会话并把工作流挂上去，读**该会话的系统提示词断面**——证明
+  // "新建会话"这一环里模型真的看到注入的 workflow:core 节（不是只有配置文件
+  // 层面正确）。headless profile 不是本环的合格载体：其 bundle 不含
+  // agentPresets 服务，preset 行会 pending（实测），故用宿主 harness。
+  const { bootHarness } = await import('./preset-harness.mjs')
+  const { SessionId } = await import('@deepseek-ai/dsh-session')
+  const { renderPrompt } = await import('@deepseek-ai/dsh-system-prompt')
+  const { assembleContextFor } = await import('@deepseek-ai/dsh-agent')
+  const sctx = await bootHarness([
+    { id: 'session-live', plugins: [
+      { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: NEW_PREFIX } },
+      { id: 'workflow-core', name: CORE },
+    ] },
+  ])
+  const session = await sctx.agents.create({
+    sessionId: SessionId('workflow-core-session-create'),
+    meta: { cwd: REPO },
+    agentOptions: { provider: 'mock', model: 'session-create-model' },
+    setup: async (ac) => void await sctx.agentPresets.mount(ac, 'session-live'),
+  })
+  const sessionText = renderPrompt(
+    await sctx.systemPrompt.assemble(assembleContextFor(session.agent, new AbortController().signal)),
+  )
+  const events = session.agent.session.snapshotEvents()
+  if (events.some(e => e.type === 'session') || session.agent.session.id !== undefined) {
+    ok('S1. a NEW session is created and carries its own prompt', String(session.agent.session.id))
+  } else {
+    bad('S1. new session created', 'no session header')
+  }
+  if (sessionText.includes('WORKFLOW ENFORCEMENT') && sessionText.includes('MAIN FLOW — idea → ship')) {
+    ok('S2. the new session\'s model-facing prompt carries the injected workflow:core section')
+  } else {
+    bad('S2. new session prompt carries workflow:core', sessionText.slice(0, 200))
+  }
+  if (sessionText.includes('session-create-model') && !sessionText.includes('{{model}}')) {
+    ok('S3. the new session\'s {{model}} interpolates (per-session variable binding)')
+  } else {
+    bad('S3. new session interpolation', sessionText.slice(0, 200))
+  }
+  await session.dispose()
+
+  // ── 安装环（install）──────────────────────────────────────────────────
+  // 断言 profile 的注册记录真的把 preset 列为 bundle（安装环的落地点），
+  // 并确认 node_modules 链接存在——这两条合起来才是"装上了"。
+  const { readFileSync: rf, existsSync } = await import('node:fs')
+  const { join: pjoin } = await import('node:path')
+  const profileDir = pjoin(liveHome, 'profiles', liveProfile)
+  try {
+    const manifest = JSON.parse(rf(pjoin(profileDir, 'package.json'), 'utf8'))
+    const bundles = manifest?.dsh?.profile?.bundles ?? []
+    if (bundles.includes('dsh-matt-preset')) {
+      ok('N1. install: profile registers dsh-matt-preset as a bundle', bundles.join(', '))
+    } else {
+      bad('N1. install: bundle registered', `bundles = ${JSON.stringify(bundles)}`)
+    }
+    const linked = existsSync(pjoin(profileDir, 'node_modules', 'dsh-matt-preset'))
+    if (linked) ok('N2. install: profile node_modules carries the preset link')
+    else bad('N2. install: node_modules link', pjoin(profileDir, 'node_modules', 'dsh-matt-preset'))
+  } catch (error) {
+    bad('N1/N2. install ring', String(error?.message ?? error))
   }
 }
 

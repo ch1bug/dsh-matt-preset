@@ -77,16 +77,21 @@ node tests/verify-bundle-sync.mjs  # cordis.patch.yml 字节级锁（agent.cordi
 node tests/sandcastle-e2e.mjs      # sandcastle 三命令端到端（33 断言：审计/重叠/夜跑/幂等/simplify/model-lane）
 ```
 
-**环境侧用例的门禁（loud skip）**：`verify-workflow-core-render.mjs` 的 L1–L2
-断言需要真实 profile 实例；未设置门禁时**响亮跳过**（打印原因、不静默当 pass），
-常规套件在无环境下仍全绿。开启方式（源码部署实例）：
+**环境侧用例的门禁（loud skip）**：`verify-workflow-core-render.mjs` 的
+安装/配置/新建会话环（N1–N2 / L1–L2 / S1–S3）需要真实 profile 实例；未设置门禁时
+**响亮跳过**（打印原因、不静默当 pass），常规套件在无环境下仍全绿。
+开启方式（源码部署实例，宿主须锚 RC2）：
 
 ```bash
 export DSH_MATT_LIVE_HOME=/home/<user>/dsh-matt-home        # 独立 DSH_HOME
 export DSH_MATT_LIVE_PROFILE=matt-dev                      # profile 名
 export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts   # 源码检出 CLI 入口
-node tests/verify-workflow-core-render.mjs                 # R1–R5 + L1–L2
+node tests/verify-workflow-core-render.mjs                 # 覆盖四环：安装→配置→调用→新建会话
 ```
+
+四环断言一览（门禁开启时）：**N1/N2 安装**（bundle 注册 + node_modules 链接）→
+**L1/L2 配置**（`--dump-config` 成功 + 组合树含 workflow-core 行）→
+**R1–R5 调用**（渲染面）→ **S1–S3 新建会话**（真实建会话 + 该会话提示词含注入节 + 会话级插值）。
 
 ## 目录
 
