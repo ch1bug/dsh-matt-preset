@@ -1,16 +1,18 @@
 # Release — 版本锚定与安装（#21）
 
-## 版本锚定方案（family scheme `dsh-v<official>-r<N>`）
+## 版本锚定方案（family scheme `dsh-v<official>-<r|a><N>`，双通道，ADR-0008）
 
 三段一一对应，同一 commit 上同时成立：
 
-| 锚 | 形态 | 例 |
-|---|---|---|
-| git tag | `dsh-v<official>-r<N>` | `dsh-v0.2.0-rc.2-r1` |
-| npm version | `<official>-r<N>`（tag 去 `dsh-v` 前缀） | `0.2.0-rc.2-r1` |
-| 打包产物 | `npm pack` → `dsh-matt-preset-<npm version>.tgz` | `dsh-matt-preset-0.2.0-rc.2-r1.tgz` |
+| 通道 | git tag | npm version（tag 去 `dsh-v` 前缀） | 例 |
+|---|---|---|---|
+| latest（跟 RC） | `dsh-v<official>-r<N>` | `<official>-r<N>` | `dsh-v0.2.0-rc.2-r1` ↔ `0.2.0-rc.2-r1` |
+| next（跟 alpha） | `dsh-v<official>-a<N>` | `<official>-a<N>` | `dsh-v0.2.1-alpha.1-a1` ↔ `0.2.1-alpha.1-a1` |
+| 打包产物 | `npm pack` → `dsh-matt-preset-<npm version>.tgz` | 同左 | `dsh-matt-preset-0.2.0-rc.2-r1.tgz` |
 
-`<official>` 对齐 DSH 运行时版本（当前 0.2.0-rc.2）；同一 official 上的 preset 迭代递增 `<N>`。
+`<official>` 对齐 DSH 运行时版本（当前 0.2.0-rc.2）；同一 official 上的 preset
+迭代递增 `<N>`。通道节奏参考上游 DSH 分发：latest 跟 RC（按需重锚，不做空转
+bump），next 跟 alpha；next 版本不进 latest 升级路径。
 安装副本的 `VERSION.json` 记录 npm version + 安装时间 + 来源（source/dir/tarball）。
 
 ## 发布流程
