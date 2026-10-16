@@ -2,7 +2,8 @@
 
 让 agent **不必再靠反复 grep 大文件**去发现运行时接口（retro 2026-10-16：本会话为此
 花了 8+ 次大文件检索，并走 3 次 `gateway/arguments-invalid` 弯路）。可执行形态见
-`tests/verify-live-tool-call.mjs`（mock 层）与 `tests/verify-live-real-llm.mjs`（真实层）。
+`tests/verify-live-tool-call.mjs`（mock 层）、`tests/verify-live-real-llm.mjs`（真实层）与
+`tests/verify-clean-env-e2e.mjs`（#75 全链：临时 home → `bin/install.mjs` → 启动 → 建会话 → turn）。
 
 ## 鉴权（完整 web 挂载路径，非 headless）
 

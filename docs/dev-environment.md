@@ -132,11 +132,15 @@ exit /b %ERRORLEVEL%
 $env:PATH = "<shim 目录>;<src>\node_modules\.bin;$env:PATH"
 dsh --version                                                  # → 0.2.0-rc.2
 $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 11/11、exit 0、零 loud skip
+$env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）
 ```
 
 实测结果（2026-10-16，装上包装后）：`verify-installer.mjs` **11/11、零 loud skip**（此前 4 条 link
 断言 + e2e 全是 loud skip）；`node scripts/verify-all.mjs` 里 `verify-installer` 由 `PASS*` 变
-**`PASS`**（20/21）。**有 dsh 那半边在本机可验证——别再默认"跳过了事"。**
+**`PASS`**（#67 时基线 20/21；#75 加入 `verify-clean-env-e2e.mjs` 后为 **21/22**，无 dsh 时 20/22）。
+`verify-clean-env-e2e.mjs` **16 环全绿、exit 0、零 loud skip**（#75；store 路径 /
+profile link / 载体 loader row 三处人为偏差分别使安装环、安装+启动+会话环、启动+turn 环变红）。
+**有 dsh 那半边在本机可验证——别再默认"跳过了事"。**
 
 ## 4. 工具链结论（全部实测，别重复试错）
 

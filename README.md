@@ -72,7 +72,7 @@ node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 
 | 门禁 | 开启的验证 |
 | --- | --- |
 | `DSH_MATT_LIVE_HOME` + `DSH_MATT_LIVE_PROFILE` + `DSH_MATT_LIVE_CLI` | 真实实例的**安装 → 配置 → 调用 → 新建会话**四环（`verify-workflow-core-render.mjs`） |
-| `DSH_MATT_LIVE_CLI` | 调用侧 live：mock LLM + 真实实例 + 捕获真实模型请求 + **真实工具执行**（`verify-live-tool-call.mjs`） |
+| `DSH_MATT_LIVE_CLI` | 调用侧 live：mock LLM + 真实实例 + 捕获真实模型请求 + **真实工具执行**（`verify-live-tool-call.mjs`）；**纯净环境全链**：临时 DSH_HOME → `bin/install.mjs` → 启动 → 建会话 → turn（`verify-clean-env-e2e.mjs`；该用例的**挂载那半边另需 PATH 上有 `dsh`**——缺席时 store 侧照跑，启动/会话/turn 整半边同因响亮跳过；#67 包装见 [dev-environment §3.1](docs/dev-environment.md#31-运行时可达性dsh-从哪来path-无-dsh--运行时缺席)） |
 | 上行 + `DEEPSEEK_API_KEY`（或 `DSH_MATT_REAL_CREDENTIALS_SOURCE`） | 真实 LLM 层：真端点接受 + **真实模型发起工具调用**（`verify-live-real-llm.mjs`） |
 | `DSH_MATT_INSTALLER=1` / `DSH_MATT_E2E=1` | 安装器（store 侧离线实跑；profile-link 断言无 dsh 时响亮跳过）/ sandcastle e2e（需 podman） |
 
@@ -80,6 +80,7 @@ node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 
 export DSH_MATT_LIVE_CLI=<src>/apps/cli/src/bin.ts
 export DSH_MATT_LIVE_HOME=<home>  DSH_MATT_LIVE_PROFILE=matt-dev
 node scripts/verify-all.mjs
+node tests/verify-clean-env-e2e.mjs    # #75 全链 e2e：另需 PATH 上的 dsh（§3.1 的临时包装）
 ```
 
 **证据分层（别拿低层冒充高层）**：离线渲染面 → mock 调用侧（真实实例 + 真实发出的
