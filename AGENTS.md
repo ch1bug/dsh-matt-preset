@@ -24,7 +24,8 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 ## Repo docs（导航指针；细节在各文件里，勿在此复述）
 
 - 决策与术语：`CONTEXT.md`（D1–D44）、`docs/adr/`
-- **验证**：`pnpm test`（== `scripts/verify-all.mjs`，唯一入口；首次 clone 先 `git config core.hooksPath .githooks` 启用 pre-commit 门禁——本地配置不随 clone 分发，`SKIP_HOOKS=1` 明确绕过）；汇总里的 `PASS*` 表示该用例含 loud skip，环境侧断言未验证
+- **验证**：`node scripts/verify-all.mjs`（唯一入口；`pnpm test` 是同一脚本的别名，但 agent shell 里 pnpm 未必在 PATH 上——工具链路径见 `docs/dev-environment.md` §0.2）。首次 clone 先 `git config core.hooksPath .githooks` 启用 pre-commit 门禁——本地配置不随 clone 分发（`SKIP_HOOKS=1` 明确绕过）；汇总里的 `PASS*` 表示该用例含 loud skip，环境侧断言未验证
+- **复核**：`docs/code-review-brief.md`（/code-review 两轴 subagent 的 brief 组装口径；审阅阶段读，实现阶段不必读）
 - 源码部署 / 隔离契约 / 构建坑（ucrt64、宿主锚、clean、端口冲突）：`docs/dev-environment.md`
 - 驱动实例 / 读耐久证据 / RPC 参数名 / mock LLM：`docs/dsh-runtime-cheatsheet.md`
 - 沙箱批跑（opt-in）：`sandcastle/README.md`

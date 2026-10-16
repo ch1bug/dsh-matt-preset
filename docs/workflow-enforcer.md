@@ -50,13 +50,17 @@ Default (see `DEFAULT_GATES` in `workflow-enforcer.mjs`):
 
 | Group | Matches (substring over the tool call) |
 | --- | --- |
-| external | `git push`, `gh pr create`, `gh issue create`, `gh release create`, `gh repo create`, `npm publish`, `cargo publish`, `sandcastle`, `run-ticket`, `plugin_manager install_bundle` / `set_plugin` / `set_bundle` |
+| external | `git push`, `gh pr create`, `gh issue create`, `gh release create`, `gh repo create`, `npm publish`, `cargo publish`, `sandcastle`, `run-ticket`, `plugin_manager install_bundle`, `plugin_manager set_plugin`, `plugin_manager set_bundle` |
 | destructive | `git reset --hard`, `git clean -f`, `rm -rf`, `docker compose down -v`, `docker volume rm`, `docker system prune`, `drop database`, `truncate table`, `delete from`, `git push --force` |
 
 A gate matches as **space-separated word pairs** over the serialized tool call, so
 `plugin_manager` + a mutation action fires (its install/enable events are gate-6
 events — the read-only `list_plugins` / `list_bundles` calls stay routine, #55),
 and a plain `plugin_manager` substring alone never does.
+
+> This table is asserted against `DEFAULT_GATES` by `tests/verify-enforcer.mjs` V17
+> (bidirectional): add a gate in one place only and the suite goes red. Write each
+> gate in full — a shorthand like `set_plugin` alone is not a gate name.
 
 ### Per-project override: `workflow-gates.yml`
 

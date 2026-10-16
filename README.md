@@ -59,9 +59,9 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 一条命令（本仓不用 GitHub Actions，**本地套件即唯一验收通道**）：
 
 ```bash
-git config core.hooksPath .githooks   # 首次 clone 一次：启用 .githooks/pre-commit 提交前门禁（本地配置，不随 clone 分发）
-node scripts/link-runtime-deps.mjs   # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
-pnpm test                            # == node scripts/verify-all.mjs
+git config core.hooksPath .githooks    # 首次 clone 一次：启用 .githooks/pre-commit 提交前门禁（本地配置，不随 clone 分发）
+node scripts/link-runtime-deps.mjs    # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
+node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 pnpm 在 PATH 上）
 ```
 
 `verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / SKIP，末尾如实汇总：
@@ -79,7 +79,7 @@ pnpm test                            # == node scripts/verify-all.mjs
 ```bash
 export DSH_MATT_LIVE_CLI=<src>/apps/cli/src/bin.ts
 export DSH_MATT_LIVE_HOME=<home>  DSH_MATT_LIVE_PROFILE=matt-dev
-pnpm test
+node scripts/verify-all.mjs
 ```
 
 **证据分层（别拿低层冒充高层）**：离线渲染面 → mock 调用侧（真实实例 + 真实发出的

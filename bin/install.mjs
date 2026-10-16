@@ -22,7 +22,7 @@
  * 一律走 DSH_HOME/profiles/<name>。
  */
 import { spawnSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -30,6 +30,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
+import { payloadOf } from '../lib/payload.mjs'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
 const PKG_NAME = 'dsh-matt-preset'
@@ -114,17 +115,6 @@ function mountOrWarn(profile, step, what) {
   console.error(`dsh not found on PATH — skipped profile ${what} (装载需手动: ${manual})`)
 }
 
-/** Expand one package.json `files` entry (dirs recurse; `*.mjs` globs) against srcDir. */
-async function expandEntry(srcDir, entry) {
-  if (!entry.includes('*')) return [entry]
-  const prefix = entry.slice(0, entry.indexOf('*'))
-  const dir = join(srcDir, prefix)
-  if (!existsSync(dir)) return []
-  const names = await readdir(dir)
-  const pattern = new RegExp('^' + entry.replaceAll('.', '\\.').replaceAll('*', '[^/]*') + '$')
-  return names.filter((n) => pattern.test(n)).map((n) => prefix + n)
-}
-
 /**
  * 解 tgz（Node 原生：gunzip + 最小 ustar/pax 读取）。
  *
@@ -200,18 +190,17 @@ async function resolveSource(from) {
   return { pkgDir: dir, source: 'dir' }
 }
 
-/** The whitelisted payload paths of a package dir, from its package.json `files`. */
-async function payloadOf(pkgDir) {
-  const pkg = JSON.parse(await readFile(join(pkgDir, 'package.json'), 'utf8'))
-  if (!Array.isArray(pkg.files) || pkg.files.length === 0) die(`package.json has no files whitelist: ${pkgDir}`)
-  const entries = (await Promise.all(pkg.files.map((e) => expandEntry(pkgDir, e)))).flat()
-  const present = []
-  for (const e of entries) if (existsSync(join(pkgDir, e))) present.push(e)
-  return { pkg, entries: present }
+/** 白名单展开逻辑住在 lib/payload.mjs（安装器与离线守卫共用一份语义）。 */
+async function payloadOfOrDie(pkgDir) {
+  try {
+    return await payloadOf(pkgDir)
+  } catch (error) {
+    die(String(error?.message ?? error))
+  }
 }
 
 async function installTo(target, { pkgDir, source }, { previousVersion, profile } = {}) {
-  const { pkg, entries } = await payloadOf(pkgDir)
+  const { pkg, entries } = await payloadOfOrDie(pkgDir)
   // 原地替换语义：先清空目标（stale 文件不残留），再整目录拷入
   await rm(target, { recursive: true, force: true })
   await mkdir(target, { recursive: true })
@@ -297,4 +286,7 @@ async function main() {
   die(`usage: install | upgrade | uninstall | --version (got: ${cmd ?? '(none)'})`)
 }
 
-main().catch((e) => die(e?.stack ?? String(e)))
+// 只有**直接执行**才跑 CLI：被 import（测试 / 复用 lib）时不得产生安装副作用。
+// 白名单展开逻辑在 lib/payload.mjs，离线守卫 tests/verify-payload-manifest.mjs 用它。
+const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (invokedDirectly) main().catch((e) => die(e?.stack ?? String(e)))

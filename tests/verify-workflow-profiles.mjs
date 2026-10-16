@@ -34,6 +34,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { bootHarness } from './preset-harness.mjs'
+import { expandEntry } from '../lib/payload.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const lf = (s) => s.replace(/\r\n/g, '\n')
@@ -135,19 +136,21 @@ if (fallback === BASELINE) ok('M4. unknown profile falls back to standard (workf
 else bad('M4. unknown profile fallback', divergence(fallback, BASELINE))
 
 // ── packaging contract: the deltas ship with the plugin ─────────────────────
-// Each delta must be an EXPLICIT package.json `files` entry: the installer's
-// `*` expansion only handles a directory prefix (bin/install.mjs expandEntry),
-// so a file-name glob like `workflow-profile-*.txt` expands to NOTHING — the
-// entry looks right and silently ships no file (caught here by this scan).
+// Coverage is checked with the INSTALLER'S OWN rule (lib/payload.mjs) rather
+// than a hand-rolled scan, so it stays true if #66 teaches expandEntry to
+// handle file-name globs. The general "no entry may resolve to nothing" guard
+// is tests/verify-payload-manifest.mjs (offline — the #55 near-miss: a
+// `workflow-profile-*.txt` entry looked right and shipped nothing).
 const shippedDeltas = readdirSync(REPO).filter(f => /^workflow-profile-.+\.txt$/.test(f))
 if (shippedDeltas.includes('workflow-profile-creative.txt'))
   ok('P3. creative delta file exists next to the plugin')
 else bad('P3. creative delta file', `found: ${shippedDeltas.join(', ') || 'none'}`)
 
-const unlisted = shippedDeltas.filter(f => !PKG.files.includes(f))
-if (shippedDeltas.length > 0 && unlisted.length === 0)
-  ok('P4. every shipped delta is an explicit payload entry', shippedDeltas.join(', '))
-else bad('P4. payload whitelist', unlisted.length > 0 ? `not listed: ${unlisted.join(', ')}` : 'no delta files found')
+const covered = new Set((await Promise.all(PKG.files.map(entry => expandEntry(REPO, entry)))).flat())
+const uncovered = shippedDeltas.filter(f => !covered.has(f))
+if (shippedDeltas.length > 0 && uncovered.length === 0)
+  ok('P4. every shipped delta is covered by the payload rule (installer expandEntry)', shippedDeltas.join(', '))
+else bad('P4. payload coverage', uncovered.length > 0 ? `not covered: ${uncovered.join(', ')}` : 'no delta files found')
 
 // ── AC3: the delta structure duplicates nothing ─────────────────────────────
 // (Mechanism-level, independent of the render: compose the shipped creative

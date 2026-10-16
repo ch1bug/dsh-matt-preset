@@ -33,6 +33,18 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 `platform=win32-x64-gnu`，跑套件会以 `0xC06D007F`（过程/DLL 找不到）崩在原生依赖上
 （实测 `verify.mjs` / `verify-dual-env.mjs`）。
 
+## 0.2 agent shell 的工具链与内联脚本
+
+跑命令的是**模型 shell**，它的 PATH 与登录 shell 不同——两条实测教训（retro 2026-10-16）：
+
+- **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。验证走
+  `node scripts/verify-all.mjs`（唯一入口，不需要 pnpm）；确实要 pnpm / python / node 的
+  绝对路径时，用 DSH harness 的 `load_workspace_dependencies`（返回随包分发的路径），
+  别假设 PATH 里已有。
+- **带正则或多行的 `node -e` 内联脚本别硬塞进 pwsh 参数**：PowerShell 的转义符是反引号，
+  `\$` 不是转义（正则被原样传下去、静默不匹配），而 `@'…'@` here-string 里的 `$` 仍会被
+  展开。写临时 `.mjs` 跑、自检通过后删掉——本会话为此白烧过一轮往返。
+
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 
 启动器用 **`DSH_HOME`** 定位 home、用 **`--profile <name>`** 选择 `$DSH_HOME/profiles/<name>`。

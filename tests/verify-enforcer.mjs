@@ -11,6 +11,7 @@
  * pointing at the dsh install), like the matt-preset verify suite.
  */
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -117,7 +118,7 @@ else bad('V6. template-brace injection', v6text.slice(0, 300))
 
 // V7: contextEvidence pure-function — real numbers shape a verifiable line;
 // unmeasurable sessions degrade to null (no line, no noise).
-import { contextEvidence } from '../workflow-enforcer.mjs'
+import { contextEvidence, DEFAULT_GATES } from '../workflow-enforcer.mjs'
 const fakeCtx = (total, input, cached, window) => ({
   get: () => ({ measure: () => ({
     totalTokens: total,
@@ -304,7 +305,23 @@ const v16c = await render()
 if (!v16c.includes('High-risk action detected')) ok('V16c. plugin_manager ⚠ consumed after firing (no repeat)')
 else bad('V16c. plugin_manager ⚠ repeated', v16c.slice(-160))
 
+// V17: the docs gate table and DEFAULT_GATES must not drift. The table HAD
+// already gone stale (missing `sandcastle`/`run-ticket`, found while wiring
+// #55's plugin_manager entries) — a prose list next to a code list always
+// drifts without a check. Offline, bidirectional: every documented gate is
+// declared, and every declared gate is documented (each written in full).
+const docGates = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
+  .split('\n')
+  .filter(line => /^\|\s*(external|destructive)\s*\|/.test(line))
+  .flatMap(line => [...line.matchAll(/`([^`]+)`/g)].map(m => m[1]))
+const declaredGates = [...DEFAULT_GATES.external, ...DEFAULT_GATES.destructive]
+const undocumented = declaredGates.filter(g => !docGates.includes(g))
+const invented = docGates.filter(g => !declaredGates.includes(g))
+if (undocumented.length === 0 && invented.length === 0)
+  ok('V17. docs gate table ↔ DEFAULT_GATES agree (bidirectional)', `${declaredGates.length} gates`)
+else bad('V17. gate table drift', `undocumented: ${undocumented.join(', ') || '—'} | invented: ${invented.join(', ') || '—'}`)
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V16) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V17) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
