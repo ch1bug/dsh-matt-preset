@@ -78,6 +78,8 @@
 
 - **D40（2026-10-11，#37）** — **Changelog/RELEASE 条目规范（comet 借入 adopt C3）**：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意到**（正例：命令/插件行为/安装方式/persona 门禁变化、破坏性变化+迁移路径；反例：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作）。条目在打 tag 时写、不逐票更新——与 ADR-0002「docs 本地 commit 随批末 push」天然兼容。模板落 docs/RELEASE.md；本仓暂无 CHANGELOG.md，首个 tag 时按模板创建。详见 [docs/adr/0007-changelog-release-convention.md](docs/adr/0007-changelog-release-convention.md)。
 
+- **D41（2026-10-16，#39 拍板）** — **PTC 采纳面与 implement-spec 复评**：① PTC 不进默认路径，作为独立执行形态引入（dsh-ptc-runtime-node + dsh-workflow-ptc，工作流经 #56 ptc profile 适配，七门语义零改动）；② **matt 工作流与 shell-host 是两个独立插件，不得默认用户具备 shell-host**——PTC profile 必须基于默认路径改出，shell-host 用户迁移由 shell-host 侧主导；③ implement-spec 维持 ADR-0005 不 port 全量，采纳面（干跑预检 + ready frontier）独立建票 #61 跟踪。Gotchas（实测）：`plugins` 覆盖=整体替换，patch overlay 会产出 pending 残缺 entry，挂载组合必须单源 patch 合并；workflow `agent()` 的 model 覆盖必须 provider+model 成对传，编排面内 agent 不可再嵌套，schema 子集保持浅层。详见 [docs/adr/0009-ptc-adoption-and-implement-spec.md](docs/adr/0009-ptc-adoption-and-implement-spec.md)。
+
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 
 ## 观察记录（2026-08-19，IRIS ef2ef0b5 会话复盘）
