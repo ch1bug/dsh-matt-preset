@@ -59,6 +59,7 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 一条命令（本仓不用 GitHub Actions，**本地套件即唯一验收通道**）：
 
 ```bash
+git config core.hooksPath .githooks   # 首次 clone 一次：启用 .githooks/pre-commit 提交前门禁（本地配置，不随 clone 分发）
 node scripts/link-runtime-deps.mjs   # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
 pnpm test                            # == node scripts/verify-all.mjs
 ```
