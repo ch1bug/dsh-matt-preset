@@ -32,6 +32,9 @@ git log --all --format=%B | grep -inE '<类别词>'             # 提交信息
   （2026-10-16 实测：一次 tracker 打码漏掉了大写变体，靠守卫的结构规则才抓到）。
 - **分页**：`gh api` 不带 `--paginate` 只给你第一页。实测"前 30 条评论全绿"是**假象**——
   第 100+ 条评论里还有个人路径。tracker 一律分页后再判。
+- **复查只能用守卫，不要手写 grep**：自己拼的探针模式通常**比判据窄**。实测：tracker 打码后
+  用"个人 token 模式"复查得 0，漏掉**一整类**布局命中（5 处 `<盘符>:\Work\…`，含一条自己的说明评论）；
+  换 `node scripts/privacy-scan.mjs --gh` 才现形。**规则改了就先跑守卫。**
 
 ## 1. 一次枚举全部类别，再动手（一遍跑齐）
 
@@ -128,4 +131,11 @@ python -m git_filter_repo --force \
   （比整仓 `SKIP_HOOKS=1` 细一档，且例外留在 diff 里可 review）。
 - `AGENTS.md` 的硬规则 + 指针；`sync-skills.{ps1,sh}` 的上游目录改 `SYNC_SKILLS_UPSTREAM`
   **必填**（本机路径不再写死，缺失即响亮报错）。
-- 跨仓口径：邻仓同一脚本，改判据时两边一起看（`dsh-shell-host/docs/agents/privacy.md`）。
+- **跨仓口径**：邻仓同一脚本，改判据时两边一起看（`dsh-shell-host/docs/agents/privacy.md`）。
+  - **共享占位符字形**（两边白名单要保持一致）：`<user>` / `<repo>` / `<work>` / `<盘符>` / `<src>` /
+    `$HOME` / `%USERPROFILE%` / `$(whoami)` / `~`，以及邻仓既有的 `me` / `u` / `x` / `alice`。
+    任一边引入新写法就同步补——否则跨仓跑守卫会互相报红（实测：我方曾因漏放行 `me`/`u`/`x`/`alice`
+    把对方干净的仓报红 6 处）。
+  - **待移植：引用哈希守卫**（邻仓 `tests/doc-references.spec.ts` 第 3 条）。口径 = **白名单**
+    `HASH_ALLOWLIST`（会话 id 也登记进去，注释写明"这是会话 id 不是提交"）+ `docs/adr/**` 整体排除；
+    **不按"8 位 hex"之类的形状放宽**——那会连真实短 SHA 引用一起放过，而它们正是该守卫要抓的。
