@@ -1,0 +1,106 @@
+/**
+ * verify-workflow-core-render.mjs —— #54 真实 preset 渲染面验证（套件成员）。
+ *
+ * 与 verify-workflow-core.mjs（合成 preset，逐项 AC）互补：这里挂**仓库自身的
+ * 生产 composition**（agent.cordis.yml 的真实 persona 前缀 + 真实
+ * workflow-core.mjs + 真实 workflow-body.txt），渲染系统提示词，确认模型实际
+ * 看到的面成立：
+ *   R1. persona 前缀不含工作流正文（导语量级 450 chars，无 MAIN FLOW）；
+ *   R2. 渲染结果含 workflow:core 注入节，正文完整（5 个标志段）；
+ *   R3. {{model}}/{{cwd}} 已插值、无字面残留；
+ *   R4. L1 等价：真实 composition 渲染 == 旧 persona 承载版（fixture 基线）渲染；
+ *   R5. 离线挂载契约：composition 里存在 workflow-core 行，且用 package
+ *       subpath 形式寻址（不得写成 profile 目录相对的 ./ 路径——enforcer 行
+ *       注释记录的同款陷阱）。
+ *
+ * 可移植：全部路径由 import.meta.url 推导，无绝对路径假设，可在纯源码检出下跑。
+ */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { assembleContextFor } from '@deepseek-ai/dsh-agent'
+import { bootHarness } from './preset-harness.mjs'
+
+const REPO = fileURLToPath(new URL('..', import.meta.url)).replace(/\\/g, '/').replace(/\/$/, '')
+const results = []
+const ok = (n, d = '') => results.push('  ✓ ' + n + (d ? ' — ' + d : ''))
+const bad = (n, d = '') => results.push('  ✗ ' + n + (d ? ' — ' + d : ''))
+
+/** Extract the `prefix: |` block scalar (same shape as verify-production). */
+const personaPrefix = (yml) => {
+  const lines = yml.split('\n')
+  const start = lines.findIndex(l => /^\s*prefix:/.test(l))
+  const out = []
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^ {6}/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i].slice(6))
+    else if (out.length > 0) break
+  }
+  return out.join('\n')
+}
+
+const composition = readFileSync(REPO + '/agent.cordis.yml', 'utf8').replace(/\r\n/g, '\n')
+const NEW_PREFIX = personaPrefix(composition)
+const OLD_PREFIX = readFileSync(REPO + '/tests/fixtures/persona-prefix-v1.txt', 'utf8').replace(/\r\n/g, '\n')
+const CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
+
+const ctx = await bootHarness([
+  { id: 'matt-real', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: NEW_PREFIX } },
+    { id: 'workflow-core', name: CORE },
+  ] },
+  { id: 'matt-old', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: OLD_PREFIX } },
+  ] },
+])
+
+const render = async (id, cwd, model) => {
+  const h = await ctx.agents.create({
+    sessionId: SessionId('render-' + id),
+    meta: { cwd },
+    agentOptions: { provider: 'mock', model },
+    setup: async (ac) => void await ctx.agentPresets.mount(ac, id),
+  })
+  const a = await ctx.systemPrompt.assemble(assembleContextFor(h.agent, new AbortController().signal))
+  const t = renderPrompt(a)
+  await h.dispose()
+  return t
+}
+
+const CWD = REPO
+const real = await render('matt-real', CWD, 'render-check-model')
+const old = await render('matt-old', CWD, 'render-check-model')
+
+// R1: persona 前缀已瘦身
+if (NEW_PREFIX.length < 800 && !NEW_PREFIX.includes('MAIN FLOW')) ok('R1. persona prefix carries no workflow body', NEW_PREFIX.length + ' chars')
+else bad('R1. persona prefix slimmed', NEW_PREFIX.length + ' chars')
+
+// R2: 注入节正文完整
+const marks = ['MAIN FLOW — idea → ship', 'WORKFLOW ENFORCEMENT', 'BATCH MODE', 'INITIALIZATION', 'METHODOLOGY']
+const missing = marks.filter(m => !real.includes(m))
+if (missing.length === 0) ok('R2. injected workflow:core carries the full body', marks.length + ' sections')
+else bad('R2. injected body incomplete', 'missing: ' + missing.join(', '))
+
+// R3: 插值
+if (real.includes('render-check-model') && real.includes(CWD) && !real.includes('{{model}}') && !real.includes('{{cwd}}'))
+  ok('R3. {{model}}/{{cwd}} interpolate in the rendered prompt')
+else bad('R3. interpolation', real.slice(0, 200))
+
+// R4: L1 等价
+if (real === old) ok('R4. real-composition render verbatim-identical to persona-carried baseline', real.length + ' chars')
+else {
+  bad('R4. verbatim-identical')
+  let i = 0
+  while (i < real.length && i < old.length && real[i] === old[i]) i++
+  console.error('  divergence at ' + i + '\n  new: ' + JSON.stringify(real.slice(i, i + 100)) + '\n  old: ' + JSON.stringify(old.slice(i, i + 100)))
+}
+
+// R5: 离线挂载契约（不依赖实例在跑）
+const coreRow = /-\s+id:\s*workflow-core\s*\n\s+name:\s*(\S+)/.exec(composition)
+if (coreRow === null) bad('R5. composition carries the workflow-core row', 'row not found')
+else if (coreRow[1] === 'dsh-matt-preset/workflow-core.mjs') ok('R5. workflow-core addressed via package subpath export', coreRow[1])
+else bad('R5. workflow-core entry path', coreRow[1] + ' (expected dsh-matt-preset/workflow-core.mjs — never a ./ profile-relative path)')
+
+console.log('\n=== WORKFLOW-CORE RENDER VERIFY (real composition) ===')
+console.log(results.join('\n'))
+process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

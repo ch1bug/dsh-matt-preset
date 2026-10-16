@@ -66,6 +66,7 @@ ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@dee
 node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + workspace attach
 node tests/verify-persona.mjs      # persona 导语：{{model}}/{{cwd}} 渲染插值
 node tests/verify-workflow-core.mjs  # workflow-core 插件（#54）：注入点插值 spike + L1 verbatim + 单行挂载 + scope 守卫
+node tests/verify-workflow-core-render.mjs  # 真实 composition 渲染面：persona 无正文 / 注入节完整 / 插值 / verbatim + subpath 契约
 node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
 node tests/verify-lang-count.mjs   # 注入次数计数：GATES 每轮 1 / LANGBASE 会话 1 / LANGTRIGGER 触发 1
@@ -95,7 +96,7 @@ dsh-matt-preset/
 ├── docs/adr/                     # 架构决策记录
 ├── docs/workflow-enforcer.md     # enforcer 使用文档
 ├── docs/workflow-session-boundaries.md  # 会话边界与成本模型设计视图
-└── tests/                        # 11 项：verify / persona / workflow-core / enforcer / production / lang-count / lang-enforcer / lang-asm / grill-contract / bundle-sync / sandcastle-e2e
+└── tests/                        # 12 项：verify / persona / workflow-core / workflow-core-render / enforcer / production / lang-count / lang-enforcer / lang-asm / grill-contract / bundle-sync / sandcastle-e2e
 ```
 
 ## License
