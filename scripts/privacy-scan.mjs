@@ -44,11 +44,13 @@ export const KINDS = {
   denylist: 'denylist',
 }
 
-/** 允许出现的用户名段：容器/CI/示例/共享账户/占位符，不是某个人的身份。 */
+/** 允许出现的用户名段：容器/CI/示例/共享账户/占位符，不是某个人的身份。
+ *  `me` / `u` / `x` / `alice` 是邻仓（dsh-shell-host）既有的占位符写法——跨仓跑守卫时
+ *  发现本表漏了它们会把对方**干净**的仓报红（2026-10-16）。 */
 export const ALLOWED_USERS = new Set([
   'agent', 'runner', 'user', 'username', 'you', 'your-user', 'me', 'app', 'node', 'example',
   'name', 'your-name', 'yourname', 'foo', 'bar', 'baz', 'test', 'administrator', 'default',
-  'public', 'shared',
+  'public', 'shared', 'u', 'x', 'alice', 'bob',
 ])
 
 /** 运行期派生形态（`$(whoami)` / `%USERNAME%` / `${USER}`）：不是硬编码身份。 */

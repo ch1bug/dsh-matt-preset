@@ -169,10 +169,10 @@ try {
   // F13 结构规则的假阳性面：省略号缩写与通用段不是身份（红场景＝真用户名，见 F2/F3）
   {
     const root = fixture({ files: {
-      'docs/abbrev.md': '本体已无 `file:///C:/Users/...` 这类硬编码\nWindows 示例：C:\\Users\\name\\.dsh\n',
+      'docs/abbrev.md': '本体已无 `file:///C:/Users/...` 这类硬编码\nWindows 示例：C:\\Users\\name\\.dsh\n占位符写法：C:/Users/x、C:\\Users\\u、/home/me、/home/alice\n',
     } })
     const { findings } = scanRepo({ root, tokens: [] })
-    if (findings.length === 0) ok('F13. `C:/Users/...`（省略号）与 `C:\\Users\\name`（通用段）→ clean')
+    if (findings.length === 0) ok('F13. `C:/Users/...`（省略号）、通用段与邻仓占位符（x/u/me/alice）→ clean')
     else bad('F13. 假阳性', JSON.stringify(findings))
   }
 
