@@ -67,6 +67,7 @@ node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档�
 node tests/verify-persona.mjs      # persona 导语：{{model}}/{{cwd}} 渲染插值
 node tests/verify-workflow-core.mjs  # workflow-core 插件（#54）：注入点插值 spike + L1 verbatim + 单行挂载 + scope 守卫
 node tests/verify-workflow-core-render.mjs  # 真实 composition 渲染面：persona 无正文 / 注入节完整 / 插值 / verbatim + subpath 契约（R1–R5 离线可跑；L1–L2 环境侧需门禁，见下）
+node tests/verify-live-tool-call.mjs  # 调用侧 live：起真实实例 + mock LLM → 真实会话 → 捕获真实模型请求 → 真实执行工具（需门禁，见下）
 node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
 node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
 node tests/verify-lang-count.mjs   # 注入次数计数：GATES 每轮 1 / LANGBASE 会话 1 / LANGTRIGGER 触发 1
@@ -93,6 +94,17 @@ node tests/verify-workflow-core-render.mjs                 # 覆盖四环：安�
 **L1/L2 配置**（`--dump-config` 成功 + 组合树含 workflow-core 行）→
 **R1–R5 调用**（渲染面）→ **S1–S3 新建会话**（真实建会话 + 该会话提示词含注入节 + 会话级插值）。
 
+**调用侧 live 用例**（`verify-live-tool-call.mjs`，门禁 `DSH_MATT_LIVE_CLI`）：
+起**真实 dsh web 实例**（源码部署）+ **本地 mock LLM**（Anthropic SSE，`DEEPSEEK_BASE_URL`
+指向它）→ token 换 cookie → RPC `session/create`（带 matt preset）+ `session/prompt`
+→ 捕获**实例发出的真实模型请求**（断言 system 含注入正文、无字面 `{{}}`）→ mock 返回
+一次工具调用 → 断言**实例真的执行了工具**（下一轮请求带 `tool_result`）。
+隔离：临时 `DSH_HOME` + `--port 0`（OS 临时端口），**不占用任何固定端口**；无需任何
+外部 LLM 凭据。```bash
+export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts
+node tests/verify-live-tool-call.mjs
+```
+
 ## 目录
 
 ```
@@ -112,7 +124,7 @@ dsh-matt-preset/
 ├── docs/adr/                     # 架构决策记录
 ├── docs/workflow-enforcer.md     # enforcer 使用文档
 ├── docs/workflow-session-boundaries.md  # 会话边界与成本模型设计视图
-└── tests/                        # 12 项：verify / persona / workflow-core / workflow-core-render / enforcer / production / lang-count / lang-enforcer / lang-asm / grill-contract / bundle-sync / sandcastle-e2e
+└── tests/                        # 13 项：verify / persona / workflow-core / workflow-core-render / live-tool-call / enforcer / production / lang-count / lang-enforcer / lang-asm / grill-contract / bundle-sync / sandcastle-e2e
 ```
 
 ## License
