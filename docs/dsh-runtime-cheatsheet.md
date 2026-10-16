@@ -95,6 +95,18 @@ mock 说 Anthropic SSE：`message_start` → `content_block_start`（`text` 或
 
 实例：[tests/verify-workflow-profiles-2.mjs](tests/verify-workflow-profiles-2.mjs) 的 ptc 形状。
 
+## 工具坑（实测，费过一整轮的那种）
+
+- **`gh api --jq` 输出形状**：`--jq '.[] | {…}'` 是 **JSONL**（逐行一个对象）——
+  直接 `ConvertFrom-Json` 会报 "Additional text encountered after finished JSON content"。
+  要整体解析就包数组 `--jq '[.[] | {…}]'`；要分页就保持 JSONL 并**逐行**解析
+  （`--paginate` 会把数组拼起来，`JSON.parse` 整体一定炸）。
+- **看旧版文件别整份 dump**：`git show HEAD:<file>` 会把你整份源码打进上下文（实测一次
+  ~50K 字符）。要核对某几行就 `git show HEAD:<path> | Select-String -Pattern '…'`。
+  顺带：`Set-Content -NoNewline` 会把管道里的多行**拼成一行**（写旧版副本时会毁掉内容）。
+- **`gh api` 别忘了 `--paginate`**：不带它只有第一页。实测"30 条评论全绿"是假象——
+  第 100+ 条里还有个人路径（见 [docs/agents/privacy.md](agents/privacy.md) §0）。
+
 ## 权威来源（要更细就读这些）
 
 - `packages/api/session-controller/src/index.ts`（`@Remote` 方法）、`.../types.ts`（请求/响应形状）

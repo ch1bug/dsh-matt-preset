@@ -4,7 +4,8 @@
 # 用法：
 #   bash scripts/sync-skills.sh [--dry-run]
 # 环境变量：
-#   SYNC_SKILLS_UPSTREAM  上游 clone 目录（默认 /c/Work/code/skills，不存在则自动 clone）
+#   SYNC_SKILLS_UPSTREAM  上游 clone 目录（**必填**——本机路径不进仓，见 docs/agents/privacy.md；
+#                         不存在则自动 clone 到该路径）
 #   SYNC_SKILLS_TARGET    镜像目标（默认 ~/.dsh/skills；测试时指到临时目录）
 #
 # 本地适配层（#10/#1 纪律，同步后必须保住）：
@@ -18,7 +19,8 @@ set -euo pipefail
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-UP="${SYNC_SKILLS_UPSTREAM:-/c/Work/code/skills}"
+# 上游目录必填：不把任何本机路径写进这个公开仓（守卫 scripts/privacy-scan.mjs 会拦）。
+UP="${SYNC_SKILLS_UPSTREAM:?需要 SYNC_SKILLS_UPSTREAM（上游 clone 目录），例：SYNC_SKILLS_UPSTREAM=<你的 clone 路径>}"
 TARGET="${SYNC_SKILLS_TARGET:-$HOME/.dsh/skills}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 EXCLUDE_FILE="$HERE/sync-skills.exclude"

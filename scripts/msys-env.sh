@@ -5,7 +5,7 @@
 # Windows 的 node/gh —— 于是 msys 里 `gh auth status`、`node tests/...` 全部失败，
 # 而 Windows 侧一切就绪（gh 已登录 keyring、GCM 管凭据、node 24 在位）。
 #
-# 用法（source，不要执行）：  . /d/dsh-matt-preset/scripts/msys-env.sh
+# 用法（source，不要执行）：  . <repo>/scripts/msys-env.sh
 # 想每次自动生效：在 ~/.bashrc 里 source 本文件。
 #
 # 只**指向**Windows 的配置，不复制、不修改：凭据与登录态留在原处。

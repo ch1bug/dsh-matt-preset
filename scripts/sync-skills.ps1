@@ -4,7 +4,8 @@
 # 用法：
 #   pwsh -File scripts/sync-skills.ps1 [-DryRun]
 # 环境变量：
-#   SYNC_SKILLS_UPSTREAM  上游 clone 目录（默认 C:\Work\code\skills，不存在则自动 clone）
+#   SYNC_SKILLS_UPSTREAM  上游 clone 目录（**必填**——本机路径不进仓，见 docs/agents/privacy.md；
+#                         不存在则自动 clone 到该路径）
 #   SYNC_SKILLS_TARGET    镜像目标（默认 ~\.dsh\skills；测试时指到临时目录）
 #
 # 本地适配层（#10/#1 纪律）：GLOSSARY 家族 → CONTEXT 家族（内容+文件名）；
@@ -22,7 +23,11 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 function Read-Text([string]$Path) { [System.IO.File]::ReadAllText($Path, $Utf8NoBom) }
 function Write-Text([string]$Path, [string]$Text) { [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom) }
 
-$Up       = if ($env:SYNC_SKILLS_UPSTREAM) { $env:SYNC_SKILLS_UPSTREAM } else { 'C:\Work\code\skills' }
+# 上游目录必填：不把任何本机路径写进这个公开仓（守卫 scripts/privacy-scan.mjs 会拦）。
+$Up = $env:SYNC_SKILLS_UPSTREAM
+if (-not $Up) {
+  throw "需要 SYNC_SKILLS_UPSTREAM（上游 clone 目录）。例：`$env:SYNC_SKILLS_UPSTREAM='<你的 clone 路径>'"
+}
 $Target   = if ($env:SYNC_SKILLS_TARGET)   { $env:SYNC_SKILLS_TARGET }   else { Join-Path $HOME '.dsh\skills' }
 $Here     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ExcludeFile = Join-Path $Here 'sync-skills.exclude'
