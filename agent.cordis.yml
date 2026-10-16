@@ -37,18 +37,25 @@
       model-invoked) — to follow one that is not in your
       skill catalog, read its instructions at ~/.dsh/skills/<name>/SKILL.md and
       follow them. Facts are your job; decisions are the human's.
-# workflow-core（内置插件，随 preset 分发；#54 工作流插件化）：ask-matt 工作流正文
-# （MAIN FLOW + 七门 + BATCH MODE + 全部辅助节，存于 workflow-body.txt，与
-# persona 前缀拆分处逐字节拼接）经 system-prompt/assemble 注入为 workflow:core
-# 节（order 10，紧随 persona 前缀）——渲染后与 persona 承载版 verbatim-identical
-# （tests/verify-workflow-core.mjs L1 断言）。{{model}}/{{cwd}} 在注入节内照常
-# 插值（spike 实证：waterfall 先于 renderPrompt 插值，agent-loop 每次组装注册变量）。
+# workflow-core（内置插件，随 preset 分发；#54 工作流插件化 + #55 profile 机制）：
+# ask-matt 工作流正文拆为**共享骨架 + 每 profile delta**——骨架 workflow-body.txt 按
+# `@@ <id>` 分节（七门只此一处，DRY），delta 文件 workflow-profile-<name>.txt 同语法：
+# 同 id 覆盖该节、新 id 按 `after=<anchor>` 插入（marker 行永不出现在注入文本里）。
+# 本 preset 显式挂 profile: standard（= 骨架 verbatim，与 #54 基线逐字节一致——AC1 见
+# tests/verify-workflow-profiles.mjs）；creative profile（创作者 preset：plugin_manager
+# 变更纳入外部动作门 + inspect-first 契约，七门措辞零改动）见
+# workflow-profile-creative.txt 与 ADR-0011。注入经 system-prompt/assemble 为
+# workflow:core 节（order 10，紧随 persona 前缀）——渲染后与 persona 承载版
+# verbatim-identical（tests/verify-workflow-core.mjs L1 断言）。{{model}}/{{cwd}} 在注入节内
+# 照常插值（spike 实证：waterfall 先于 renderPrompt 插值，agent-loop 每次组装注册变量）。
 # scope 守卫默认 'marker'：仅当组装结果含 ask-matt 标记才注入，绝不泄漏到非
 # 工作流会话；其他 preset 以单行挂载时显式 config scope: 'all'（挂载即 opt-in）。
 # 挂载 = 一行 `dsh-matt-preset/workflow-core.mjs`（经包 subpath exports 解析，
 # 随安装位可移植，与 workflow-enforcer 同一陷阱规避）。
 - id: workflow-core
   name: dsh-matt-preset/workflow-core.mjs
+  config:
+    profile: standard
 
 # workflow-enforcer（内置插件，随 preset 分发；注意：preset 的插件行按 profile 目录
 # 解析，写相对 ./ 路径会在挂载审计报 never started——用自包子路径导出（随安装位解析，可移植））：

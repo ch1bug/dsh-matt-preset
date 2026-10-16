@@ -65,9 +65,13 @@ try {
   // (#54: the workflow body moved to workflow-core — check the injected
   // workflow text alongside the persona intro.)
   {
+    // #55: check the INJECTED body (profile-composed), not the sectioned
+    // skeleton file — a check grepping raw markers could pass while the
+    // composed text drifted.
+    const { profileBody } = await import(pathToFileURL(join(MATT_DIR, 'workflow-core.mjs')).href)
     const [yml, body] = await Promise.all([
       readFile(join(MATT_DIR, 'agent.cordis.yml'), 'utf8'),
-      readFile(join(MATT_DIR, 'workflow-body.txt'), 'utf8'),
+      profileBody('standard'),
     ])
     const flat = (yml + '\n' + body).replace(/\r\n/g, '\n').replace(/\s+/g, ' ')
     const has = s => flat.includes(s.replace(/\s+/g, ' '))

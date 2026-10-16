@@ -57,7 +57,7 @@ await test('install: copies payload to the stable store, stamps version + manife
   assert.equal(stamp.version, pkgVersion)
   // payload 完整：bundle 载体、插件、skills、lang-packs、sandcastle
   for (const f of ['preset.yml', 'agent.cordis.yml', 'cordis.patch.yml',
-    'workflow-core.mjs', 'workflow-body.txt',
+    'workflow-core.mjs', 'workflow-body.txt', 'workflow-profile-creative.txt',
     'workflow-enforcer.mjs', 'lang-enforcer.mjs', 'handoff-tool.mjs',
     'skills/ponytail/SKILL.md', 'lang-packs', 'sandcastle', 'package.json']) {
     assert.ok(existsSync(join(storeOf(home), f)), `missing payload: ${f}`)

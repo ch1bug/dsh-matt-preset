@@ -280,7 +280,31 @@ const v15b = await render()
 if (!v15b.includes('High-risk action detected')) ok('V15b. sandcastle ⚠ consumed (no repeat)')
 else bad('V15b. sandcastle ⚠ repeated', v15b.slice(-160))
 
+// V16 (#55): plugin_manager MUTATIONS are external-action events (they change
+// the whole profile and can run build scripts), while read-only list_* calls
+// stay routine. The creative profile DECLARES install/enable as gate-6 events,
+// so the gate list itself must know them — otherwise the injected text and the
+// per-turn reminders contradict each other ("this list is exhaustive").
+await emitSessionEvent(ctx, agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 16, name: 'plugin_manager', arguments: JSON.stringify({ action: 'list_plugins' }) },
+})
+const v16a = await render()
+if (!v16a.includes('High-risk action detected')) ok('V16a. read-only plugin_manager list → no ⚠ (routine)')
+else bad('V16a. read-only plugin_manager gated', v16a.slice(-240))
+
+await emitSessionEvent(ctx, agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 17, name: 'plugin_manager', arguments: JSON.stringify({ action: 'install_bundle', target: 'pkg@1.0.0' }) },
+})
+const v16b = await render()
+if (v16b.includes('High-risk action detected') && v16b.includes('plugin_manager')) ok('V16b. plugin_manager install_bundle → external-action ⚠ (one-shot)')
+else bad('V16b. plugin_manager mutation gate', v16b.slice(-240))
+const v16c = await render()
+if (!v16c.includes('High-risk action detected')) ok('V16c. plugin_manager ⚠ consumed after firing (no repeat)')
+else bad('V16c. plugin_manager ⚠ repeated', v16c.slice(-160))
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V15) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V16) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

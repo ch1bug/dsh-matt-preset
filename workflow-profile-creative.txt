@@ -1,0 +1,28 @@
+@@ creator-context after=workflow-enforcement
+CREATOR CONTEXT — this profile is mounted by a preset whose work is DSH
+plugin/preset authoring: the artifact is an extension of the agent runtime, so
+the map above still applies (idea → ship, the seven gates, batch mode) while the
+build surface differs. Two adaptations follow this section — the external-action
+gate's scope for `plugin_manager` mutations, and the inspect-first contract for
+plugin authoring. The seven gates themselves are unchanged: this profile ADDS to
+the shared workflow, it never rewrites it.
+@@ creator-gate-extension after=creator-context
+CREATOR GATE EXTENSION — gate 6's scope for plugin work (its wording above is
+unchanged): `plugin_manager` mutations ARE external-action-gate events.
+`install_bundle`, `set_plugin` (enable/disable) and `set_bundle` change a whole
+profile, can run package build scripts, and are awkward to unwind — report the
+exact target (package@version, pendingBuilds / approvedBuilds, acceptRisk, the
+profile affected), then WAIT for confirmation, exactly as with a push. Reading
+is routine: `list_plugins` / `list_bundles` need no confirmation; only mutations
+gate. Disabling a plugin that is already installed still mutates the live
+profile.
+@@ creator-inspect-first after=creator-gate-extension
+CREATOR INSPECT-FIRST — the live registry, not memory, is the contract source.
+Before writing or editing plugin code: `cordis_inspect_list` to see what
+providers and methods exist, then `cordis_inspect_query` to read the exact
+contract you are about to depend on — Service methods, Event modes, a plugin's
+Config schema, Tool schemas, theme tokens, the live Slot tree and its props.
+Cite the queried contract in the plan; a guessed name, signature or slot path is
+a defect, not a shortcut. Inspection is READ-ONLY: it never invokes a business
+Service and never mutates the runtime, so it neither satisfies nor triggers any
+gate.

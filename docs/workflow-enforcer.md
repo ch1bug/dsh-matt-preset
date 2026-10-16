@@ -50,8 +50,13 @@ Default (see `DEFAULT_GATES` in `workflow-enforcer.mjs`):
 
 | Group | Matches (substring over the tool call) |
 | --- | --- |
-| external | `git push`, `gh pr/issue/release create`, `gh repo create`, `npm publish`, `cargo publish` |
+| external | `git push`, `gh pr create`, `gh issue create`, `gh release create`, `gh repo create`, `npm publish`, `cargo publish`, `sandcastle`, `run-ticket`, `plugin_manager install_bundle` / `set_plugin` / `set_bundle` |
 | destructive | `git reset --hard`, `git clean -f`, `rm -rf`, `docker compose down -v`, `docker volume rm`, `docker system prune`, `drop database`, `truncate table`, `delete from`, `git push --force` |
+
+A gate matches as **space-separated word pairs** over the serialized tool call, so
+`plugin_manager` + a mutation action fires (its install/enable events are gate-6
+events — the read-only `list_plugins` / `list_bundles` calls stay routine, #55),
+and a plain `plugin_manager` substring alone never does.
 
 ### Per-project override: `workflow-gates.yml`
 

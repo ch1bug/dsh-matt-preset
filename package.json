@@ -23,6 +23,7 @@
     "workflow-gates.yml.example",
     "workflow-core.mjs",
     "workflow-body.txt",
+    "workflow-profile-creative.txt",
     "*.mjs",
     "skills",
     "lang-packs",

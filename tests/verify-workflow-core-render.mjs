@@ -12,6 +12,7 @@
  *   R5. 离线挂载契约：composition 里存在 workflow-core 行，且用 package
  *       subpath 形式寻址（不得写成 profile 目录相对的 ./ 路径——enforcer 行
  *       注释记录的同款陷阱）。
+ *   R6. #55：挂载显式声明 profile: standard（不靠插件默认值隐式选档）。
  *
  * 可移植：全部路径由 import.meta.url 推导，无绝对路径假设，可在纯源码检出下跑。
  *
@@ -111,6 +112,15 @@ const coreRow = /-\s+id:\s*workflow-core\s*\n\s+name:\s*(\S+)/.exec(composition)
 if (coreRow === null) bad('R5. composition carries the workflow-core row', 'row not found')
 else if (coreRow[1] === 'dsh-matt-preset/workflow-core.mjs') ok('R5. workflow-core addressed via package subpath export', coreRow[1])
 else bad('R5. workflow-core entry path', coreRow[1] + ' (expected dsh-matt-preset/workflow-core.mjs — never a ./ profile-relative path)')
+
+// R6: the shipped mount names its profile explicitly (#55) — relying on the
+// plugin default to mean "standard" would hide the contract from the composition.
+// Scope the search to the workflow-core ENTRY (up to the next row or top-level
+// comment), so a later entry's `profile:` can never satisfy it by accident.
+const coreEntry = /-\s+id:\s*workflow-core\s*\n([\s\S]*?)(?=\n\s*-\s+id:|\n#|$)/.exec(composition)?.[1] ?? ''
+const profileRow = /^\s+profile:\s*(\S+)/m.exec(coreEntry)
+if (profileRow?.[1] === 'standard') ok('R6. composition mounts workflow-core with an explicit profile: standard')
+else bad('R6. explicit profile row', profileRow?.[1] ?? 'no profile: inside the workflow-core entry')
 
 // ── LIVE 段（环境侧，门禁开启）─────────────────────────────────────────────
 // 环境侧验证：在真实 profile home 上跑 launcher 的 --dump-config，确认

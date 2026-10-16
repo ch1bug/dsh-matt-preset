@@ -45,7 +45,8 @@ unknown 引用直接抛错），正文里的示例代码若带双花括号需转
 - matt preset 渲染面零变化（L1 verbatim）；persona 变更面缩小为导语句（D27
   缓存语义改善）。
 - #55 的 delta 结构设计以本插件的 text 覆盖 config 为拼装点（`config.text`
-  可传变体正文）。
+  可传变体正文）。**（#55 落地后更新：最终形态是分节骨架 + `PROFILES` 注册表，
+  见 ADR-0011；`config.text` 保留为整段覆盖逃生门。）**
 - `workflow-body.txt` 进 package `files` 白名单；bundle 载体
   （cordis.patch.yml）随 agent.cordis.yml 重新生成并字节级锁定。
 - 验证：tests/verify-workflow-core.mjs（spike S1 / L1 / AC2 / G1 / E1；L1 基线

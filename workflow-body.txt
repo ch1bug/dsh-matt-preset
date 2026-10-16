@@ -1,3 +1,4 @@
+@@ main-flow
 MAIN FLOW — idea → ship:
 1. Sharpen. Run the grilling interview (load the `grilling` skill) and
    keep the `domain-modeling` vocabulary; in a working directory prefer
@@ -21,7 +22,7 @@ MAIN FLOW — idea → ship:
    pointers, automated checks, the coding standards /code-review
    enforces, steering files, tooling), so the next build starts from a
    better environment.
-
+@@ workflow-enforcement
 WORKFLOW ENFORCEMENT — six hard gates; the workflow-enforcer plugin
 injects their details and high-risk-action reminders per request.
 Violating them (silent skipping, deciding for the human, coding without
@@ -82,7 +83,7 @@ the state file says. If the state file is missing, stale, or
 contradicts the observed environment (git HEAD, worktree, file states),
 STOP and ask the human — do not guess, do not silently "fix up" the
 record, do not re-derive state from context.
-
+@@ batch-mode
 BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
 系列处理 / 大系列"); never on by default. Single-issue work keeps the
 per-issue push rhythm.
@@ -226,7 +227,7 @@ per-issue push rhythm.
     PROPOSE batches to the human instead of drifting per-issue.
   - A batch declaration names members + end point (last ticket) + AC
     check; that declaration is the license for autonomous execution.
-
+@@ text-pushes-exclude-actions
 TEXT PUSHES EXCLUDE ACTIONS — a push whose diff contains only text/docs
 changes (CHANGELOG.md, docs/**, AGENTS.md, *.md, .github/**) must not
 trigger CI: the repo's ci.yml should carry paths-ignore for those paths,
@@ -234,7 +235,7 @@ so doc-only pushes burn zero Actions minutes. Applies in and out of a
 batch. If the repo lacks the filter, add it as part of the current
 batch/ticket work (or file a ticket) — never leave doc-only pushes
 running the full CI.
-
+@@ context-hygiene
 CONTEXT HYGIENE — keep grilling through tickets in ONE window and watch
 the smart zone — the point where the model's reasoning degrades
 (attention is quadratic; the cliff is model-dependent — Matt's empirical
@@ -267,7 +268,7 @@ way, a snapshot mismatch with the handoff stops you — report and ask
 before starting. A "recommended / 最热 / 续作 / 选一开工" line is a
 suggestion from the previous session, not your marching orders — the
 human is the only one who assigns work.
-
+@@ methodology
 METHODOLOGY — the thinking under the map, not just the skill names:
 frontier (ask only what is unblocked; facts are your job, decisions are
 the human's) · red loop (red before green, one slice at a time) · tight
@@ -280,18 +281,18 @@ clean seam) · domain language (the words are the product; CONTEXT.md
 glossary, ADRs for hard-to-reverse decisions) · human is the index
 (pointers, not copies). Load the `matt-methodology` skill for the full
 treatment whenever a phase is about to start.
-
+@@ on-ramps
 ON-RAMPS — /triage for issues you didn't create; /diagnosing-bugs for
 hard bugs (tight feedback loop first); /wayfinder for huge foggy efforts
 (decision tickets, then merge onto the main flow at /to-spec).
-
+@@ health
 HEALTH — run /improve-codebase-architecture when idle and design the
 chosen module on the /codebase-design bench.
-
+@@ standalone
 STANDALONE — /grill-me, /prototype, /research (background agent,
 primary sources), /to-questionnaire, /wizard, /wait-what, /teach,
 /writing-for-agents, /resolving-merge-conflicts.
-
+@@ utilities
 UTILITIES — /git-guardrails-claude-code (block destructive git
 commands), /setup-pre-commit, /scaffold-exercises,
 /migrate-to-shoehorn (test `as` → shoehorn). IN-PROGRESS
@@ -299,11 +300,11 @@ commands), /setup-pre-commit, /scaffold-exercises,
 background agent), /loop-me (grill specs for workflows), /writing-beats,
 /writing-fragments, /writing-shape (writing craft), /setup-ts-deep-modules
 (deep-module wiring).
-
+@@ precondition
 PRECONDITION — engineering-skill setup (issue tracker + triage labels)
 runs automatically the first time a tracker-dependent skill is used (see
 INITIALIZATION); never call /setup-matt-pocock-skills proactively.
-
+@@ initialization
 INITIALIZATION — autonomously bootstrap the stateful docs in a workspace
 that has none. Once per session, when the workflow text is visible and the
 cwd has no CONTEXT.md, probe the workspace (cheap, non-mutating):

@@ -52,6 +52,13 @@ export const DEFAULT_GATES = {
     'git push', 'gh pr create', 'gh issue create',
     'gh release create', 'gh repo create', 'npm publish', 'cargo publish',
     'sandcastle', 'run-ticket',
+    // plugin_manager MUTATIONS are profile-wide external actions (they load a
+    // plugin for the whole profile and can run package build scripts). Word
+    // pairs, so the read-only list_plugins / list_bundles calls never match.
+    // #55's creative profile declares install/enable as gate-6 events — this is
+    // the one place the gate list lives (D23: high-risk details ride in the
+    // plugin, the workflow text keeps the anchor).
+    'plugin_manager install_bundle', 'plugin_manager set_plugin', 'plugin_manager set_bundle',
   ],
   destructive: [
     'git reset --hard', 'git clean -f', 'rm -rf', 'docker compose down -v',
