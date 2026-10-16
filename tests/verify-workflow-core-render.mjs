@@ -134,7 +134,7 @@ const liveCli = process.env.DSH_MATT_LIVE_CLI
 if (!liveHome) {
   console.warn(
     '  !! SKIP (loud) - live instance proof needs DSH_MATT_LIVE_HOME ' +
-      '(e.g. /home/<user>/dsh-matt-home); instance-side dump evidence absent here',
+      '(e.g. $HOME/dsh-matt-home); instance-side dump evidence absent here',
   )
 } else if (!liveCli) {
   console.warn(

@@ -137,7 +137,7 @@
 - ✅ 17/17 全套验证重跑全绿（track A handoff 子会话 + 文档首条提示词 + model 路由；track B 全量失败不归咎自定义行；track C jobs 全套；track D workspace attach）。
 - ✅ 文案一致性修复：preset.yml 描述去除已删的 `/clear`（对齐 D15）；`notifySessionId` 已填真实会话 id（matt-session-7a5993c2-f65c-453c-896c-042d90f5b658，对齐 D9/D10）。
 - ✅ 已发布为 GitHub 公开仓库 ch1bug/dsh-matt-preset（preset.yml + agent.cordis.yml + 插件 + tests/，按 dsh-agent-presets 规范；notifySessionId 仓库版留空，会话 id 不外泄；tests 改为仓库相对路径并全绿）。
-- ✅ 测试服务器已部署：http://127.0.0.1:3090（DSH_HOME=/home/<user>/dsh-src/.dsh-test，隔离数据根 + 符号链接同一 ~/.dsh/.agent-presets，读取全部修复后的文件；生产 3080 未动）。
+- ✅ 测试服务器已部署：http://127.0.0.1:3090（DSH_HOME=$HOME/dsh-src/.dsh-test，隔离数据根 + 符号链接同一 ~/.dsh/.agent-presets，读取全部修复后的文件；生产 3080 未动）。
 - ✅ 已按 D17 取消两阶段 bootstrap：删除 tool-bootstrap 行与文件，persona / matt-workflow / handoff-tool / README / NOTICE / verify 同步清理；验证 17/17 仍绿。
 - ✅ 已按 D18 把完整人设并入 persona（删除 matt-workflow 插件与 md）；新增 tests/verify-persona.mjs（{{model}}/{{cwd}} 渲染插值冒烟）全绿。
 - ✅ 已按 D19 在 persona 加 WORKFLOW ENFORCEMENT 四个硬 gate（入口路由 / implement 前置 / 决策边界 / 阶段声明）；技能本体未改（sync 覆盖），前置检查以 persona 形式声明。

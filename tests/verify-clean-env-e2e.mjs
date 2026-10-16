@@ -70,7 +70,7 @@ const CLI = process.env.DSH_MATT_LIVE_CLI
 if (!CLI) {
   loudSkip(
     'clean-env e2e needs DSH_MATT_LIVE_CLI (source checkout CLI entry, e.g. ' +
-      '/home/<user>/dsh-matt-src/apps/cli/src/bin.ts) — the whole install→start→session→turn chain is unverified',
+      '<src>/apps/cli/src/bin.ts) — the whole install→start→session→turn chain is unverified',
   )
   console.log('\n=== CLEAN-ENV E2E (install → start → session → turn) ===')
   console.log(results.join('\n'))

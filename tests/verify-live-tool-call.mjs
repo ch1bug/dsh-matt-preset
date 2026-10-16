@@ -38,7 +38,7 @@ const CLI = process.env.DSH_MATT_LIVE_CLI
 if (!CLI) {
   console.warn(
     '  !! SKIP (loud) - live call-side proof needs DSH_MATT_LIVE_CLI ' +
-      '(source checkout CLI entry, e.g. /home/<user>/dsh-matt-src/apps/cli/src/bin.ts)',
+      '(source checkout CLI entry, e.g. <src>/apps/cli/src/bin.ts)',
   )
   console.log('\n=== LIVE TOOL-CALL VERIFY ===')
   console.log(results.join('\n'))

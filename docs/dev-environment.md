@@ -14,7 +14,8 @@
   可继承的事实一律回仓（本文件 + [dsh-runtime-cheatsheet.md](dsh-runtime-cheatsheet.md)）。
 - 副本要刷新时**重新部署**，不要在副本里手改后当基线（会漂移成第二份事实）。
 - 同一 workspace 只保留**一份**部署副本；历史上的散落副本（早期 `<repo>/dsh-src`，与
-  `/home/<user>/dsh-matt-src` 重复）已清理。
+  msys2 侧部署副本 `$HOME/dsh-matt-src` 重复）已清理。本文用 `$HOME` 表示 **msys 侧**
+  用户目录（≠ Windows 用户目录，见 §0.1）、`%USERPROFILE%` 表示 Windows 用户目录。
 
 ## 0.1 msys2 会话引导（复用 Windows 侧配置）
 
@@ -93,7 +94,7 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 
 | 资源 | 本工作区（matt 工作流） | 相邻工作区（shell-host） | 桌面端 |
 | --- | --- | --- | --- |
-| DSH_HOME | msys2 侧独立 home | 各自独立 home | `C:\Users\<user>\.dsh` |
+| DSH_HOME | msys2 侧独立 home | 各自独立 home | `%USERPROFILE%\.dsh` |
 | profile | `matt-dev` | `dsh-host-dev` | `desktop` |
 | 端口 | 19501 | 19502 | 19387（GUI） |
 | 源码树 | 各自 clone | 各自 clone | 安装版 |
@@ -126,7 +127,7 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 
 **2026-10-16 实测**：Windows 侧 agent shell 与 msys 登录 shell 的 PATH 上**都没有** `dsh`
 （`Get-Command dsh` / `which -a dsh` 均空），但**运行时是可达的**——msys 侧部署副本
-`/home/<user>/dsh-matt-src`（tag `dsh-v0.2.0-rc.2`）与 DSH_HOME `/home/<user>/dsh-matt-home` 都在位。
+`$HOME/dsh-matt-src`（tag `dsh-v0.2.0-rc.2`）与 DSH_HOME `$HOME/dsh-matt-home` 都在位。
 把"PATH 无 dsh"读成"本机没有 dsh / 有 dsh 那半边无法验证"是**错的**：#67 会话据此把
 `verify-installer` 的 4 条 link 断言判成"本机不可验证"，写进了已 push 的 commit。
 

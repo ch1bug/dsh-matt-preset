@@ -18,14 +18,14 @@
  *     b) DSH_MATT_REAL_CREDENTIALS_SOURCE —— 一个含 `deepseek-account-platform/*`
  *        记录的 credentials.yaml 路径（账号设备授权路线，无需 API key）。测试只
  *        **只读**取出这两条记录写入临时 home（跑完随临时目录删除）。默认尝试
- *        桌面 home `C:\Users\<user>\.dsh\.credentials.yaml`（存在且含该记录时）。
+ *        当前用户的 home `~/.dsh/.credentials.yaml`（存在且含该记录时）。
  * 可选：DSH_MATT_REAL_MODEL 指定模型；DSH_MATT_REAL_PROMPT 覆盖任务文本。
  *
  * 隔离：临时 DSH_HOME（os.tmpdir）+ `--port 0`，不占用任何固定端口（19501/19502/19387）。
  */
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
@@ -38,9 +38,9 @@ const bad = (n, d = '') => results.push('  ✗ ' + n + (d ? ' — ' + d : ''))
 
 const CLI = process.env.DSH_MATT_LIVE_CLI
 const KEY = process.env.DEEPSEEK_API_KEY
-/** 账号授权路线：只读源（默认桌面 home），只取 deepseek-account-platform/* 记录。 */
+/** 账号授权路线：只读源（默认当前用户 home），只取 deepseek-account-platform/* 记录。 */
 const CRED_SOURCE = process.env.DSH_MATT_REAL_CREDENTIALS_SOURCE
-  ?? 'C:\\Users\\<user>\\.dsh\\.credentials.yaml'
+  ?? join(homedir(), '.dsh', '.credentials.yaml')
 const ACCOUNT_PREFIX = 'deepseek-account-platform/'
 
 /** 从源 credentials.yaml 只读取账号记录（不改源文件）。 */
