@@ -174,12 +174,16 @@ async function executeHandoff(ctx, args, exec) {
   // D26: environment snapshot template — the child's起手式 verifies this
   // (git log/status) instead of rebuilding context; the handoff author fills
   // the values. Kept as a template so structure is stable, content is theirs.
+  // retro 2026-10-16: a bare environment claim ("this machine has no dsh") shipped
+  // a false AC verdict into a pushed commit, because nothing forced the claim to
+  // carry its probe. Every environment claim now carries `命令 → 输出`.
   const snapshot = [
     '## 环境快照（起手式验证）',
     '<!-- 新会话起手式：git log/status 对照以下快照，不一致以实际为准 -->',
     '- 分支/HEAD: ',
     '- 工作树: ',
     '- 关键文件状态: ',
+    '- 环境结论（每条一行 `命令 → 输出`；裸结论无效）: ',
     '- 已确认决策: ',
     '- 下一步: ',
   ].join('\n')

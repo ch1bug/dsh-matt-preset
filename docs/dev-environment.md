@@ -52,8 +52,8 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   --title "…\`dir/**\`…"` 会把 markdown 反引号写成 `\`（#66 会话实测，随后用 `gh issue edit`
   的单引号标题修回，白一往返）——带反引号 / `$` 的标题或正文一律走**单引号**、here-string 或
   `--body-file`，写完**回读一遍**。
-- **worktree 文本文件是 CRLF**（`core.autocrlf=true`，index 里存 LF）：`edit` 的**多行**
-  `old_string`（`\n` 连接）匹配不到 CRLF 内容——用**单行锚点**；插入的新行是 LF，`git add`
+- **worktree 文本文件是 CRLF**（`core.autocrlf=true`，index 里存 LF）。**2026-10-16 复测更正：多行锚点可用**（在 230/230 CRLF 的 `tests/verify-installer.mjs` 上用两行锚点成功改注释，11 次 `edit` 后该文件仍 230/230 CRLF）。旧记的"多行
+  `old_string`（`\n` 连接）匹配不到 CRLF 内容——**这条 2026-10-16 已复测证伪，别再为此退回单行锚点**；插入的新行是 LF，`git add`
   时归一化，仓库无碍。只有**逐字节敏感**的正文（骨架 `workflow-body.txt` 这类要被解析器
   逐字节复原的文件）才值得写一次性脚本并保持原行尾（`split('\n')` → 改 → `join(nl)`）。
 - **一次性编辑脚本的自校验要对「冻结基线」，不要对改前内容**：改前内容里还带着你正要删掉的
@@ -101,10 +101,42 @@ cd <src> && git fetch --depth 1 origin tag dsh-v0.2.0-rc.2 && git checkout tags/
 pnpm install --ignore-scripts --package-import-method=copy     # 见 §4 工具链
 pnpm run clean                                                 # 见 §4 切 tag
 pnpm run build                                                 # 必须经 pnpm，见 §4
-DSH_HOME=<home> pnpm exec dsh --profile <profile> --no-open --port <port>
+DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --port <port>   # 构建产物入口（cwd 无关）；旧口径 `pnpm exec dsh` 在本机不通，见 §3.1
 ```
 
 首次启动会自动初始化 profile（生成 `cordis.yml`、`.credentials.yaml`、`storages/`）。
+
+### 3.1 运行时可达性：`dsh` 从哪来（PATH 无 `dsh` ≠ 运行时缺席）
+
+**2026-10-16 实测**：Windows 侧 agent shell 与 msys 登录 shell 的 PATH 上**都没有** `dsh`
+（`Get-Command dsh` / `which -a dsh` 均空），但**运行时是可达的**——msys 侧部署副本
+`/home/<user>/dsh-matt-src`（tag `dsh-v0.2.0-rc.2`）与 DSH_HOME `/home/<user>/dsh-matt-home` 都在位。
+把"PATH 无 dsh"读成"本机没有 dsh / 有 dsh 那半边无法验证"是**错的**：#67 会话据此把
+`verify-installer` 的 4 条 link 断言判成"本机不可验证"，写进了已 push 的 commit。
+
+| 用途 | 命令 |
+| --- | --- |
+| 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
+| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.0-rc.2` |
+
+**PATH 型工具**（`bin/install.mjs`、测试里的 `dsh --version` 探针）shell out 到字面 `dsh`，需要一个
+包装（临时放 `%TEMP%`，跑完可弃；`<src>\node_modules\.bin` 提供 `dsh plugin` 需要的 pnpm，见 §4.5）：
+
+```bat
+@echo off
+node "<src>\apps\cli\lib\bin.js" %*
+exit /b %ERRORLEVEL%
+```
+
+```powershell
+$env:PATH = "<shim 目录>;<src>\node_modules\.bin;$env:PATH"
+dsh --version                                                  # → 0.2.0-rc.2
+$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 11/11、exit 0、零 loud skip
+```
+
+实测结果（2026-10-16，装上包装后）：`verify-installer.mjs` **11/11、零 loud skip**（此前 4 条 link
+断言 + e2e 全是 loud skip）；`node scripts/verify-all.mjs` 里 `verify-installer` 由 `PASS*` 变
+**`PASS`**（20/21）。**有 dsh 那半边在本机可验证——别再默认"跳过了事"。**
 
 ## 4. 工具链结论（全部实测，别重复试错）
 

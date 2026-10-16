@@ -151,6 +151,13 @@ try {
       } else {
         bad('A. handoff artifact manifest', '产物清单/sha256 missing from document')
       }
+      // D26 修订（retro 2026-10-16）：环境快照必须要求环境结论带探针（`命令 → 输出`）——
+      // 一条裸结论（"本机没有 dsh"）曾把错的 AC 判据写进已 push 的 commit。
+      if (text.includes('环境快照') && text.includes('环境结论')) {
+        ok('A. handoff document carries the environment snapshot (claims need command → output)')
+      } else {
+        bad('A. handoff snapshot section', '环境快照/环境结论 missing from document')
+      }
     } else {
       bad('A. handoff child first user message', `events=${childEvents.map(ev => ev.type).join(',')}`)
     }

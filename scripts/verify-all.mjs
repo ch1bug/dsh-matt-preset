@@ -20,11 +20,13 @@ import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 非用例文件（共享挂具）与需要外部环境、默认跳过的用例。 */
+/** 非用例文件（共享挂具）与需要外部环境、默认跳过的用例。
+ *  `why` 口径（retro 2026-10-16）：写清这门禁**挡住哪条链 / 哪半边**——缺环境时读者才知道
+ *  暗掉的是什么（#67 会话里 `SKIP verify-installer.mjs` 一行看不出 installer→启动→turn 整条链没测）。 */
 const NOT_A_TEST = new Set(['preset-harness.mjs'])
 const OPT_IN = new Map([
   ['verify-installer.mjs', { flag: 'DSH_MATT_INSTALLER', why: 'installer 用例（store 侧离线可跑；profile-link 断言需本机 dsh）' }],
-  ['sandcastle-e2e.mjs', { flag: 'DSH_MATT_E2E', why: '需要 podman' }],
+  ['sandcastle-e2e.mjs', { flag: 'DSH_MATT_E2E', why: 'sandcastle 三命令 e2e（需 podman）' }],
 ])
 
 const files = readdirSync(join(REPO, 'tests'))
