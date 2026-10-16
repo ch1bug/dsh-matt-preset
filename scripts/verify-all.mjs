@@ -58,6 +58,15 @@ for (const file of files) {
 
 const label = { PASS: 'PASS', 'PASS*': 'PASS*', FAIL: 'FAIL', SKIP: 'SKIP' }
 console.log('\n=== verify-all ===')
+
+// 提交前门禁是**每 clone 一次**的本地配置：没配就是静默没有，而套件照样全绿。
+// 响亮提一句（advisory，不阻断、不改 exit code —— 与 loud skip 同一口径）。
+const hooksProbe = spawnSync('git', ['config', 'core.hooksPath'], { cwd: REPO, encoding: 'utf8' })
+const hooksPath = (hooksProbe.stdout ?? '').trim()
+if (hooksProbe.error === undefined && hooksProbe.status !== null && hooksPath !== '.githooks') {
+  console.log(`  !! pre-commit 钩子未启用（core.hooksPath = ${hooksPath === '' ? '未设置' : hooksPath}）—— 首次 clone 跑一次: git config core.hooksPath .githooks`)
+}
+
 for (const r of rows) console.log(`  ${label[r.status].padEnd(6)} ${r.file.padEnd(38)} ${r.detail}`)
 
 const failures = rows.filter(r => r.status === 'FAIL')
