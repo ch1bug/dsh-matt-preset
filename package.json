@@ -8,6 +8,10 @@
   "bin": {
     "dsh-preset-install": "bin/install.mjs"
   },
+  "scripts": {
+    "test": "node scripts/verify-all.mjs",
+    "link-deps": "node scripts/link-runtime-deps.mjs"
+  },
   "dependencies": {
     "yaml": "^2.6.0"
   },

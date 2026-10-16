@@ -1,0 +1,23 @@
+#!/bin/sh
+# .githooks/pre-commit —— 本仓无 CI，本地套件即唯一验收通道；提交前跑它。
+# 启用（每个 clone 一次）：git config core.hooksPath .githooks
+# 绕过（明确知道自己在跳什么时）：SKIP_HOOKS=1 git commit …
+[ -n "$SKIP_HOOKS" ] && { echo "pre-commit: SKIP_HOOKS set — 跳过 verify-all"; exit 0; }
+
+# 找 node：PATH → 常见安装位（msys 的 bash 与 Windows 侧 node 各自 PATH 不同，
+# 缺工具链时**响亮跳过**而不是阻断提交 —— 与套件的 loud-skip 惯例一致）。
+NODE=$(command -v node 2>/dev/null)
+for c in "/c/Program Files/nodejs/node.exe" "/ucrt64/bin/node.exe" "/usr/bin/node"; do
+  [ -n "$NODE" ] && break
+  [ -x "$c" ] && NODE="$c"
+done
+if [ -z "$NODE" ]; then
+  echo "pre-commit: 找不到 node —— 跳过 verify-all（本次提交未经验证）"
+  exit 0
+fi
+
+echo "pre-commit: $NODE scripts/verify-all.mjs"
+"$NODE" scripts/verify-all.mjs || {
+  echo "pre-commit: 检查未通过 —— 修掉再提交，或用 SKIP_HOOKS=1 明确跳过"
+  exit 1
+}

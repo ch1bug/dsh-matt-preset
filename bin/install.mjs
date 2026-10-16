@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
@@ -125,17 +126,74 @@ async function expandEntry(srcDir, entry) {
 }
 
 /**
+ * 解 tgz（Node 原生：gunzip + 最小 ustar/pax 读取）。
+ *
+ * 为什么不用系统 tar（#64 实测）：解包必须跨 tar 方言成立，而两条路都不通——
+ *   - `shell:true` + 绝对路径：**GNU tar**（msys/Linux）把 `C:\…` 的冒号当远程主机
+ *     （`无法连接至 C:`）；
+ *   - 改成 `shell:false` + `-C <work>`：GNU tar 仍吃不下 msys 路径转换后的
+ *     `C:\msys64\tmp\…`（`无法 open: No such file or directory`）。
+ * 所以不赌宿主方言：npm pack 产出的是 gzip 包着的 ustar（长路径走 pax/GNU 扩展），
+ * 这里自己读，任何平台行为一致。
+ */
+async function extractTarball(tarball, dest) {
+  const buf = gunzipSync(await readFile(tarball))
+  /** tar 头字段：NUL 结尾、按八进制/字符串读取。 */
+  const field = (header, start, len) => header.subarray(start, start + len).toString('utf8').replace(/\0[\s\S]*$/u, '').trim()
+  let offset = 0
+  let pendingName
+  while (offset + 512 <= buf.length) {
+    const header = buf.subarray(offset, offset + 512)
+    if (header.every((b) => b === 0)) break
+    const size = Number.parseInt(field(header, 124, 12) || '0', 8)
+    const type = String.fromCharCode(header[156]) || '0'
+    const prefix = field(header, 345, 155)
+    const rawName = field(header, 0, 100)
+    const dataStart = offset + 512
+    const dataEnd = dataStart + size
+
+    if (type === 'x' || type === 'g') {
+      // pax 扩展头：记录形如 "<len> path=<value>\n"，长路径从这里来
+      const body = buf.subarray(dataStart, dataEnd).toString('utf8')
+      const hit = /(?:^|\n)\d+ path=([^\n]+)/u.exec(body)
+      if (hit) pendingName = hit[1]
+    } else if (type === 'L') {
+      // GNU 长名头
+      pendingName = buf.subarray(dataStart, dataEnd).toString('utf8').replace(/\0[\s\S]*$/u, '')
+    } else {
+      const full = (pendingName ?? (prefix ? `${prefix}/${rawName}` : rawName)).replace(/^\.\//u, '')
+      pendingName = undefined
+      if (full !== '' && !full.split('/').includes('..')) {
+        const target = join(dest, full)
+        if (type === '5') await mkdir(target, { recursive: true })
+        else if (type === '0' || type === '\0') {
+          await mkdir(dirname(target), { recursive: true })
+          await writeFile(target, buf.subarray(dataStart, dataEnd))
+        }
+      }
+    }
+    offset = dataStart + Math.ceil(size / 512) * 512
+  }
+  return join(dest, 'package')
+}
+
+/**
  * Resolve the package payload: returns { pkgDir, pkg, source }.
- * --from tarball → extract with system tar; --from dir → use as-is;
- * default → this package's own checkout.
+ * --from tarball → extract with the in-process extractor (no host tar dialect);
+ * --from dir → use as-is; default → this package's own checkout.
  */
 async function resolveSource(from) {
   if (!from) return { pkgDir: PKG_DIR, source: 'source' }
   if (from.endsWith('.tgz') || from.endsWith('.tar.gz')) {
     const work = await mkdtemp(join(tmpdir(), 'dsh-preset-pkg-'))
-    const r = spawnSync('tar', ['-xzf', resolve(from), '-C', work], { encoding: 'utf8', shell: process.platform === 'win32' })
-    if (r.status !== 0) { await rm(work, { recursive: true, force: true }); die(`tar extract failed: ${r.stderr}`) }
-    return { pkgDir: join(work, 'package'), source: 'tarball' }
+    try {
+      const pkgDir = await extractTarball(resolve(from), work)
+      if (!existsSync(pkgDir)) throw new Error(`tarball has no package/ entry: ${from}`)
+      return { pkgDir, source: 'tarball' }
+    } catch (error) {
+      await rm(work, { recursive: true, force: true })
+      die(`tarball extract failed: ${String(error?.message ?? error)}`)
+    }
   }
   const dir = resolve(from)
   if (!existsSync(join(dir, 'package.json'))) die(`--from is not a package directory (no package.json): ${dir}`)

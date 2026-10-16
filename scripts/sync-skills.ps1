@@ -15,6 +15,13 @@ param([switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# 显式 UTF-8（无 BOM）读写：绝不依赖宿主码页。#63 实测：Windows PowerShell 5.1
+# 下 `Get-Content -Raw` / `Set-Content` 默认 ANSI（zh-CN = GBK），会把非 ASCII 压成
+# `?`（`→` 的 E2 86 92 → E2 86 3F），产出非法 UTF-8 → 技能加载器拒绝该技能。
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Read-Text([string]$Path) { [System.IO.File]::ReadAllText($Path, $Utf8NoBom) }
+function Write-Text([string]$Path, [string]$Text) { [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom) }
+
 $Up       = if ($env:SYNC_SKILLS_UPSTREAM) { $env:SYNC_SKILLS_UPSTREAM } else { 'C:\Work\code\skills' }
 $Target   = if ($env:SYNC_SKILLS_TARGET)   { $env:SYNC_SKILLS_TARGET }   else { Join-Path $HOME '.dsh\skills' }
 $Here     = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -32,7 +39,7 @@ if (-not (Test-Path (Join-Path $Up '.git'))) {
 }
 
 $Excluded = if (Test-Path $ExcludeFile) {
-  Get-Content $ExcludeFile | Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') } | ForEach-Object { $_.Trim() }
+  Get-Content $ExcludeFile -Encoding utf8 | Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') } | ForEach-Object { $_.Trim() }
 } else { @() }
 
 function Test-TreeEqual([string]$A, [string]$B) {
@@ -52,7 +59,7 @@ function Invoke-Transforms([string]$Dir) {
   Get-ChildItem $Dir -Recurse -File | Where-Object {
     $_.Extension -in '.md', '.yaml', '.yml', '.json', '.txt', ''
   } | ForEach-Object {
-    $c = Get-Content $_.FullName -Raw
+    $c = Read-Text $_.FullName
     if ($c -notmatch 'GLOSSARY|implement-spec') { return }
     # 适配层：GLOSSARY 家族 → CONTEXT 家族 + implement-spec 路由剔除（ADR-0005，#10 金标）
     $n = $c -replace 'GLOSSARY-MAP\.md', 'CONTEXT-MAP.md' -replace 'GLOSSARY-FORMAT\.md', 'CONTEXT-FORMAT.md' -replace 'GLOSSARY\.md', 'CONTEXT.md'
@@ -60,7 +67,7 @@ function Invoke-Transforms([string]$Dir) {
     $n = $n -replace 'Then work the tickets one of two ways:', 'Then work the tickets:'
     $n = $n -replace "; ``/implement-spec``'s implementers each drive ``/tdd``, and it runs one ``/code-review`` over the integration branch\.", '.'
     $n = $n -replace "`r`n", "`n"   # 行尾统一 LF（上游 clone 受 autocrlf 影响可能 CRLF；现存镜像为 LF）
-    if ($n -ne $c) { Set-Content -NoNewline -Path $_.FullName -Value $n }
+    if ($n -ne $c) { Write-Text $_.FullName $n }
   }
   Get-ChildItem $Dir -Recurse -Filter 'GLOSSARY-FORMAT.md' | ForEach-Object {
     Rename-Item $_.FullName 'CONTEXT-FORMAT.md'
@@ -70,9 +77,9 @@ function Invoke-Transforms([string]$Dir) {
     $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
     $probe = [Math]::Min(4096, $bytes.Length)
     for ($i = 0; $i -lt $probe; $i++) { if ($bytes[$i] -eq 0) { return } }
-    $c = Get-Content $_.FullName -Raw
+    $c = Read-Text $_.FullName
     $n = $c -replace "`r`n", "`n"
-    if ($n -ne $c) { Set-Content -NoNewline -Path $_.FullName -Value $n }
+    if ($n -ne $c) { Write-Text $_.FullName $n }
   }
 }
 

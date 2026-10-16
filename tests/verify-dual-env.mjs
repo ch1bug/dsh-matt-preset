@@ -15,6 +15,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFile, readdir, rm, mkdtemp } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -108,8 +109,13 @@ async function runEnv(label, installArgs) {
 
 try {
   await runEnv('source', [])
-  // npm 环境：真 npm pack 出 tarball 再装
-  const packed = spawnSync('npm', ['pack', '--pack-destination', tmp], { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' })
+  // npm 环境：真 npm pack 出 tarball 再装。
+  // 用 `node <npm-cli.js>` 而不是 `npm` + shell:true：后者在 Node 24 触发
+  // DEP0190（shell:true 传参告警），而 .cmd shim 在 Node ≥24 不允许 shell:false。
+  const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const packed = existsSync(npmCli)
+    ? spawnSync(process.execPath, [npmCli, 'pack', '--pack-destination', tmp], { cwd: REPO, encoding: 'utf8' })
+    : spawnSync('npm', ['pack', '--pack-destination', tmp], { cwd: REPO, encoding: 'utf8', shell: true })
   assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`)
   const [tarball] = (await readdir(tmp)).filter((f) => f.endsWith('.tgz'))
   assert.ok(tarball, 'no tarball produced')

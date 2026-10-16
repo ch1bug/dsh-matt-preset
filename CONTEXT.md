@@ -82,6 +82,8 @@
 
 - **D42（2026-10-16，#54 落地）** — **workflow-core 插件化**：ask-matt 工作流正文（MAIN FLOW + 七门 + BATCH MODE + 辅助节）抽出 persona，改由本仓 `workflow-core.mjs` 经 system-prompt/assemble 注入（`workflow:core` 节，order 10），渲染后与 persona 承载版 verbatim-identical（L1 断言）；persona 前缀只留导语句（含 `ask-matt` 标记，同时喂 enforcer 与 workflow-core 的 marker scope 守卫）。任何 preset 单行挂载 `dsh-matt-preset/workflow-core.mjs`（subpath exports 解析）即得工作流；非 matt preset 显式 `scope: 'all'`。Spike 结论：{{model}}/{{cwd}} 在注入节内照常插值——waterfall 先于 renderPrompt、变量由 agent-loop 每次组装注册；注入文本内任何 `{{…}}` 都走严格校验（malformed/unknown 即抛）。取代 D18 的"全文承载在 persona"形态。详见 [docs/adr/0010-workflow-core-plugin.md](docs/adr/0010-workflow-core-plugin.md)。
 
+- **D43（2026-10-16，retro 落地）** — **环境自检三件套**：① **唯一检查入口** `scripts/verify-all.mjs`（`pnpm test`）——枚举 `tests/*.mjs`、逐项报 PASS/PASS\*/FAIL/SKIP，`PASS*` 明示"含 loud skip、环境侧未验证"，环境依赖项由门禁变量开启（`DSH_MATT_INSTALLER`/`DSH_MATT_E2E`/`DSH_MATT_LIVE_*`），配 `.githooks/pre-commit`（`git config core.hooksPath .githooks` 启用，`SKIP_HOOKS=1` 绕过）；② **依赖一条命令** `scripts/link-runtime-deps.mjs`——补齐此前未文档化的两处隐依赖（仓根 `node_modules/yaml`、`tests/node_modules/{yaml,@deepseek-ai}`）；③ **技能镜像完整性守卫** `tests/verify-skills-mirror.mjs`——严格 UTF-8 + 前言可解析 + `sync-skills.ps1` 编码回归锁（#63：PS 5.1 下 ANSI 读写会把含非 ASCII 的技能写成非法 UTF-8，致 11/37 技能被加载器拒绝）。环境事实与接口速查出仓外记忆，落 [docs/dev-environment.md](docs/dev-environment.md) 与 [docs/dsh-runtime-cheatsheet.md](docs/dsh-runtime-cheatsheet.md)，由 AGENTS.md 指针引。**沉淀纪律**：仓外（home/REGISTRY.md）只留机器相关的落地记录，可继承的事实回仓。
+
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 
 ## 观察记录（2026-08-19，IRIS ef2ef0b5 会话复盘）

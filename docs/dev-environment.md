@@ -1,0 +1,95 @@
+# 开发环境（源码部署 / 隔离 / 构建）
+
+本文件是本仓**环境事实的唯一来源**：基准纪律、隔离契约、工具链结论、源码部署步骤、构建坑。
+它存在的理由（retro 2026-10-16）：这些事实此前只落在某个 msys2 home 的 REGISTRY.md
+里，**仓外、不可继承**，每个新会话/新机器都要从零试错（本会话大半长度花在这条链上）。
+
+日常改动的验证走 `scripts/verify-all.mjs`（见 README「验证」）；本文件只管**起实例**。
+
+## 0. 基准纪律：工作区是源，部署副本只是副本
+
+- **唯一基准 = 工作区**（本仓 checkout，远端 `ch1bug/dsh-matt-preset`）。一切改动**只提交到工作区**。
+- msys2 侧的源码树 / DSH_HOME / profile **只是部署副本**：可再生、可丢弃，**不承载唯一事实**。
+  机器本地状态（端口、路径、profile 名）记在 `<DSH_HOME>/profiles/<p>/REGISTRY.md`；
+  可继承的事实一律回仓（本文件 + [dsh-runtime-cheatsheet.md](dsh-runtime-cheatsheet.md)）。
+- 副本要刷新时**重新部署**，不要在副本里手改后当基线（会漂移成第二份事实）。
+- 同一 workspace 只保留**一份**部署副本；历史上的散落副本（早期 `<repo>/dsh-src`，与
+  `/home/<user>/dsh-matt-src` 重复）已清理。
+
+## 0.1 msys2 会话引导（复用 Windows 侧配置）
+
+msys 的 `HOME` 不是 Windows 用户目录，默认 PATH 也没有 Windows 的 node/gh ——
+msys 里 `gh auth status`、`node tests/…` 会直接失败。source 一条命令解决：
+
+```bash
+. <repo>/scripts/msys-env.sh      # 想常驻：写进 ~/.bashrc
+```
+
+它只**指向**Windows 的配置（不改、不复制）：`PATH` 加 Windows node / gh /
+Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户目录，
+`COREPACK_HOME` 指向 corepack 缓存。
+
+**PATH 顺序是硬约束**：Windows node 必须优先于 msys 的 ucrt64 node —— 后者上报
+`platform=win32-x64-gnu`，跑套件会以 `0xC06D007F`（过程/DLL 找不到）崩在原生依赖上
+（实测 `verify.mjs` / `verify-dual-env.mjs`）。
+
+## 1. 隔离契约：两个工作区 + 桌面端互不干扰
+
+启动器用 **`DSH_HOME`** 定位 home、用 **`--profile <name>`** 选择 `$DSH_HOME/profiles/<name>`。
+两处都要独立，profile **名**也要不同（防误挂、防误读）。
+
+| 资源 | 本工作区（matt 工作流） | 相邻工作区（shell-host） | 桌面端 |
+| --- | --- | --- | --- |
+| DSH_HOME | msys2 侧独立 home | 各自独立 home | `C:\Users\<user>\.dsh` |
+| profile | `matt-dev` | `dsh-host-dev` | `desktop` |
+| 端口 | 19501 | 19502 | 19387（GUI） |
+| 源码树 | 各自 clone | 各自 clone | 安装版 |
+
+- **`DSH_PROFILE` / `DSH_PROFILE_DIR` 不是启动选择器**：它们是 `dsh-shell-env` 每次
+  模型 shell 调用**注入给模型的输出事实**。拿它们做隔离判断是错的。
+- 桌面端是**稳定升级通道**：开发中的改动不得先装桌面端（CONTEXT「DSH 测试/升级通道分工」）。
+- pnpm store 与 corepack shim 可共享（内容寻址、只读复用），**并发 install 不要共享**。
+
+## 2. 宿主锚点（ADR-0008）
+
+跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.0-rc.2-r1` ↔ 宿主 tag
+`dsh-v0.2.0-rc.2`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
+与锚不符 —— 必须显式 checkout tag。
+
+## 3. 源码部署步骤（msys2 侧）
+
+```bash
+git clone https://github.com/deepseek-ai/deepseek-harness.git <src>
+cd <src> && git fetch --depth 1 origin tag dsh-v0.2.0-rc.2 && git checkout tags/dsh-v0.2.0-rc.2
+pnpm install --ignore-scripts --package-import-method=copy     # 见 §4 工具链
+pnpm run clean                                                 # 见 §4 切 tag
+pnpm run build                                                 # 必须经 pnpm，见 §4
+DSH_HOME=<home> pnpm exec dsh --profile <profile> --no-open --port <port>
+```
+
+首次启动会自动初始化 profile（生成 `cordis.yml`、`.credentials.yaml`、`storages/`）。
+
+## 4. 工具链结论（全部实测，别重复试错）
+
+1. **ucrt64 node 跑 pnpm 装 DSH 本体不可行**：pnpm 加载 N-API 原生件即
+   `napi-sys … Node-API symbol has not been loaded` → panic abort（`--ignore-scripts`
+   也一样）。绕行 = `--package-import-method=copy`（关硬链接），且用 Windows node 装。
+   *（相邻工作区的插件包几乎纯 JS，纯 ucrt64 能过 —— 结论不可类推。）*
+2. **构建期原生件缺口**：ucrt64 node 上报 `platform=win32-x64-gnu`，而 rolldown 等
+   只发布 `-msvc` 绑定 → 构建必须走 **Windows node**。
+3. **RC2 的构建接口**：`scripts/build.ts` 用 `--profile`（alpha HEAD 是
+   `--scope artifacts`），且**必须经 pnpm 调用**（脚本读 `npm_execpath`）→ `pnpm run build`。
+4. **切 tag 后必须 `pnpm run clean`**：`lib/` 被 `.gitignore` 忽略，`git status` 看着
+   干净，实际残留上一 tag 的产物（实测 358 个 `lib/`）→ RC2 构建报
+   `MISSING_EXPORT "principalOf"`（该符号只存在于 alpha 源码）。clean 清掉 369 路径后通过。
+5. **`dsh plugin` 需要 PATH 上有 pnpm**：`corepack enable --install-directory <dir>`
+   装 shim（写 Program Files 会 EPERM）；`dsh plugin --profile <p> add <绝对路径>`。
+6. **msys 的 `pkill` 杀不掉 Windows node 进程**：端口占用报
+   `EADDRINUSE 127.0.0.1:<port>` 时，用 `netstat -ano` 找 pid + `Stop-Process -Id <pid> -Force`。
+
+## 5. 实例相关文档
+
+- 驱动实例 / 读证据 / mock LLM：[dsh-runtime-cheatsheet.md](dsh-runtime-cheatsheet.md)
+- 隔离与构建的**本地落地记录**（每个 home 各一份，机器相关，不入库）：
+  `<DSH_HOME>/profiles/<profile>/REGISTRY.md`
+- 验证入口与门禁：[README「验证」](../README.md)

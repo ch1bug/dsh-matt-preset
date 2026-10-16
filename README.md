@@ -56,80 +56,37 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 
 ## 验证
 
-```bash
-# 依赖解析同部署：把测试的 @deepseek-ai 指到已装 dsh 运行时的包表
-# （Windows 用 junction：cmd /c mklink /J tests\node_modules\@deepseek-ai <dsh>\node_modules\@deepseek-ai）
-mkdir -p tests/node_modules
-ln -s "$(dirname "$(dirname "$(readlink -f "$(which dsh)")")")/node_modules/@deepseek-ai" tests/node_modules/@deepseek-ai
-# 0.2.0-rc 起 preset 走声明注册（不再扫目录 roots）；共享挂具 tests/preset-harness.mjs
-# 自动从已装运行时解析 baseUrl，无需环境变量。
-node tests/verify.mjs              # 挂载套件：handoff 子会话 + 文档首条提示词 + model 路由 + workspace attach
-node tests/verify-persona.mjs      # persona 导语：{{model}}/{{cwd}} 渲染插值
-node tests/verify-workflow-core.mjs  # workflow-core 插件（#54）：注入点插值 spike + L1 verbatim + 单行挂载 + scope 守卫
-node tests/verify-workflow-core-render.mjs  # 真实 composition 渲染面：persona 无正文 / 注入节完整 / 插值 / verbatim + subpath 契约（R1–R5 离线可跑；L1–L2 环境侧需门禁，见下）
-node tests/verify-live-tool-call.mjs  # 调用侧 live：起真实实例 + mock LLM → 真实会话 → 捕获真实模型请求 → 真实执行工具（需门禁，见下）
-node tests/verify-live-real-llm.mjs  # 真实 LLM 层：真端点 + 真凭据跑真 turn → 供应商接受 + 真实模型发起工具调用 + 实例执行（opt-in，见下）
-node tests/verify-enforcer.mjs     # workflow-enforcer V1–V15（基线/高危一次性/白名单/关票抽查/建票提醒/批内收尾 AUTO-HANDOFF/scope/无噪音/沙箱门禁）
-node tests/verify-production.mjs   # 生产级：真实 persona 全文 + 真实 minimal persona
-node tests/verify-lang-count.mjs   # 注入次数计数：GATES 每轮 1 / LANGBASE 会话 1 / LANGTRIGGER 触发 1
-node tests/verify-lang-enforcer.mjs    # 语言知识包 V1–V5（命中注入/触发/会话一次/disable/非 matt 会话）
-node tests/verify-lang-asm.mjs     # 语言包系统提示词组装（真实 matt persona + lang 段）
-node tests/workflow-enforcer-grill-contract.mjs  # enforcer × grill 模式契约
-node tests/verify-bundle-sync.mjs  # cordis.patch.yml 字节级锁（agent.cordis.yml 唯一手改源）
-node tests/sandcastle-e2e.mjs      # sandcastle 三命令端到端（33 断言：审计/重叠/夜跑/幂等/simplify/model-lane）
-```
-
-**环境侧用例的门禁（loud skip）**：`verify-workflow-core-render.mjs` 的
-安装/配置/新建会话环（N1–N2 / L1–L2 / S1–S3）需要真实 profile 实例；未设置门禁时
-**响亮跳过**（打印原因、不静默当 pass），常规套件在无环境下仍全绿。
-开启方式（源码部署实例，宿主须锚 RC2）：
+一条命令（本仓不用 GitHub Actions，**本地套件即唯一验收通道**）：
 
 ```bash
-export DSH_MATT_LIVE_HOME=/home/<user>/dsh-matt-home        # 独立 DSH_HOME
-export DSH_MATT_LIVE_PROFILE=matt-dev                      # profile 名
-export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts   # 源码检出 CLI 入口
-node tests/verify-workflow-core-render.mjs                 # 覆盖四环：安装→配置→调用→新建会话
+node scripts/link-runtime-deps.mjs   # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
+pnpm test                            # == node scripts/verify-all.mjs
 ```
 
-四环断言一览（门禁开启时）：**N1/N2 安装**（bundle 注册 + node_modules 链接）→
-**L1/L2 配置**（`--dump-config` 成功 + 组合树含 workflow-core 行）→
-**R1–R5 调用**（渲染面）→ **S1–S3 新建会话**（真实建会话 + 该会话提示词含注入节 + 会话级插值）。
+`verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / SKIP，末尾如实汇总：
+**`PASS*` = 该用例含 loud skip，其环境侧断言未验证**（绿不等于全验过）。
 
-**调用侧 live 用例**（`verify-live-tool-call.mjs`，门禁 `DSH_MATT_LIVE_CLI`）：
-起**真实 dsh web 实例**（源码部署）+ **本地 mock LLM**（Anthropic SSE，`DEEPSEEK_BASE_URL`
-指向它）→ token 换 cookie → RPC `session/create`（带 matt preset）+ `session/prompt`
-→ 捕获**实例发出的真实模型请求**（断言 system 含注入正文、无字面 `{{}}`）→ mock 返回
-一次工具调用 → 断言**实例真的执行了工具**（下一轮请求带 `tool_result`）。
-隔离：临时 `DSH_HOME` + `--port 0`（OS 临时端口），**不占用任何固定端口**；无需任何
-外部 LLM 凭据。
+**环境侧用例的门禁**（未设置则响亮跳过，不阻塞常规套件）：
+
+| 门禁 | 开启的验证 |
+| --- | --- |
+| `DSH_MATT_LIVE_HOME` + `DSH_MATT_LIVE_PROFILE` + `DSH_MATT_LIVE_CLI` | 真实实例的**安装 → 配置 → 调用 → 新建会话**四环（`verify-workflow-core-render.mjs`） |
+| `DSH_MATT_LIVE_CLI` | 调用侧 live：mock LLM + 真实实例 + 捕获真实模型请求 + **真实工具执行**（`verify-live-tool-call.mjs`） |
+| 上行 + `DEEPSEEK_API_KEY`（或 `DSH_MATT_REAL_CREDENTIALS_SOURCE`） | 真实 LLM 层：真端点接受 + **真实模型发起工具调用**（`verify-live-real-llm.mjs`） |
+| `DSH_MATT_INSTALLER=1` / `DSH_MATT_E2E=1` | 安装器（需本机 dsh profile 布局）/ sandcastle e2e（需 podman） |
 
 ```bash
-export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts
-node tests/verify-live-tool-call.mjs
+export DSH_MATT_LIVE_CLI=<src>/apps/cli/src/bin.ts
+export DSH_MATT_LIVE_HOME=<home>  DSH_MATT_LIVE_PROFILE=matt-dev
+pnpm test
 ```
 
-**真实 LLM 层**（`verify-live-real-llm.mjs`，opt-in）：mock 层证明的是"实例这一侧到
-wire 为止全通"（真实组合树 / 建会话 / 发出的请求字节 / 工具执行），**不能**证明
-① 真实端点是否接受该请求（鉴权、模型名、系统提示词长度上限、字段兼容）；
-② 真实模型是否按工作流走、是否真发起工具调用；③ 真实凭据路径。本层补这三条：
-真端点跑一次 turn，用 RPC 投影读 + `session/page` 耐久读断言——
-供应商接受（`outputTokens>0`）、真实 `assistant/message`、真实 `tool/call` + `tool/result`。
+**证据分层（别拿低层冒充高层）**：离线渲染面 → mock 调用侧（真实实例 + 真实发出的
+请求字节 + 工具执行循环）→ 真实 LLM 层（供应商接受 + 真实模型行为）。mock 层**不能**
+替代真实层。
 
-凭据二选一：`DEEPSEEK_API_KEY`（仅经 env 传入，不落盘）；或
-`DSH_MATT_REAL_CREDENTIALS_SOURCE` 指向含 `deepseek-account-platform/*` 记录的
-credentials.yaml（账号授权路线，**只读**取出记录写入临时 home，跑完随临时目录删除）。
-
-```bash
-export DSH_MATT_LIVE_CLI=/home/<user>/dsh-matt-src/apps/cli/src/bin.ts
-# 账号路线（默认尝试桌面 home 的 credentials.yaml）
-node tests/verify-live-real-llm.mjs
-```
-
-> 实测教训：会话日志（`sessions/**/session.v4.jsonl.zstd`）是**批量落盘**的，
-> 真实 turn 早已完成时文件里可能只有 header 行 —— **不要用文件当实时证据**，
-> 用 RPC 投影（`session/projections`）与 `session/page` 耐久读。
-> typert RPC 的参数名逐方法不同（`request` / `_request` / 无参），猜错会得到
-> `gateway/arguments-invalid`。
+其余接口细节按需读：[驱动实例/读耐久证据/mock LLM/账号路由](docs/dsh-runtime-cheatsheet.md)、
+[源码部署与构建](docs/dev-environment.md)。
 
 ## 目录
 
@@ -147,10 +104,17 @@ dsh-matt-preset/
 │   ├── README.md
 │   └── templates/                # Dockerfile / dsh.ts adapter / audit-ticket / run-ticket / night-run / lib / worker-context
 ├── CONTEXT.md                    # 术语表 + 决策（D1–D42）
+├── AGENTS.md                     # steering 入口（导航指针）
 ├── docs/adr/                     # 架构决策记录
+├── docs/agents/                  # issue-tracker / triage-labels / domain 约定
+├── docs/dev-environment.md       # 源码部署 / 隔离契约 / 构建坑
+├── docs/dsh-runtime-cheatsheet.md # 驱动实例 / 读耐久证据 / RPC 参数名
 ├── docs/workflow-enforcer.md     # enforcer 使用文档
 ├── docs/workflow-session-boundaries.md  # 会话边界与成本模型设计视图
-└── tests/                        # 14 项：verify / persona / workflow-core / workflow-core-render / live-tool-call / live-real-llm / enforcer / production / lang-count / lang-enforcer / lang-asm / grill-contract / bundle-sync / sandcastle-e2e
+├── scripts/verify-all.mjs        # 唯一检查入口（pnpm test）
+├── scripts/link-runtime-deps.mjs # 一条命令补齐测试所需运行时链接
+├── scripts/sync-skills.ps1/.sh   # 上游技能镜像同步（编码纪律见 #63）
+└── tests/                        # 用例（清单由 verify-all 枚举，勿在此复述）
 ```
 
 ## License
