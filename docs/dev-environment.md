@@ -259,7 +259,7 @@ web 模板初始化（`--profile <p> --from-default-profile web …`）。`dsh p
    *（相邻工作区的插件包几乎纯 JS，纯 ucrt64 能过 —— 结论不可类推。）*
 2. **构建期原生件缺口**：ucrt64 node 上报 `platform=win32-x64-gnu`，而 rolldown 等
    只发布 `-msvc` 绑定 → 构建必须走 **Windows node**。
-3. **RC2 的构建接口**：`scripts/build.ts` 用 `--profile`（alpha HEAD 是
+3. **RC2 的构建接口**：**DSH 源码树**的 `<src>/scripts/build.ts` 用 `--profile`（alpha HEAD 是
    `--scope artifacts`），且**必须经 pnpm 调用**（脚本读 `npm_execpath`）→ `pnpm run build`。
 4. **切 tag 后必须 `pnpm run clean`**：`lib/` 被 `.gitignore` 忽略，`git status` 看着
    干净，实际残留上一 tag 的产物（实测 358 个 `lib/`）→ RC2 构建报

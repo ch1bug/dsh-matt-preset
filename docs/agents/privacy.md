@@ -136,6 +136,6 @@ python -m git_filter_repo --force \
     `$HOME` / `%USERPROFILE%` / `$(whoami)` / `~`，以及邻仓既有的 `me` / `u` / `x` / `alice`。
     任一边引入新写法就同步补——否则跨仓跑守卫会互相报红（实测：我方曾因漏放行 `me`/`u`/`x`/`alice`
     把对方干净的仓报红 6 处）。
-  - **待移植：引用哈希守卫**（邻仓 `tests/doc-references.spec.ts` 第 3 条）。口径 = **白名单**
+  - **待移植：引用哈希守卫**（邻仓 `dsh-shell-host/tests/doc-references.spec.ts` 第 3 条）。口径 = **白名单**
     `HASH_ALLOWLIST`（会话 id 也登记进去，注释写明"这是会话 id 不是提交"）+ `docs/adr/**` 整体排除；
     **不按"8 位 hex"之类的形状放宽**——那会连真实短 SHA 引用一起放过，而它们正是该守卫要抓的。

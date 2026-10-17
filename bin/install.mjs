@@ -26,7 +26,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promi
 import { readFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
@@ -125,8 +125,11 @@ function mountOrWarn(profile, step, what) {
  *     `C:\msys64\tmp\…`（`无法 open: No such file or directory`）。
  * 所以不赌宿主方言：npm pack 产出的是 gzip 包着的 ustar（长路径走 pax/GNU 扩展），
  * 这里自己读，任何平台行为一致。
+ * 解包 `--from` 的 tgz：**只**写 dest 之内（名字按任一分隔符切段、拒收 `..`，并用规整后的
+ * 相对路径兜底校验"仍在 dest 内"—— tar 规范用 `/`，伪造归档可以写 `\`，而 Windows 的
+ * `join(dest, '..\\..\\x')` 会规整逃出 dest）。导出给 tests/verify-install-tarball.mjs 用。
  */
-async function extractTarball(tarball, dest) {
+export async function extractTarball(tarball, dest) {
   const buf = gunzipSync(await readFile(tarball))
   /** tar 头字段：NUL 结尾、按八进制/字符串读取。 */
   const field = (header, start, len) => header.subarray(start, start + len).toString('utf8').replace(/\0[\s\S]*$/u, '').trim()
@@ -153,12 +156,20 @@ async function extractTarball(tarball, dest) {
     } else {
       const full = (pendingName ?? (prefix ? `${prefix}/${rawName}` : rawName)).replace(/^\.\//u, '')
       pendingName = undefined
-      if (full !== '' && !full.split('/').includes('..')) {
-        const target = join(dest, full)
-        if (type === '5') await mkdir(target, { recursive: true })
-        else if (type === '0' || type === '\0') {
-          await mkdir(dirname(target), { recursive: true })
-          await writeFile(target, buf.subarray(dataStart, dataEnd))
+      // 段切分按**任一分隔符**：tar 规范用 `/`，但伪造归档可以写 `\`，而 Windows 上
+      // `join(dest, '..\\..\\x')` 会规整逃出 dest（原过滤只 `split('/')`，抓不到）。
+      // 空段与 `.` 丢弃，`..` 一律拒收。
+      const parts = full.split(/[\\/]/u).filter((p) => p !== '' && p !== '.')
+      if (parts.length > 0 && !parts.includes('..')) {
+        const target = join(dest, ...parts)
+        // 兜底：规整后的相对路径必须仍在 dest 之内（同时挡住绝对名与跨盘名）。
+        const rel = relative(resolve(dest), resolve(target))
+        if (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)) {
+          if (type === '5') await mkdir(target, { recursive: true })
+          else if (type === '0' || type === '\0') {
+            await mkdir(dirname(target), { recursive: true })
+            await writeFile(target, buf.subarray(dataStart, dataEnd))
+          }
         }
       }
     }
