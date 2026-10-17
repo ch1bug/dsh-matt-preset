@@ -50,12 +50,20 @@
   git -C "$HOME/dsh-matt-preset" merge --ff-only FETCH_HEAD
   ```
 
-- **tag 必须一起同步，且要 `--force`**（邻仓 `dsh-shell-host` 2026-10-17 实测；git 语义通用）：只
-  `fetch origin main` 时 tag **不进同步面**——不报错、退出码 0、树干净，副本静默停在旧 tag；已存在的
-  tag 默认 refuse clobber，只打一行 `! [rejected] … (would clobber existing tag)` 就略过该 ref。
-  后果：`main` 同提交、工作树干净，**旧 tag 让重写前的提交仍经 `refs/tags/*` 可达**，副本侧隐私守卫
-  于是判红（看着干净的副本判不出绿）。处置：`git tag -d <tag>` + `fetch --tags --force`，再按
-  [privacy.md](agents/privacy.md) 清本机悬挂对象。
+- **tag 必须一起同步，且要 `--force`**（本机 2026-10-17 两形态探针复核，git 2.55/2.56 一致）：两种
+  "同步不到 tag" 的形态**行为不同，别混说**——
+  - `fetch origin main`（无 `--tags`）：tag **根本不进同步面** —— 不报错、**退出码 0**、无任何 tag 提示，
+    副本**静默**停在旧 tag。这才是"静默"的那一半。
+  - `fetch --tags origin` 而本地已有同名 tag 且对象不同：打一行
+    `! [rejected] <tag> -> <tag> (would clobber existing tag)` 略过该 ref，**且该次 fetch 退出码为 1**
+    （同一 fetch 里 `main` 照常更新，看着像同步成功）→ 脚本里写成 `fetch … && merge …` 的会在此**断链**。
+  - 升级口径（同步块里那两行、**各自独立执行**）实测：`fetch --prune --tags --force origin` → 退出码 0、
+    tag 一次性落位；随后 `merge --ff-only FETCH_HEAD` 正常快进。
+
+  后果：`main` 同提交、工作树干净，**只有 tag 落后** —— 落后的 tag 让**重写前**的提交仍经 `refs/tags/*`
+  **可达**，而 `privacy-scan` 用 `git log --all` + `for-each-ref` 扫面（悬挂/不可达对象不在扫描面），
+  于是副本侧判红（看着干净的副本判不出绿）。处置：`git tag -d <tag>` + `fetch --tags --force` 对齐，
+  再按 [privacy.md](agents/privacy.md) 清本机悬挂对象。
 - **副本目录名不必等于 `dsh-matt-preset`**（2026-10-17 修）：检出目录名曾是硬约束——
   `tests/verify.mjs` 把生产名 `dsh-matt-preset/x.mjs` 拼到 `<repo>/..` 上，取名 `…-src` 的副本会被
   改写成不存在的兄弟路径，而 loader 的报错把锅甩给插件行（`workflow-core … never started`）。
