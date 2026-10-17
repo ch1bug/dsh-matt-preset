@@ -66,3 +66,27 @@ Agent Teams（任务板 blocked_by=任务图、2 个 durable teammates、send_me
   处置记录在彼文，不再"改判"原文决策。
 - pilot 暴露的模板质量尾巴收敛在 #12–#15（不阻塞流水线复用）；端到端冒场脚本
   暂存 `.scratch/e2e-sandcastle.sh`（15/15），#15 负责提升进 tests/。
+
+## Amendment（2026-10-17）：批末收尾适用 #71 的批末 retro 规则（书面锚点，不引机制）
+
+本车道的**收尾**（**Lead 会话、批末 push、CI 全绿**）**适用**
+[ADR-0002](0002-batch-mode.md) / #71 的**批末 retro 规则**：批末 push 后等 CI 全绿 → 在 Lead 会话
+跑一次 retro（聚合同批 `.scratch/retro/*.md`、去重合并、按严重度一次呈现）→ 呈现后写
+`.scratch/retro/.aggregated` → 把 `retro: done @ <commit>` 写进 `.scratch/batch-state.md`。
+形状与标记语义见 [docs/batch-state.md](../batch-state.md)（单一事实源），触发面见
+[docs/workflow-enforcer.md](../workflow-enforcer.md)——**本 ADR 不复述字段、不复述判定面**。
+
+**为什么不需要专用机制**（本车道的适用性由构造保证，而非由新机制保证）：
+
+- 本车道的 **Lead 会话就在主 cwd**（流水线是"一个会话一条流水线"，见上文结论 4：票的 grain
+  从"会话"降到"teammate 任务"，编排与决策仍在 Lead）——**teammate 在 worktree 内干活，但收尾
+  动作（批末 push、跑 retro、写标记）恒由主 cwd 的 Lead 执行**。
+- 于是 #71 规则依赖的两个前提**按构造即成立**：(a) 收尾处的 cwd 里
+  `.scratch/batch-state.md` **存在**（批次状态是显式宣告的，不是探测出来的）；(b) 批末 push 后
+  的 **CI 全绿信号**由既有远程 CI 给出，无需为本车道另立信号。
+- 因此**复用** #71 的规则与标记即可闭环，**不新增**信号 / 状态 / 配置，也不新增 enforcer
+  关键词或用例（**零机制**：本车道没有任何为它而生的仓内机制，enforcer 对本车道与 matt 批
+  一视同仁）。这与 ADR-0005 的处置同形——**承接思想与规则、不去改判他人决策**。
+
+**不补 ADR-0005 备注**：本车道不改 ADR-0005 的决策（上游 /implement-spec 技能本身仍"暂不
+采用"，其流水线思想已由本 ADR 承接，见彼文修订注）；为避免双写，本 ADR 不再追加对它的备注。

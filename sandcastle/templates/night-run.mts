@@ -18,6 +18,8 @@
  *     （ticket-audit 抽查 + 批末 push 走 summary gate）
  *   - digest 附波次合并提示：merged 票按 3–5 票一波分组，波内 rebase onto master
  *     串行（本模板只给分组与提示文本；真执行归编排会话）
+ *   - digest 附「retro 素材」段：返工 / 踩踏 / 降级 / 波次合并的**摘要素材**，喂给
+ *     清晨主会话的批末 retro（#71 规则）。**容器内不跑 retro**（Q73-1）：这里只喂料。
  *
  * 退出码：0=全部处理完  2=配额熔断提前停止（队列可重跑续命）
  */
@@ -168,6 +170,118 @@ export function renderWaveHints(waves: Wave[]): string {
   return lines.join("\n");
 }
 
+// ============================================================
+// digest —— 素材与收口（纯函数，供冒烟测试直接导入）
+//
+// ⚠ 容器内不跑 retro（#73 Q73-1）。retro 的**决策路径**（候选交 human 拍板）只在
+// 清晨主会话：批末 push 后的 CI 全绿信号正好落在那一刻，候选也只有在那里才能呈现
+// 给人类。故**本文件是"喂料"而非"判定"** —— 它只把夜间跑出来的素材摘出来写进
+// digest，**不包含任何 retro 触发/判定逻辑**（没有 push 关键词匹配、没有文本面
+// 扫描、不读 `.scratch/batch-state.md`）。判定面恒为 `(toolName, argv)` + 标记，
+// 那份判据的唯一实现在 enforcer（`workflow-enforcer.mjs` 的 #71 触发面，
+// 判定面逐字口径见 `docs/workflow-enforcer.md`）；形状见 `docs/batch-state.md`。
+// ============================================================
+
+/** run-ticket 状态 → retro 素材类别（#71 批末 retro 的候选来源）。 */
+export const RETRO_STATUS_CLASSES: { status: string; label: string }[] = [
+  { status: "parked-verify", label: "降级/验证失败" },
+  { status: "parked-conflict", label: "降级/冲突" },
+  { status: "parked-timeout", label: "降级/超时" },
+  { status: "parked-empty", label: "降级/空改" },
+  { status: "needs-simplify", label: "降级/待简化" },
+  { status: "quota-stop", label: "熔断/配额" },
+];
+
+/** digest 行里出现这几类**关键词**同样计入"返工"素材（状态字符串之外的信号）。 */
+export const RETRO_NOTE_HINTS: { hint: string; label: string }[] = [
+  { hint: "返工", label: "返工" },
+  { hint: "rework", label: "返工" },
+];
+
+/** 逐票结果（night-run 主循环的产物；`note` 为 run-ticket 输出尾部）。 */
+export interface RunResult {
+  id: string;
+  status: string;
+  note: string;
+}
+
+/**
+ * `RETRO STATUS / NOTE` 单元格：` | ` → ` / `（防表格串列）、折叠换行 → 空格、超长截断。
+ * **主流程的说明列也走这里**（`digest` 表格那行），所以全文件只有一份转义口径 ——
+ * 早先注释这么声称、却没让主流程复用（主流程是内联的 `replace/ slice`），
+ * 复核实测抓到该不一致；现在两处真的同源。
+ */
+export function digestCell(text: string, max: number): string {
+  return text.replace(/\|/g, "/").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/**
+ * 「retro 素材」段 —— **喂料，不是判定输入**。
+ *
+ * 这是什么：给清晨主会话的**批末 retro**（#71：聚合同批 `.scratch/retro/*.md` →
+ * 去重合并记次数 → 按严重度排序 → 一次呈现）准备**摘要素材**，四类：
+ *   1. **返工**：note 里出现返工/rework 的票（真返工由收口审计确认）；
+ *   2. **踩踏**：serial 组（写域重叠）——**波次合并摘要**与它同源，重叠票靠
+ *      同波内串行解决，踩踏是否真发生由收口审计确认；
+ *   3. **降级**：parked + needs-simplify + 配额熔断的票（含 note 片段，必须
+ *      带证据路径/命令才能进候选——材料对着 note 复核）；
+ *   4. **波次合并摘要**：`planWaves`/`loadSerialGroups` 的产物（几波、serial
+ *      组、超 5 票的波），与波次提示段共用同一个 `waves`，不另算一遍。
+ *
+ * ⚠ **本段不参与任何判定**：它不触发 retro、不写 `.scratch/`、不判断"该不该聚合"。
+ * 发现 → 候选 → human 拍板的链条只在清晨主会话（Q73-1）；
+ * 这里输出的是**给那条链的输入文本**，仅此而已。
+ */
+export function renderRetroMaterial(
+  results: RunResult[],
+  waves: Wave[],
+  serialGroups: string[][],
+): string {
+  const classLabel = new Map(RETRO_STATUS_CLASSES.map((c) => [c.status, c.label]));
+  // 返工只有**一种**判据：note 里出现返工信号（真返工由收口审计确认）。
+  // 早先还判过 `r.status === "rework"` —— 那是**永假分支**：`statusForExit`（见下）只映出
+  // merged / parked-* / needs-simplify / failed，主循环从不产出 `"rework"`。死码会误导读者
+  // 以为存在这个状态，故删（复核实测抓到）。
+  const rework = results.filter((r) =>
+    RETRO_NOTE_HINTS.some((h) => r.note.toLowerCase().includes(h.hint.toLowerCase())),
+  );
+  const degraded = results.filter((r) => classLabel.has(r.status));
+  const overlaps = serialGroups.filter((group) => group.some((id) => results.some((r) => r.id === id)));
+
+  const lines: string[] = [
+    "retro 素材（喂清晨主会话的批末 retro；**本段不参与判定**）：",
+    `- 返工：${rework.length === 0 ? "无信号" : rework.map((r) => `#${r.id}（${r.status}）`).join("、")}`,
+    `- 踩踏：serial 组 ${overlaps.length} 组${overlaps.length === 0 ? "（写域无重叠）" : ""} —— ${overlaps.map((g) => g.map((t) => `#${t}`).join("/")).join("、") || "—"}；真踩踏与否由收口审计确认`,
+    `- 降级：${degraded.length === 0 ? "无" : degraded.map((r) => `${classLabel.get(r.status)} #${r.id}`).join("、")}`,
+    // 空态与其余三类同形：明确写出"无"，而不是只留一个 `0 波` 的数字（复核实测：
+    // 空批时四类里只有这一类没有空态文案）。
+    `- 波次合并摘要：${waves.length === 0 ? "无（本轮无 merged 票，未成波）" : `${waves.length} 波（${waves.map((w) => `第 ${w.wave} 波 ${w.tickets.length} 票`).join("、")}；波内 rebase onto master 串行）`}`,
+  ];
+  for (const r of degraded) {
+    lines.push(`  - #${r.id} note：${digestCell(r.note, 120) || "(空)"}`);
+  }
+  lines.push(
+    "- 编辑入口（人在环）：这些是**候选素材**——只有「发现 → 候选 → human 拍板」这一条路；",
+    "  想补/改素材**直接编辑本 digest**（它是本次夜跑的记录，不是机器状态），不必去动任何标记文件。",
+  );
+  return lines.join("\n");
+}
+
+/**
+ * digest 的「收口提醒」。retro 步骤**逐条点名**——但**动作仍在主会话**：
+ * 容器里没有任何一步会写 `.scratch/retro/` 或标记（Q73-1，本文件不跑 retro）。
+ * 标记文件名与语义的单一事实源是 `docs/batch-state.md`。
+ */
+export function renderWrapUpHints(): string[] {
+  return [
+    "1. 对 merged 票按比例跑 `ticket-audit` 抽查（AC 覆盖/测试真实性/验证重放）",
+    "2. 抽查通过 → 批末 push 走 summary gate（一次 push，远程 CI 全绿为完成）",
+    "3. **批末 retro（在清晨主会话跑，不在容器内）**：CI 全绿后跑本会话 retro → 读齐同批 `.scratch/retro/*.md` → **去重合并（同一问题记次数）** → 按严重度排序 → **一次呈现**给 human（每条标来源票号/会话）",
+    "4. 呈现之后写 `.scratch/retro/.aggregated`（跨会话的「聚合已呈现」抑制者——批末聚合**每批至多一次**），再把 `retro: done @ <commit>` 写进 `.scratch/batch-state.md`",
+    "5. parked 票：verify/conflict → 同沙箱返工一次或降级白天 batch",
+  ];
+}
+
 /** run-ticket.mts 退出码 → 状态（消费 run-ticket 导出的 EXIT_STATUS，单一事实源）。 */
 export function statusForExit(code: number | null): string {
   const map: Record<number, string> = {
@@ -259,7 +373,12 @@ for (const t of tickets) {
 
 // —— 波次合并提示（merged 票 3–5 一波；serial 组来自 audits touch-overlap，软依赖，缺省按默认分组）——
 const mergedIds = results.filter((r) => r.status === "merged").map((r) => r.id);
-const waveHints = renderWaveHints(planWaves(mergedIds, loadSerialGroups(".sandcastle/audits")));
+const serialGroups = loadSerialGroups(".sandcastle/audits");
+const waves = planWaves(mergedIds, serialGroups);
+const waveHints = renderWaveHints(waves);
+// retro 素材段与波次提示共用同一份 `waves`/`serialGroups`（不重复计算）——
+// 它是**喂料**，收口提醒里的 retro 步骤仍是主会话的动作（容器内不跑 retro，Q73-1）。
+const retroMaterial = renderRetroMaterial(results, waves, serialGroups);
 
 // —— 清晨 digest ——
 mkdirSync(".sandcastle/digest", { recursive: true });
@@ -270,16 +389,16 @@ const digest = [
   "",
   `| 票 | 状态 | 说明 |`,
   `| --- | --- | --- |`,
-  ...results.map((r) => `| #${r.id} | ${r.status} | ${r.note.replace(/\|/g, "/").slice(0, 120)} |`),
+  ...results.map((r) => `| #${r.id} | ${r.status} | ${digestCell(r.note, 120)} |`),
   "",
   `统计：${JSON.stringify(count)}`,
   "",
   waveHints,
   "",
+  retroMaterial,
+  "",
   "收口提醒：",
-  "1. 对 merged 票按比例跑 `ticket-audit` 抽查（AC 覆盖/测试真实性/验证重放）",
-  "2. 抽查通过 → 批末 push 走 summary gate（一次 push，远程 CI 全绿为完成）",
-  "3. parked 票：verify/conflict → 同沙箱返工一次或降级白天 batch",
+  ...renderWrapUpHints(),
 ].join("\n");
 writeFileSync(digestPath, digest, "utf8");
 console.log(`\n${digest}\n\ndigest → ${digestPath}`);

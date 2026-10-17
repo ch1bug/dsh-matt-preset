@@ -68,6 +68,13 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 # ③ 早晨：读 .sandcastle/digest/<stamp>.md → ticket-audit 抽查 → 批末 push 过 summary gate
 ```
 
+- **批末收尾适用 #71 的批末 retro 规则**（车道适用范围见
+  [docs/batch-state.md](../docs/batch-state.md) 的「适用车道」节）：**批末 push + CI 全绿 → 在清晨
+  主会话跑 retro**（读齐同批 `.scratch/retro/*.md` → 去重合并 → 一次呈现 → 写
+  `.scratch/retro/.aggregated` → 把 `retro: done @ <commit>` 写进 `.scratch/batch-state.md`）。
+  **容器内不跑 retro**：夜批只把 digest 的「retro 素材」段（返工 / 踩踏 / 降级 / 波次合并摘要）
+  当**喂料**——候选交 human 的决策路径只在清晨主会话，喂料不参与判定
+  （**复用 #71 的标记，无专用机制 / 无专用状态文件**）
 - **检查点**：每票完成写 `.sandcastle/state/<id>.json`（status/commits/verify/log），
   merged/pr 的票重跑自动跳过——崩溃从断点继续，不从头再来
 - **波次合并提示**（已落地）：digest 末尾附 merged 票的 3–5 票一波分组建议（纯提示，

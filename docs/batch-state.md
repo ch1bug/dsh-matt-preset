@@ -92,6 +92,18 @@ enforcer 是 reminder-only，**只读标记、不写文件**。
 间接 push（经脚本）与 PTY 分片写入**一律不触发**，交事实探测兜底（**宁严勿宽**：误触发白跑一次
 retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字口径见 `docs/workflow-enforcer.md`。
 
+## 适用车道（哪些车道适用这套规则、各自无需什么）
+
+三条车道**共用**同一份批末收尾规则（本文件的形状 + `retro:` / `.aggregated` 标记 + #71 的
+`(toolName, argv)` 触发面）——差别只在**收尾会话在哪、靠什么信号判"批末"**，不在机制。
+各车道**只声明适用范围，不复述字段**（形状见上文；车道权威口径见各自 ADR）：
+
+| 车道 | 适用什么 | 无需什么 |
+| --- | --- | --- |
+| **matt 批**（白天，ADR-0002） | 宣告批次 → 写 `.scratch/batch-state.md`；批末 push + CI 全绿 → 主会话跑批末 retro。**规则原生于此**，其余车道是它的复用者。 | 无需专用机制——它就是 #71 的基准形态（收尾会话 = 批末那个 main-cwd 会话）。 |
+| **沙箱夜批 Y**（ADR-0003，落地 #73） | 同上：批末 push + CI 全绿 → **主会话**跑批末 retro（聚合 `.scratch/retro/*.md` → 去重一次呈现 → 写 `.aggregated` → 写 `retro: done @ <commit>`）。 | **复用 #71 的标记**（`.scratch/batch-state.md` + `retro:` / `.aggregated`）——**无专用状态文件、无专用标记、无新机制**。容器内**不跑 retro**：夜间只把 digest 的「retro 素材」段当**喂料**（喂料不参与判定）；候选交 human 的**决策路径只在清晨主会话**（CI 全绿信号正好落在那一刻）。 |
+| **Teams 流水线**（ADR-0006） | 同上：批末 push + CI 全绿 → **Lead 会话**跑批末 retro（聚合 `.scratch/retro/*.md` → 去重一次呈现 → 写 `.aggregated` → 写 `retro: done @ <commit>`）。流水线是"一个会话一条流水线"，票的 grain 降到 teammate 任务，**收尾动作恒由主 cwd 的 Lead 执行**。 | **复用 #71 的规则与标记**（`.scratch/batch-state.md` + `retro:` / `.aggregated`）——**无专用信号、无专用状态、无新机制**：收尾处主 cwd 里有 batch-state.md、批末 push 后有既有 CI 绿信号，两个前提**按构造即成立**，故无需为本车道另立任何东西。 |
+
 ## 指针（只留指针，不复述）
 
 - 决策：`CONTEXT.md` **D31**（批次模式 / 护栏 a·b·c / 状态显式化）、**D33**（一票一会话，
