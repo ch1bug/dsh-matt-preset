@@ -202,7 +202,7 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
 })
 
 if (dshOnPath) {
-  await test('e2e: installed preset mounts on rc.2 (dump-config shows the row, plugin imports)', async () => {
+  await test('e2e: installed preset mounts on the current anchor (dump-config shows the row, plugin imports)', async () => {
     const home = join(tmp, 'e2e')
     const r = run(['install', '--profile', 'web'], home)
     assert.equal(r.status, 0, `install exit ${r.status}: ${r.stderr}`)
