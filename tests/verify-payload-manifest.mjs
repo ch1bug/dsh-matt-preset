@@ -58,12 +58,19 @@ if (entries.length >= 10 && new Set(entries).size === entries.length) {
 }
 
 // ── P3: bundle 载体必须在 payload 里（否则挂载成功但无 patch 可装载，#28） ────
+// #99：`dsh.bundle.patch` 由**字符串变数组**（一个 bundle 四个模式，ADR-0015），
+// 断言随之从"取出那一条"变成"**每一条**都在 payload 内"——语义**加强**而非放宽：
+// 声明里任何一份 patch 缺席，挂载都会少一个模式（或整包挂不上）。
 const patch = PKG.dsh?.bundle?.patch
-const patchPath = typeof patch === 'string' ? patch.replace(/^\.\//, '') : undefined
-if (patchPath !== undefined && entries.includes(patchPath)) {
-  ok('P3. the declared bundle patch rides in the payload', patchPath)
+const patchPaths = (Array.isArray(patch) ? patch : [patch])
+  .filter((p) => typeof p === 'string')
+  .map((p) => p.replace(/^\.\//, ''))
+const absentPatches = patchPaths.filter((p) => !entries.includes(p))
+if (patchPaths.length > 0 && absentPatches.length === 0) {
+  ok('P3. every declared bundle patch rides in the payload', patchPaths.join(', '))
 } else {
-  bad('P3. bundle patch in payload', `declared=${String(patchPath)} present=${String(entries.includes(patchPath))}`)
+  bad('P3. bundle patch in payload',
+    `declared=${JSON.stringify(patchPaths)} absent=${JSON.stringify(absentPatches)}`)
 }
 
 // ── P4–P6: 展开规则本身（#66 的票面现象，在临时包上离线复现） ────────────────

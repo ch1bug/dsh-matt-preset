@@ -187,13 +187,13 @@ if (duplicateBodies.length === 0)
   ok('AC3e. every skeleton section appears exactly once in the standard render')
 else bad('AC3e. duplicated skeleton bodies', duplicateBodies.join(', '))
 
-// The creative profile inserts after the WHOLE enforcement block: the split
+// The cordis profile inserts after the WHOLE enforcement block: the split
 // moved that anchor, so this guards the composed ORDER, not just presence.
-const creativeDelta = core.parseSections(lf(readFileSync(REPO + '/workflow-profile-creative.txt', 'utf8')))
-const creativeIds = core.composeSections(parsed.sections, creativeDelta.sections).map(s => s.id)
-if (groupIsContiguous(creativeIds) && creativeIds.indexOf('creator-context') === creativeIds.indexOf('enforcement-recovery') + 1)
-  ok('AC3f. the creative profile still lands AFTER the whole enforcement block (anchor migrated with the split)')
-else bad('AC3f. creative insertion point', creativeIds.join(', '))
+const cordisDelta = core.parseSections(lf(readFileSync(REPO + '/workflow-profile-cordis.txt', 'utf8')))
+const cordisIds = core.composeSections(parsed.sections, cordisDelta.sections).map(s => s.id)
+if (groupIsContiguous(cordisIds) && cordisIds.indexOf('creator-context') === cordisIds.indexOf('enforcement-recovery') + 1)
+  ok('AC3f. the cordis profile still lands AFTER the whole enforcement block (anchor migrated with the split)')
+else bad('AC3f. cordis insertion point', cordisIds.join(', '))
 
 // ── AC1: the ptc profile (program-first tool surface, gates unchanged) ──────
 const PTC_DELTA_RAW = readOrNull(REPO + '/workflow-profile-ptc.txt')
@@ -206,7 +206,7 @@ const added = ptcDelta.sections.map(s => s.id).filter(id => !ids.includes(id))
 const ptcIds = core.composeSections(parsed.sections, ptcDelta.sections).map(s => s.id)
 const ptcText = core.joinSections(core.composeSections(parsed.sections, ptcDelta.sections), parsed.trailingNewline)
 
-if (Object.keys(core.PROFILES).sort().join(',') === 'creative,minimal,ptc,standard')
+if (Object.keys(core.PROFILES).sort().join(',') === 'cordis,minimal,ptc,standard')
   ok('P5. all four profiles are registered', Object.keys(core.PROFILES).join(', '))
 else bad('P5. profiles registered', JSON.stringify(Object.keys(core.PROFILES)))
 
@@ -436,7 +436,7 @@ else bad('AC2m. minimal marker scope guard', minimalMarkerless.slice(0, 200))
 // assertions require is now a convention (P7), not a workaround for a silent bug.
 const PKG = JSON.parse(readFileSync(REPO + '/package.json', 'utf8'))
 const shipped = readdirSync(REPO).filter(f => /^workflow-profile-.+\.txt$/.test(f)).sort()
-const expectedDeltas = ['workflow-profile-creative.txt', 'workflow-profile-minimal.txt', 'workflow-profile-ptc.txt']
+const expectedDeltas = ['workflow-profile-cordis.txt', 'workflow-profile-minimal.txt', 'workflow-profile-ptc.txt']
 if (JSON.stringify(shipped) === JSON.stringify(expectedDeltas))
   ok('P6. every profile delta sits next to the plugin', shipped.join(', '))
 else bad('P6. shipped delta files', `found: ${shipped.join(', ') || 'none'}`)

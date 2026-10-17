@@ -2,6 +2,8 @@
 
 Status: accepted（2026-10-16，implement #56 落盘）
 
+> 注（2026-10-18，#99）：档名 `creative` 更名 `cordis`（与官方第四档对齐）；本文按新名回写。
+
 ## Context
 
 #55 落地了档位机制（[ADR-0011](0011-workflow-profiles.md)）：共享骨架 + 每 profile
@@ -30,10 +32,10 @@ delta，覆盖粒度 = **空行分块**（当时 12 节）。#56 要在同一机
 2. **`workflow-enforcement` 拆成四节**：`workflow-enforcement`（七门）+ 紧连接的
    `enforcement-done` / `enforcement-tiering` / `enforcement-recovery`。拆分**逐字节
    无损**（`joinSections` 复原 #54 基线，AC3/AC3a 断言），故 standard 注入文本一字未
-   动——这正是 minimal 能压后三块而七门留在唯一一处的前提。creative 档的插入锚点随之从
+   动——这正是 minimal 能压后三块而七门留在唯一一处的前提。cordis 档的插入锚点随之从
    `workflow-enforcement` 迁到 `enforcement-recovery`，否则创作者三节会插进七门与 DONE
    之间（AC3f 用「enforcement 组连续」断言把顺序钉住）。
-3. **`ptc` = 只增不改**（沿用 creative 的形状，四节，锚在 `enforcement-recovery` 之后）：
+3. **`ptc` = 只增不改**（沿用 cordis 的形状，四节，锚在 `enforcement-recovery` 之后）：
    - `ptc-execution-shape` —— 工具面即程序面（写程序用 `run_code` 跑，注册表以生成
      SDK 交给程序）；地图与七门照旧；**不假设任何额外宿主插件**（D41：基于默认路径改出，
      不依赖 shell-host）；

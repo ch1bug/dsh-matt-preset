@@ -1,5 +1,5 @@
 /**
- * verify-workflow-profiles.mjs — #55: profile mechanism + creative profile.
+ * verify-workflow-profiles.mjs — #55: profile mechanism + cordis profile.
  *
  * The #54 plugin carried ONE workflow body (workflow-body.txt). #55 splits it
  * into a SHARED SKELETON (workflow-body.txt, sectioned by `@@ <id>` markers)
@@ -23,7 +23,7 @@
  *      (tests/fixtures/workflow-body-v1.txt — captured before #55 and
  *      re-taken at #85 with the workflow text-policy change: an intentional
  *      baseline move, not drift; ADR-0010 precedent).
- * AC2: `profile: creative` injects the adapted text under a creator preset,
+ * AC2: `profile: cordis` injects the adapted text under a creator preset,
  *      with the seven gates present and unmodified in wording.
  * AC3: the delta structure duplicates no workflow section between profiles —
  *      the seven gates are edited in exactly one place (the skeleton).
@@ -82,7 +82,7 @@ else {
 if (core.DEFAULT_PROFILE === 'standard') ok('P1. default profile is standard')
 else bad('P1. default profile', String(core.DEFAULT_PROFILE))
 
-if (Object.hasOwn(core.PROFILES ?? {}, 'standard') && Object.hasOwn(core.PROFILES ?? {}, 'creative'))
+if (Object.hasOwn(core.PROFILES ?? {}, 'standard') && Object.hasOwn(core.PROFILES ?? {}, 'cordis'))
   ok('P2. profiles registered', Object.keys(core.PROFILES).join(', '))
 else bad('P2. profiles registered', JSON.stringify(core.PROFILES))
 
@@ -143,9 +143,9 @@ else bad('M4. unknown profile fallback', divergence(fallback, BASELINE))
 // is tests/verify-payload-manifest.mjs (offline — the #55 near-miss: a
 // `workflow-profile-*.txt` entry looked right and shipped nothing).
 const shippedDeltas = readdirSync(REPO).filter(f => /^workflow-profile-.+\.txt$/.test(f))
-if (shippedDeltas.includes('workflow-profile-creative.txt'))
-  ok('P3. creative delta file exists next to the plugin')
-else bad('P3. creative delta file', `found: ${shippedDeltas.join(', ') || 'none'}`)
+if (shippedDeltas.includes('workflow-profile-cordis.txt'))
+  ok('P3. cordis delta file exists next to the plugin')
+else bad('P3. cordis delta file', `found: ${shippedDeltas.join(', ') || 'none'}`)
 
 const covered = new Set((await Promise.all(PKG.files.map(entry => expandEntry(REPO, entry)))).flat())
 const uncovered = shippedDeltas.filter(f => !covered.has(f))
@@ -154,42 +154,42 @@ if (shippedDeltas.length > 0 && uncovered.length === 0)
 else bad('P4. payload coverage', uncovered.length > 0 ? `not covered: ${uncovered.join(', ')}` : 'no delta files found')
 
 // ── AC3: the delta structure duplicates nothing ─────────────────────────────
-// (Mechanism-level, independent of the render: compose the shipped creative
+// (Mechanism-level, independent of the render: compose the shipped cordis
 // delta onto the skeleton and count bodies. A profile that copied a shared
 // section would show the skeleton body twice — or leave the skeleton body
 // behind an override.)
-const CREATIVE_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-creative.txt', 'utf8'))
-const delta = core.parseSections(CREATIVE_DELTA_RAW)
+const CORDIS_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-cordis.txt', 'utf8'))
+const delta = core.parseSections(CORDIS_DELTA_RAW)
 const skeletonIds = ids
 const deltaIds = delta.sections.map(s => s.id)
-const creativeSections = core.composeSections(parsed.sections, delta.sections)
-const creativeText = core.joinSections(creativeSections, parsed.trailingNewline)
+const cordisSections = core.composeSections(parsed.sections, delta.sections)
+const cordisText = core.joinSections(cordisSections, parsed.trailingNewline)
 const countOf = (haystack, needle) => (needle === '' ? 0 : haystack.split(needle).length - 1)
 
-const composedIds = creativeSections.map(s => s.id)
+const composedIds = cordisSections.map(s => s.id)
 if (new Set(composedIds).size === composedIds.length)
-  ok('AC3a. composed creative sections carry unique ids', `${composedIds.length} sections`)
+  ok('AC3a. composed cordis sections carry unique ids', `${composedIds.length} sections`)
 else bad('AC3a. composed ids unique', JSON.stringify(composedIds))
 
-const shadowed = skeletonIds.filter(id => countOf(creativeText, parsed.sections.find(s => s.id === id).text) !== 1)
+const shadowed = skeletonIds.filter(id => countOf(cordisText, parsed.sections.find(s => s.id === id).text) !== 1)
 if (shadowed.length === 0) ok('AC3b. every shared section appears exactly once (override or untouched — never both)')
 else bad('AC3b. shared sections duplicated/shadowed', shadowed.join(', '))
 
-const deltaBodiesUnique = deltaIds.filter(id => countOf(creativeText, delta.sections.find(s => s.id === id).text) !== 1)
+const deltaBodiesUnique = deltaIds.filter(id => countOf(cordisText, delta.sections.find(s => s.id === id).text) !== 1)
 if (deltaBodiesUnique.length === 0) ok('AC3c. every delta section appears exactly once', deltaIds.join(', '))
 else bad('AC3c. delta sections', deltaBodiesUnique.join(', '))
 
 const gateSection = parsed.sections.find(s => s.id === 'workflow-enforcement')
-if (!CREATIVE_DELTA_RAW.includes(gateSection.text))
-  ok('AC3d. the seven-gate block is not copied into the creative delta (one place to edit)')
-else bad('AC3d. creative delta copies the gate block')
+if (!CORDIS_DELTA_RAW.includes(gateSection.text))
+  ok('AC3d. the seven-gate block is not copied into the cordis delta (one place to edit)')
+else bad('AC3d. cordis delta copies the gate block')
 
 const offSkeleton = deltaIds.filter(id => !skeletonIds.includes(id))
 if (deltaIds.length === offSkeleton.length)
-  ok('AC3e. the creative profile ADDS sections and rewrites none', offSkeleton.join(', '))
-else bad('AC3e. creative profile rewrites a shared section', deltaIds.filter(id => skeletonIds.includes(id)).join(', '))
+  ok('AC3e. the cordis profile ADDS sections and rewrites none', offSkeleton.join(', '))
+else bad('AC3e. cordis profile rewrites a shared section', deltaIds.filter(id => skeletonIds.includes(id)).join(', '))
 
-// ── AC2: creative mounts under a creator preset (model-facing surface) ──────
+// ── AC2: cordis mounts under a creator preset (model-facing surface) ──────
 const CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
 const GATE_ANCHORS = ['ENTRY ROUTING', 'IMPLEMENT GATE', 'DECISION BOUNDARY', 'PHASE DECLARATION',
   'ONE ISSUE PER SESSION', 'EXTERNAL-ACTION GATE', 'TICKET EXIT']
@@ -197,11 +197,11 @@ const plain = 'You are a plain agent.'
 const personaRow = (prefix) => ({ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix } })
 const corePlugin = (config) => ({ id: 'workflow-core', name: CORE, ...(config === undefined ? {} : { config }) })
 const ctx = await bootHarness([
-  { id: 'creator', plugins: [personaRow('You are a creator agent powered by {{model}}.'), corePlugin({ profile: 'creative', scope: 'all' })] },
-  { id: 'creator-markerless', plugins: [personaRow(plain), corePlugin({ profile: 'creative' })] },
+  { id: 'creator', plugins: [personaRow('You are a creator agent powered by {{model}}.'), corePlugin({ profile: 'cordis', scope: 'all' })] },
+  { id: 'creator-markerless', plugins: [personaRow(plain), corePlugin({ profile: 'cordis' })] },
   { id: 'standard-explicit', plugins: [personaRow(plain), corePlugin({ profile: 'standard', scope: 'all' })] },
   { id: 'standard-default', plugins: [personaRow(plain), corePlugin({ scope: 'all' })] },
-  { id: 'text-override', plugins: [personaRow(plain), corePlugin({ profile: 'creative', scope: 'all', text: 'CUSTOM {{model}}.' })] },
+  { id: 'text-override', plugins: [personaRow(plain), corePlugin({ profile: 'cordis', scope: 'all', text: 'CUSTOM {{model}}.' })] },
 ])
 const render = async (id, cwd, model) => {
   const handle = await ctx.agents.create({
@@ -226,13 +226,13 @@ const missingGates = GATE_ANCHORS.filter(anchor => !creatorText.includes(anchor)
 if (missingGates.length === 0) ok('AC2b. all seven gates present under the creator preset', GATE_ANCHORS.join(', '))
 else bad('AC2b. seven gates', `missing: ${missingGates.join(', ')}`)
 
-if (countOf(creativeText, gateSection.text) === 1)
+if (countOf(cordisText, gateSection.text) === 1)
   ok('AC2c. the seven-gate block is byte-identical to the shared skeleton (wording unmodified)')
-else bad('AC2c. gate wording', `${countOf(creativeText, gateSection.text)} copies`)
+else bad('AC2c. gate wording', `${countOf(cordisText, gateSection.text)} copies`)
 
 if (creatorText.includes('creator-model') && !creatorText.includes('{{model}}'))
-  ok('AC2d. {{model}} interpolates on the creative mount (persona + injected section render together)')
-else bad('AC2d. creative interpolation', creatorText.slice(0, 200))
+  ok('AC2d. {{model}} interpolates on the cordis mount (persona + injected section render together)')
+else bad('AC2d. cordis interpolation', creatorText.slice(0, 200))
 
 const markerless = await render('creator-markerless', '/tmp/wp-plain-cwd', 'plain-model')
 if (!markerless.includes('MAIN FLOW — idea → ship'))
@@ -245,8 +245,8 @@ if (standardExplicit === standardDefault)
   ok('AC2f. explicit `profile: standard` renders identically to the default mount')
 else bad('AC2f. explicit standard vs default', `${standardExplicit.length} vs ${standardDefault.length}`)
 if (countOf(standardExplicit, gateSection.text) === 1 && !standardExplicit.includes('CREATOR'))
-  ok('AC2g. the standard mount carries no creative delta')
-else bad('AC2g. standard mount leaked creative deltas')
+  ok('AC2g. the standard mount carries no cordis delta')
+else bad('AC2g. standard mount leaked cordis deltas')
 
 const override = await render('text-override', '/tmp/wp-custom-cwd', 'custom-model')
 if (override.includes('CUSTOM custom-model.') && !override.includes('MAIN FLOW'))

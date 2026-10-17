@@ -14,7 +14,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cp, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -93,7 +93,7 @@ await test('install: copies payload to the stable store, stamps version + manife
   assert.deepEqual(absent, [], `payload entries missing from the store: ${absent.join(', ')}`)
   // payload 完整：类别代表（bundle 载体 / 插件 / skills / lang-packs / sandcastle）
   for (const f of ['preset.yml', 'agent.cordis.yml', 'cordis.patch.yml',
-    'workflow-core.mjs', 'workflow-body.txt', 'workflow-profile-creative.txt',
+    'workflow-core.mjs', 'workflow-body.txt', 'workflow-profile-cordis.txt',
     'workflow-profile-ptc.txt', 'workflow-profile-minimal.txt',
     'workflow-enforcer.mjs', 'lang-enforcer.mjs', 'handoff-tool.mjs',
     'skills/ponytail/SKILL.md', 'lang-packs', 'sandcastle', 'package.json']) {
@@ -195,10 +195,53 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
   const manifest = JSON.parse(await readFile(join(storeOf(home), 'manifest.json'), 'utf8'))
   assert.equal(manifest.source, 'tarball')
   // AC2 关键不变量：bundle 声明随 tarball 路径存活（package.json 带 dsh.bundle.patch，
-  // 载体 cordis.patch.yml 在包内）——否则挂载虽 link 成功却无 patch 可装载。
+  // 载体在包内）——否则挂载虽 link 成功却无 patch 可装载。
+  // #99（ADR-0015）：声明已由字符串变**数组**（一个 bundle 四个模式，默认档在 cordis.patch.yml），
+  // 故断言数组形状 + 默认档仍在第 1 位 + **每一份载体都随包到了**——少一份就少一个模式。
   const tpkg = JSON.parse(await readFile(join(storeOf(home), 'package.json'), 'utf8'))
-  assert.equal(tpkg.dsh?.bundle?.patch, './cordis.patch.yml', 'bundle patch declaration lost via tarball')
-  assert.ok(existsSync(join(storeOf(home), 'cordis.patch.yml')), 'carrier lost via tarball')
+  const tpatch = tpkg.dsh?.bundle?.patch
+  assert.ok(Array.isArray(tpatch) && tpatch.length === 4, `bundle patch declaration lost via tarball: ${JSON.stringify(tpatch)}`)
+  assert.equal(tpatch[0], './cordis.patch.yml', 'the default mode must stay array item 1')
+  const missing = tpatch.map((p) => p.replace(/^\.\//, '')).filter((p) => !existsSync(join(storeOf(home), p)))
+  assert.deepEqual(missing, [], `carrier(s) lost via tarball: ${missing.join(', ')}`)
+})
+
+/**
+ * #47（断言半边，并入 #99-C）：桌面形态。
+ *
+ * 特殊之处**不是** --dump-config：desktop 是由 Electron 应用独占管理的 profile，
+ * `dsh --profile desktop --dump-config` 会报 `profile "desktop" is managed
+ * exclusively by the Electron application`，**不能**拿它当装载证据。但
+ * `dsh plugin --profile desktop add` 这条写路径是可用的，装完的产物就是 profile
+ * 层的 package.json。所以本用例**只读那个文件**，不调 --dump-config。
+ *
+ * 桌面 profile 的另一条实测前提：它必须**先被桌面应用初始化过**（即
+ * `<DSH_HOME>/profiles/desktop/package.json` 已在）。完全空 DSH_HOME 下会得到
+ * `Open DeepSeek Harness Desktop once to initialize its profile…`——那是环境前提，
+ * 不是本 preset 的缺陷，所以这里预置一个最小 profile 层来模拟"桌面已初始化"，
+ * 也正是 #67 的现实安装形态。
+ *
+ * 无 dsh 时照 #67 口径响亮跳过（install 不建 profile link，读依赖表会是 ENOENT）。
+ */
+await test('install --profile desktop: links the store into the desktop profile', async () => {
+  if (!dshOnPath) {
+    loudSkip('desktop-profile install proof needs dsh on PATH (#47/#67)')
+    return
+  }
+  const home = join(tmp, 'desktop')
+  const profileDir = join(home, 'profiles', 'desktop')
+  await mkdir(profileDir, { recursive: true })
+  await writeFile(join(profileDir, 'package.json'),
+    JSON.stringify({ name: 'desktop', private: true, dependencies: {} }, null, 2))
+  const r = run(['install', '--profile', 'desktop'], home)
+  assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+  const profile = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+  // profile 层依赖表：store 以 link 形式登记（与既有 linked() 同判据）
+  assert.match(String(profile.dependencies?.['dsh-matt-preset'] ?? ''), /\./,
+    `desktop profile deps missing dsh-matt-preset: ${JSON.stringify(profile.dependencies)}`)
+  // 装载声明：bundle 列表必须含本 preset，否则 profile link 成功也无 patch 可装载
+  assert.ok(Array.isArray(profile.dsh?.profile?.bundles) && profile.dsh.profile.bundles.includes('dsh-matt-preset'),
+    `desktop profile bundles missing dsh-matt-preset: ${JSON.stringify(profile.dsh)}`)
 })
 
 if (dshOnPath) {

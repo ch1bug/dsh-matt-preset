@@ -20,10 +20,11 @@
     "preset.yml",
     "agent.cordis.yml",
     "cordis.patch.yml",
+    "presets/*.patch.yml",
     "workflow-gates.yml.example",
     "workflow-core.mjs",
     "workflow-body.txt",
-    "workflow-profile-creative.txt",
+    "workflow-profile-cordis.txt",
     "workflow-profile-ptc.txt",
     "workflow-profile-minimal.txt",
     "*.mjs",
@@ -36,7 +37,12 @@
   ],
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": [
+        "./cordis.patch.yml",
+        "./presets/matt-ptc.patch.yml",
+        "./presets/matt-minimal.patch.yml",
+        "./presets/matt-cordis.patch.yml"
+      ]
     }
   },
   "exports": {

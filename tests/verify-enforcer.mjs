@@ -343,7 +343,7 @@ else bad('V15b. sandcastle ⚠ repeated', v15b.slice(-160))
 
 // V16 (#55): plugin_manager MUTATIONS are external-action events (they change
 // the whole profile and can run build scripts), while read-only list_* calls
-// stay routine. The creative profile DECLARES install/enable as gate-6 events,
+// stay routine. The cordis profile DECLARES install/enable as gate-6 events,
 // so the gate list itself must know them — otherwise the injected text and the
 // per-turn reminders contradict each other ("this list is exhaustive").
 await emitSessionEvent(ctx, agent.session, {

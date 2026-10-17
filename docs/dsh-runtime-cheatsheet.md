@@ -92,6 +92,50 @@ mock 说 Anthropic SSE：`message_start` → `content_block_start`（`text` 或
   `dsh-tool-workflow`）实测先 `ctx.provide(name, inertService())` 补
   `fs` / `sandbox` / `sandboxPolicy` / `subagents` 四项，再交 `ensurePresetMountable` 即可。
 - stub 形状用挂具导出的 **`inertService()`**（单一事实源），别就地再写一个 Proxy。
+- **`inertService()` 是「浅」Proxy（`get` 只返回 no-op 函数，不递归）**：插件若访问
+  `ctx.<svc>.<sub>.<method>()`，浅层会让 `.<sub>` 求值成一个**函数**，再取 `.method` 就是
+  `undefined` → `TypeError`。实测（2026-10-18，#99）：`dsh-tool-jobs` 真调
+  `ctx.jobs.events.subscribe(...)`，浅 stub 下 `ensurePresetMountable` 的第二轮诊断里
+  **再也抓不到 `waiting for`**（错误换形了），于是循环 `break` 并抛
+  `preset … not mountable in harness` —— 报的是"挂不上"，真因是 stub 太浅。
+  **修法**：对这类服务预置**深一层**的 stub（仍以 `inertService()` 为底，例如
+  `{ ...inertService(), events: inertService() }`），而**不是**去加大盲补轮数。
+
+## 挂载级断言的判据：两层，不是 `broken === undefined`
+
+全量 matt roster 在挂具里**必然**缺 host 侧能力（`subagents` / `sandboxPolicy` /
+`model-selection-settings` 等），`resolve(id).broken` **恒非 `undefined`** ——
+所以「激活干净」是一个**不可达**的判据，写成断言就是永远红。
+本仓既有口径（`tests/verify.mjs` Track B）分两层，照它写：
+
+- **A 层（严格，必须绿）**：声明**解析成功**、`config.id` 互不重复、roster 里在场、
+  profile 亲子对应。
+- **B 层（诊断）**：`broken` 的**每一行**都是 `: waiting for <host 服务>` ——
+  **只含 host 面缺失**，不得出现任何**载体/声明缺陷**
+  （`never started` / `Duplicate agent preset` / 模块加载失败 / 我们自己的行被点名）。
+
+另：写「某个 id 可解析」这类断言时，**用固定期望表里的常量去 `resolve`，不要用"从文件里
+读出来的 id"** —— 后者是空洞的：id 被改坏时它跟着坏，断言照样绿（2026-10-18 #99 实测抓到）。
+
+### 两个诊断面不是一回事（实测 2026-10-18，#99）
+
+对**全量 roster**（`cordis.patch.yml` 那一族，24 行）实测，两个面读数**不同**：
+
+| 面 | 读数 |
+| --- | --- |
+| `ctx.agentPresets.resolve(id).broken` | **20 行，全部是 `: waiting for <host 服务>`**（0 条其它） |
+| `ensurePresetMountable(ctx, id)` | **抛错**，且正文里另有 **2 条非 waiting**：<br>`tool-jobs: ctx.jobs.events.subscribe is not a function`<br>`tool-subagent: \`modelSelectionSettings\` requires …model-selection-settings in the Host scope` |
+
+**关键：这两条在 pre-#99 的载体上完全相同**（拿 `git show HEAD:cordis.patch.yml` 实测），
+所以它们是**挂具自身的缺陷**，不是任何载体改动引入的回归。
+
+推论（写断言时直接照用）：
+- **`ensurePresetMountable` 对全量 roster 恒抛**，不能当绿门；要用它就得写成
+  "允许抛、但断言正文只含 `waiting for`"。
+- **`resolve().broken` 是正确的那一面**：它把"载体缺陷"与"host 面缺失"分开，
+  且不会被上面两条挂具缺陷污染。**判"我们的行没问题"就读它。**
+- 上面那条 `jobs` 报错正是 `inertService()` 太浅导致的；但因为**它在 pre-#99 就存在**，
+  修它是挂具的事，不是某张票的事。
 
 实例：[tests/verify-workflow-profiles-2.mjs](tests/verify-workflow-profiles-2.mjs) 的 ptc 形状。
 

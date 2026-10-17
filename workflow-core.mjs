@@ -30,7 +30,7 @@
  *   - a new id is inserted where its `after=<anchor>` says, and appended
  *     when no anchor is given.
  * `standard` carries no delta — it is the skeleton verbatim, byte-identical
- * to the #54 body (AC1 in tests/verify-workflow-profiles.mjs). `creative`
+ * to the #54 body (AC1 in tests/verify-workflow-profiles.mjs). `cordis`
  * (creator preset), `ptc` (PTC execution shape) and `minimal` (compressed
  * token-budget text) each adapt the workflow from a delta. An adapting
  * profile therefore never copies shared text: the seven gates exist in
@@ -55,7 +55,7 @@
  * `scope: 'all'` to receive the workflow text regardless of a marker.
  *
  * Config:
- *   - profile: 'standard' (default), 'creative' (creator preset: plugin
+ *   - profile: 'standard' (default), 'cordis' (creator preset: plugin
  *              authoring adaptations), 'ptc' (PTC execution shape: program
  *              surface vocabulary, gates unchanged) or 'minimal' (compressed
  *              token-budget text, gates unchanged). An unknown name falls back
@@ -87,7 +87,7 @@ export const DEFAULT_PROFILE = 'standard'
  * touched. */
 export const PROFILES = {
   standard: null,
-  creative: new URL('./workflow-profile-creative.txt', import.meta.url),
+  cordis: new URL('./workflow-profile-cordis.txt', import.meta.url),
   ptc: new URL('./workflow-profile-ptc.txt', import.meta.url),
   minimal: new URL('./workflow-profile-minimal.txt', import.meta.url),
 }

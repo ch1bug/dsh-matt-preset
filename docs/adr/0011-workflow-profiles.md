@@ -2,16 +2,18 @@
 
 Status: accepted（2026-10-16，implement #55 落盘）
 
+> 注（2026-10-18，#99）：档名 `creative` 更名 `cordis`（与官方第四档对齐）；本文按新名回写。
+
 ## Context
 
 #54 把工作流正文抽成单文件（`workflow-body.txt`），由 `workflow-core.mjs` 经
 system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**服务不同 preset
-（standard = matt；creative = 创作者 preset），#56 还要加 ptc/minimal。每档复制一份
+（standard = matt；cordis = 创作者 preset），#56 还要加 ptc/minimal。每档复制一份
 正文的代价是七门出现 N 份副本：一处改动改 N 遍，且 D41 要求的"七门语义零改动"无法
 机械保证。
 
 票面约束：① `profile: standard` 的注入输出与 #54 基线**逐字节一致**（证明重构零内容
-漂移）；② creative 挂在创作者 preset 下注入适配文本，七门在场且**措辞未改**；
+漂移）；② cordis 挂在创作者 preset 下注入适配文本，七门在场且**措辞未改**；
 ③ 结构上**不得有任一工作流节在两个 profile 间重复**。
 
 ## Decision
@@ -30,7 +32,7 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
    `tests/fixtures/workflow-body-v1.txt`（#54 正文，落地前冻结；#85 随文本政策重取，
    见 CONTEXT D48）逐字节断言（AC1）。
    加档 = 落一个 delta 文件 + 注册表一行，共享文本一字不改。
-4. **creative 档**（创作者 preset 适配，**只增不改**，三节）：`creator-context`（框定：
+4. **cordis 档**（创作者 preset 适配，**只增不改**，三节）：`creator-context`（框定：
    产物是运行时扩展，地图与七门照旧）；`creator-gate-extension`
    （`plugin_manager` 的 `install_bundle` / `set_plugin`(enable/disable) / `set_bundle`
    属**外部动作门**事件——报目标与风险字段后等确认；只读 `list_*` 不需确认）；
@@ -42,7 +44,7 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
 
 ## Consequences
 
-- 七门只此一处（AC3 用结构断言证明：每个共享节在合成输出里恰好出现一次；creative
+- 七门只此一处（AC3 用结构断言证明：每个共享节在合成输出里恰好出现一次；cordis
   delta 文件不含七门块；覆盖语义下骨架正文不残留）。
 - #56（ptc/minimal）与 #58（batch 组件抽取）落在同一 delta 机制上，不需要新的拼装点。
 - matt preset 显式挂载 `profile: standard`（不靠插件默认值隐式选档，R6 断言）。
@@ -51,7 +53,7 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
   V16（`plugin_manager` 变更触发外部动作门、只读 `list_*` 不触发）；#54 的
   `tests/verify-workflow-core.mjs` L1 与 `verify-workflow-core-render.mjs` R4
   verbatim 断言保持全绿——重构对渲染面零影响。
-- **文本与机制同口径**：creative 文本声明的 gate 事件必须真的在 enforcer 的
+- **文本与机制同口径**：cordis 文本声明的 gate 事件必须真的在 enforcer 的
   `DEFAULT_GATES` 里（D23：高危清单归插件、工作流文本只留锚点）——故 #55 把
   `plugin_manager install_bundle` / `set_plugin` / `set_bundle` 加进默认外部清单
   （词对匹配，只读 `list_*` 不触发）。否则"清单是穷举的"那句基线提醒会与注入文本

@@ -105,6 +105,83 @@ error: profile "desktop" is managed exclusively by the Electron application
 升级前跑唯一入口（`node scripts/verify-all.mjs`）与 `privacy-scan`——`.githooks/pre-commit`
 已经把二者绑在提交上，绕过它（`SKIP_HOOKS=1`）就意味着把未验证的树推给 live 面。
 
+## 桌面端（`desktop` profile）：迁移与回滚（#47 AC，2026-10-18 #99 落盘）
+
+本节是桌面形态的**迁移 runbook**（此前只有上一节的"不能 CLI 装"一句，没有可执行步骤）。
+
+### 形态事实（实测，勿再假设）
+
+| 项 | 事实 |
+| --- | --- |
+| `--dump-config` | **不可用**：`dsh --profile desktop --dump-config` → `error: profile "desktop" is managed exclusively by the Electron application` |
+| `dsh plugin --profile desktop add|rm` | **可用** —— 装载的写入路径不被独占；`bin/install.mjs` 走的正是这条 |
+| profile 层 | `<DSH_HOME>/profiles/desktop/package.json`（`dependencies` + `dsh.profile.bundles`）|
+| 稳定存储 | `<DSH_HOME>/.agent-presets/matt`（与 web/headless 面**同一路径**，已统一）|
+| 认行 | 按 **`patchId: "preset-dsh-matt-preset"`** 认，**不要按 `name`** —— 该行 `name` 恒为 `@deepseek-ai/dsh-agent-preset`（与内置 preset 同包），按 `dsh-matt-preset` 查**恒返回 0**（实测踩过）|
+
+### 迁移（一条命令）
+
+```bash
+node bin/install.mjs install --profile desktop            # fresh
+node bin/install.mjs upgrade --profile desktop            # 已有安装，原地替换
+```
+
+装完**重启应用**（或新开会话）生效，在 hero-chip 选择模式。
+
+> **#99 起 hero-chip 有 4 个 matt 模式**（`Matt 工作流` / `· PTC` / `· 精简` / `· Cordis`）——
+> 一个插件（`dsh-matt-preset`）、四份 preset patch（`presets/*.patch.yml`），
+> 装一次全有、卸一次全清（ADR-0015）。从 #99 之前的版本升级时，**必须用 `upgrade`
+> 重装一次**：`dsh.bundle.patch` 由单文件变数组属**载体形态变化**，旧的 profile 层缓存
+> 不会自己重新解析。
+
+### 旧 store 分叉的迁移（#47 现场遗留）
+
+#47 的现场症状是 **store 路径分叉**：桌面 profile 的 link 指向
+`<DSH_HOME>/.agent-presets/dsh-matt-preset`，而 installer 写的是
+`<DSH_HOME>/.agent-presets/matt` —— 两边不是同一个目录，于是
+**installer 怎么升级都更新不到桌面端**。
+
+**形态自 2026-10-17 起已统一**（两边都是 `.agent-presets/matt`），但**旧机器上那个分叉
+store 目录不会自己消失**，且桌面 link 若仍指着它，`upgrade` 依旧写不进去。迁移动作：
+
+```bash
+# 1) 看桌面 link 到底指向哪边（分叉的判据）
+node -e "const p=require(process.env.HOME+'/.dsh/profiles/desktop/package.json'); console.log(p.dependencies['dsh-matt-preset'])"
+#    → 期望 link:<DSH_HOME>/.agent-presets/matt
+#    → 若仍指向 .../.agent-presets/dsh-matt-preset，就是分叉现场
+
+# 2) 重装（installer 会写正确路径并重挂 profile link）
+node bin/install.mjs install --profile desktop --force
+
+# 3) 确认 link 已改指，再删掉遗留目录（确认前不要删）
+node bin/install.mjs --version
+rm -rf <DSH_HOME>/.agent-presets/dsh-matt-preset   # 仅在第 1 步确认它不再被 link 之后
+```
+
+**判据**：第 1 步的输出变成 `link:<DSH_HOME>/.agent-presets/matt`，且重启后 hero-chip 出现
+4 个 matt 模式。遗留目录的删除是**外部动作**（`rm -rf`），须人工确认后再执行。
+
+### 回滚
+
+1. **回滚到 #99 之前的形态**：`node bin/install.mjs install --force --from dsh-matt-preset-<旧版本>.tgz --profile desktop`
+   （旧 tag ↔ 旧 npm 版本一一对应，见上文"升级/回滚"节）→ 重启应用。
+2. **只回滚到上一个绿提交（payload 面）**：同上，换成该提交打的 tarball。
+3. **完全卸下桌面端**（四模式同时消失、无残留）：
+
+   ```bash
+   node bin/install.mjs uninstall --profile desktop      # 摘 profile link + 清存储目录
+   ```
+
+   验收：`plugin_manager` / 插件视角**不再有** `dsh-matt-preset` 条目，roster 里**四个 matt 模式同时消失**；
+   官方四个模式（`standard`/`ptc`/`minimal`/`cordis`）**仍在**（本 preset 从不改它们）。
+
+### 桌面形态的机械断言
+
+`tests/verify-installer.mjs` 有对应用例（`--profile desktop` 跑 install，断言 profile 的
+`dependencies` 与 `dsh.profile.bundles` 都含 `dsh-matt-preset`）。该用例与其他 profile-link
+断言共用 `#67` 的口径：**PATH 上没有 `dsh` 时响亮跳过**（`SKIP (loud)`，verify-all 记为 `PASS*`），
+不硬崩、也不静默当通过。
+
 ## 版本条目（Changelog）模板（ADR-0007）
 
 规范：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意
