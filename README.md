@@ -66,6 +66,9 @@ node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 
 
 `verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / SKIP，末尾如实汇总：
 **`PASS*` = 该用例含 loud skip，其环境侧断言未验证**（绿不等于全验过）。
+汇总行尾带 `hooks=<on|off|未设置>`（提交前门禁是**每 clone 一次**的本地配置，缺席必须响亮；
+非 on 时另给一行补救命令；git 不可用或非 git 仓库时不带该段，且不改 exit code，见
+[dev-environment §0.3](docs/dev-environment.md#03-防线缺席必须响亮d47)）。
 
 **环境侧用例的门禁**（未设置则响亮跳过，不阻塞常规套件）：
 

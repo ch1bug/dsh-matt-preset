@@ -188,19 +188,30 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 
 | 防线 | 缺席时的表现 | 口径 |
 | --- | --- | --- |
-| `core.hooksPath` 未指向 `.githooks` | 此前**完全静默** | **响亮**：`verify-all` 汇总行带 `hooks=` |
+| `core.hooksPath` 未指向 `.githooks` | 此前**完全静默** | **响亮**：`verify-all` 汇总行带 `hooks=<on\|off\|未设置>`（非 on 再加一行补救命令；git 不可用时静默不猜，不改 exit code） |
 | `SKIP_HOOKS=1` 主动绕过 | 打印 `pre-commit: SKIP_HOOKS set — 跳过 verify-all` | 已响亮 |
 | 环境门禁变量未设 | 汇总 `SKIP` 行 + "N 项因缺环境跳过" | 已显式 |
 | 用例内 loud skip | 汇总标 `PASS*` | 已显式 |
-| `scripts/link-runtime-deps.mjs` 未跑 | `ERR_MODULE_NOT_FOUND` 硬失败 | 已响亮（报错不指路，可选优化） |
+| `scripts/link-runtime-deps.mjs` 未跑 | `ERR_MODULE_NOT_FOUND` 硬失败 | 已响亮 + **报错指路**（#69：失败输出含 `ERR_MODULE_NOT_FOUND` 时 `verify-all` 追一行 `node scripts/link-runtime-deps.mjs`；判据 `tests/verify-all-entry.mjs` E7） |
 | `package.json files` 条目零展开 | 此前**完全静默**（payload 少发货） | 已立 #66 并修 |
 
-**高危三类**（依赖仓外状态、会真红且难诊断 —— 本清单到这三条为止，其余后议，D29）：
+**高危三类**（依赖仓外状态、会真红且难诊断 —— 本清单到这三条为止，其余后议，D29）——
+#69 已逐条定口径，现状与守卫落点如下（**别再逐个重新判断**）：
 
 1. **`<DSH_HOME>` 运行时依赖**（插件运行时 node_modules，如 `yaml`）—— 缺失时插件在挂载期抛，
-   表象是"安装成功但不用"；
-2. **技能镜像**（`<DSH_HOME>/skills`）—— 缺失时会话侧技能目录为空，测试看不出来；
+   表象是"安装成功但不用"。**落地**：`ERR_MODULE_NOT_FOUND` 本就是硬失败，再补一行**报错指路**
+   （`verify-all` 指到 `scripts/link-runtime-deps.mjs`；判据 `tests/verify-all-entry.mjs` E7）；
+2. **技能镜像**（`<DSH_HOME>/skills`）—— 缺失时会话侧技能目录为空，测试看不出来。**落地**：
+   镜像不在场时 `tests/verify-skills-mirror.mjs` 打 `SKIP (loud)` → 汇总标 `PASS*`（**响亮**，
+   不是静默绿；这条在 #69 之前就已到位）；M1/M2 只在镜像在场时跑，镜像在而无可用技能则硬红。
+   #69 补 **M4** 守卫把「响亮」钉住（自跑子进程给一个不存在的镜像路径 → 必须打出 `SKIP (loud)`
+   且 exit 0）；
 3. **端口 / 实例假设**（3080 / 3090 / 19501 等）—— 占用或未起时用例是**超时**而不是报错。
+   **落地**：现役用例一律 `--port 0`（OS 分配）；实例未就绪是 120s 超时**响亮失败**（消息带实例
+   stdout/stderr）；turn / 工具等待的 deadline 过后也各自落到 `bad(…)`（带 `within Ns` 或
+   projections 读数，不静默）。#69 由 `tests/verify-instance-assumptions.mjs` 静态钉住：
+   A1 无非 0 端口 / A2 未就绪必须有响亮出口（**只看代码行，注释不算**）/ A3 扫描面自检 /
+   A4 判据自检。
 
 **不做**：汇总行不加 `gates=` 等传感器字段（门禁状态看 `SKIP` / `PASS*` 行即可，D29）。
 

@@ -11,13 +11,15 @@
  *   M1 每个 <mirror>/<name>/SKILL.md 严格 UTF-8 可解码（无 `?` 置换 / ANSI 字节）
  *   M2 前言可被 YAML 解析、含 name + description、且 name 与目录名一致
  *   M3 回归守卫：sync-skills.ps1 不得再出现未指定编码的 Get-Content/Set-Content
+ *   M4 回归守卫：镜像缺失时**响亮**（`SKIP (loud)` + exit 0）—— D47 高危②（#69）
  *
  * 门禁：镜像目录不存在时响亮跳过（默认取 $DSH_HOME/skills 或 ~/.dsh/skills）。
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { parse as parseYaml } from 'yaml'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -38,6 +40,28 @@ const bad = (n, d = '') => results.push('  ✗ ' + n + (d ? ' — ' + d : ''))
     .filter(({ line }) => /^(Get-Content|Set-Content|Out-File)\b/.test(line) && !/-Encoding\b/.test(line))
   if (offenders.length === 0) ok('M3. sync-skills.ps1 无未指定编码的 Get-Content/Set-Content（#63 回归锁）')
   else bad('M3. sync-skills.ps1 编码回归', offenders.map(o => `${o.n}: ${o.line}`).join(' | '))
+}
+
+// M4（#69 高危②）：镜像缺失必须**响亮** —— 自跑一次（子进程给 bogus `DSH_SKILLS_MIRROR`），
+// 必须打出 `SKIP (loud)` 且 exit 0（verify-all 据此标 `PASS*`，而不是静默绿）。递归保护：子进程
+// 带 `DSH_MATT_SKILLS_MIRROR_PROBE=1` 时不再自跑（与端口那条例外同族：把"响亮"钉住，别被改回静默）。
+if (process.env.DSH_MATT_SKILLS_MIRROR_PROBE !== '1') {
+  const self = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      // 拼进程号：既保证不存在，也不依赖"某个固定 temp 名恰好没被建"。
+      DSH_SKILLS_MIRROR: join(tmpdir(), `dsh-matt-no-such-mirror-${process.pid}`),
+      DSH_MATT_SKILLS_MIRROR_PROBE: '1',
+    },
+  })
+  const probeOut = `${self.stdout ?? ''}${self.stderr ?? ''}`
+  if (self.status === 0 && probeOut.includes('SKIP (loud)')) {
+    // 文案里**不能**出现 `SKIP (loud)` 字面：verify-all 按整段输出分档，写进来会把本用例误标 `PASS*`。
+    ok('M4. 镜像缺失 → 响亮跳过（loud skip）且 exit 0（不静默绿；verify-all 据此标 PASS*）')
+  } else {
+    bad('M4. 镜像缺失时不够响亮', `status=${self.status} out=${probeOut.slice(-200)}`)
+  }
 }
 
 if (!existsSync(mirror)) {
