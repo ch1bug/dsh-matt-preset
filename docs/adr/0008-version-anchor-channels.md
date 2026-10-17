@@ -38,3 +38,11 @@ Status: accepted（2026-10-16，human 拍板，triage 会话落盘）
   `0.2.1-rc.1-r1`**，宿主 tag `dsh-v0.2.1-rc.1`（commit `1600d8a1`）。版本线政策本身
   **未变**——`Decision` 第 3 条里预写的 "rc.3" 只是当时的版本号猜测，family scheme
   照旧；本注记只登记事实。
+- **2026-10-17（同日再前移，rc.2 追加）**：上游当日 08:16Z 发布 `dsh-v0.2.1-rc.2`，
+  锚点前移为 **tag `dsh-v0.2.1-rc.2-r1` ↔ npm `0.2.1-rc.2-r1`**，宿主 tag
+  `dsh-v0.2.1-rc.2`（commit `687f282e`）。**政策同样未变**（family scheme 原样适用）。
+  取证与漂移面：rc.2 相对 rc.1 是**纯追加**（新增 `DeepSeek-V4.1-Flash-1017` 支持 +
+  DeepSeek Search/Fetch API），本仓依赖的 `packages/core|preset|llm` **零 src 改动**，
+  故**无契约适配工作**——详见 [dev-environment §2](../dev-environment.md) 的漂移面注记。
+  **另一条实测更正**：`docs/upgrade-guide/` 下**没有 rc 级 guide**（最新只到
+  `v0.2.1-alpha.4`），rc 间取证须用 **release notes + compare API**。
