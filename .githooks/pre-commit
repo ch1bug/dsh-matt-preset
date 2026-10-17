@@ -1,8 +1,17 @@
 #!/bin/sh
-# .githooks/pre-commit —— 本仓无 CI，本地套件即唯一验收通道；提交前跑它。
+# .githooks/pre-commit —— 本仓无 CI（ADR-0004 的边界见 ADR-0013），本地套件即唯一验收通道；
+# 提交前跑它。四项：① 分支形态（detached HEAD 拒绝）② index/工作树不脱节
+# ③ staged 的 tests/* 新增行里不留实验标记 ④ verify-all 全套（含 privacy 验收）。
 # 启用（每个 clone 一次）：git config core.hooksPath .githooks
 # 绕过（明确知道自己在跳什么时）：SKIP_HOOKS=1 git commit …
 [ -n "$SKIP_HOOKS" ] && { echo "pre-commit: SKIP_HOOKS set — 跳过 verify-all"; exit 0; }
+
+# ① 分支形态：`merge --ff-only` 的副本同步与"提交只在权威树"都依赖分支（邻仓 ADR-0014 的第一项，
+# 他们记过同类事故）。判据由 tests/verify-precommit-hook.mjs H4 钉住。
+if ! git symbolic-ref -q HEAD >/dev/null; then
+  echo "pre-commit: HEAD 处于 detached 状态 —— 先 git switch <branch> 再提交，或用 SKIP_HOOKS=1 明确跳过"
+  exit 1
+fi
 
 # 提交记录的是 INDEX，而 verify-all 跑的是工作树：两者脱节时门禁为"将要提交的内容"背书，
 # 而提交里根本没有它（#82 会话实测：复核后又改了 3 个文件，commit 记下复核前的快照，
@@ -13,6 +22,16 @@ if [ -n "$UNSTAGED" ]; then
   echo "pre-commit: 工作树有未 staged 的改动 —— 本次提交不会包含它们："
   echo "$UNSTAGED" | sed 's/^/  /'
   echo "  复核后请重新 git add -A；确要有意部分暂存则 SKIP_HOOKS=1 git commit …"
+  exit 1
+fi
+
+# ② 实验标记（[DEBUG-… / [MUTATION-…）不许留在提交里：**标记死了才叫实验**——留下的标记意味着
+# "被跑过的那棵树"与提交物不是同一份，而 verify-all 照样会绿（扰动是本仓修复类票的标准取证手段）。
+# 只看 staged 的 tests/* **新增行**：文档里叙述这套做法不该被自己拦下（H6）。判据由 H5/H6 钉住。
+MARKERS=$(git diff --cached -U0 -- 'tests/*' | grep -E '^\+.*\[(DEBUG|MUTATION)-' || true)
+if [ -n "$MARKERS" ]; then
+  echo "$MARKERS" | head -5
+  echo "pre-commit: staged diff 里还有实验标记（[DEBUG-… / [MUTATION-…）—— 清掉再提交，或用 SKIP_HOOKS=1 明确跳过"
   exit 1
 fi
 

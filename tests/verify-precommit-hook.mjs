@@ -17,6 +17,12 @@
  *   H3 `SKIP_HOOKS=1` → the documented escape hatch still bypasses. This is the
  *      guard-placement pin: move the new check above the skip block and H3 goes
  *      red (perturbation recorded in the retro session that added it).
+ *   H4 detached HEAD → refused (branch form is load-bearing for `--ff-only`
+ *      copy sync and for "commits only in the authority tree"; 邻仓 ADR-0014).
+ *   H5 an experiment marker (`[MUTATION…` / `[DEBUG…`, see brief §2.6) left in a staged
+ *      `tests/*` new line → refused, marker named.
+ *   H6 the same marker outside `tests/*` → not blocked (the scope is tests/*
+ *      new lines, so docs describing the practice don't trip it).
  */
 import { mkdtemp, mkdir, writeFile, copyFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -104,10 +110,57 @@ try {
   } else {
     bad('H3. SKIP_HOOKS bypass broken', `exit=${h3.status} checkerRan=${existsSync(marker)} | ${tail(h3)}`)
   }
+// H4: detached HEAD —— `--ff-only` 副本同步与"提交只在权威树"都依赖分支形态
+  // （邻仓 ADR-0014 的钩子第一项；他们记过同类事故）。
+  const branch = run(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim()
+  run(['checkout', '-q', '--detach'])
+  await diverge('sixth\n', 'sixth\n')
+  await rm(marker, { force: true })
+  const h4 = run(['commit', '-m', 'h4'])
+  const h4out = tail(h4)
+  if (h4.status !== 0 && h4out.includes('detached') && !existsSync(marker)) {
+    ok('H4. detached HEAD → commit refused, checker not run (fail fast)')
+  } else {
+    bad('H4. detached HEAD not guarded', `exit=${h4.status} checkerRan=${existsSync(marker)} | ${h4out}`)
+  }
+  run(['switch', '-q', branch])
+
+  // H5: 实验标记（[DEBUG… / [MUTATION…，见 brief §2.6）留在 staged 的 tests/* 新增行里 → 拒绝。
+  // 标记死了才叫实验：留下的标记意味着"被跑过的那棵树"与提交物不是同一份。
+  // 夹具标记**运行时拼接**：字面串不进提交（本仓 pre-commit 机械拦 staged tests/* 新增行里的实验标记；	ests/ 里一个字都不留是约定，邻仓同形）。
+  const MARKER_H5 = '[' + 'MUTATION' + '-probe-h5]'
+  await mkdir(join(root, 'tests'), { recursive: true })
+  await writeFile(join(root, 'tests', 'probe.mjs'), `const x = 1 // ${MARKER_H5}\n`)
+  run(['add', 'tests/probe.mjs'])
+  await rm(marker, { force: true })
+  const headBeforeH5 = run(['rev-parse', 'HEAD']).stdout.trim()
+  const h5 = run(['commit', '-m', 'h5'])
+  const h5out = tail(h5)
+  if (h5.status !== 0 && h5out.includes(MARKER_H5) && !existsSync(marker)) {
+    ok('H5. experiment marker in staged tests/* → commit refused, marker named, checker not run')
+  } else {
+    bad('H5. experiment marker not guarded', `exit=${h5.status} checkerRan=${existsSync(marker)} | ${h5out}`)
+  }
+  // 不论拦没拦到，都回到 H5 之前的状态：被拦时 index 里仍留着 staged 文件，
+  // 未加固时那个提交则真落进了 HEAD —— 两种世界都要让 H6 从一个干净树起跑。
+  run(['reset', '-q', '--hard', headBeforeH5])
+
+  // H6: 同一标记出现在**非 tests/** 文件里不拦 —— 判据只看 tests/* 新增行，
+  // 文档里叙述这套做法（如本测试与 brief）不该被自己拦下。
+  await mkdir(join(root, 'docs'), { recursive: true })
+  await writeFile(join(root, 'docs', 'notes.md'), '文档里叙述 `[MUTATION…]` 做法\n')
+  run(['add', 'docs/notes.md'])
+  await rm(marker, { force: true })
+  const h6 = run(['commit', '-m', 'h6'])
+  if (h6.status === 0 && existsSync(marker)) {
+    ok('H6. same marker outside tests/ → not blocked (scope is tests/* new lines)')
+  } else {
+    bad('H6. marker scope too wide (docs blocked)', `exit=${h6.status} checkerRan=${existsSync(marker)} | ${tail(h6)}`)
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }
 
-console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H3) ===')
+console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H6) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

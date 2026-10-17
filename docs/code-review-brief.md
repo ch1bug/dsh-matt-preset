@@ -41,6 +41,11 @@
    （`git stash push` 会重置 index 并按 autocrlf 改行尾），回退后**编辑前重新 `read`**
    （FS 版本守卫报 `file changed since it was read`，本次白读两次）；③ 探针里拼 `\n` 会撞 CRLF
    工作树（`-Raw` 读进的是 `\r\n`）——按 `\r?\n` 切分或用显式 `$nl`，否则替换静默不生效。
+   **实验标记（2026-10-17 起，机械拦）**：调试/扰动探针一律带唯一前缀 —— `[DEBUG-<唯一串>]` /
+   `[MUTATION-<唯一串>]`，提交前必须清掉。理由：**标记死了才叫实验**，留下的标记意味着"被跑过的
+   那棵树"与提交物不是同一份（而 verify-all 照样绿）。`.githooks/pre-commit` 已机械拦 staged 的
+   `tests/*` **新增行**（`grep -E '^\+.*\[(DEBUG|MUTATION)-'`，只看 tests/：文档里叙述这套做法不算）；
+   判据由 `tests/verify-precommit-hook.mjs` H5/H6 钉住。
 
 ## 3. standards 源（本仓）
 
