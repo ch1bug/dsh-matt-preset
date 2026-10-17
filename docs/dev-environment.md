@@ -69,6 +69,10 @@
   改写成不存在的兄弟路径，而 loader 的报错把锅甩给插件行（`workflow-core … never started`）。
   现在 `resolveLocalNames` 按**包目录本身**解析前缀名，`tests/verify-harness-paths.mjs` P1–P3 钉住；
   实测改名副本与规范树逐项同结果（数字见 §0.1「msys2 侧全流程验证」）。
+- **日常驱动升级的"活面"是 link 面，不是桌面端**：`<DSH_HOME>/profiles/<p>` 以 `link:` 直连权威检出
+  （`matt-dev` / `headless`），升级 = 提交后重启该面；**桌面端 profile 由 Electron 应用独占管理，CLI
+  装不了**（`error: profile "desktop" is managed exclusively by the Electron application`）——完整
+  runbook（升级/检查点/回滚/桌面侧怎么装）见 [RELEASE.md](RELEASE.md)「升级 runbook（link 面）」。
 
 ## 0.1 msys2 会话引导（复用 Windows 侧配置）
 

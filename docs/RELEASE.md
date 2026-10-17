@@ -61,6 +61,50 @@ link 解析——包名 `dsh-matt-preset` 与插件命名空间刻意一致，�
 安装/升级后重启 `dsh --profile <p>`（或新开会话）生效，hero-chip 选择
 "Matt 工作流"。
 
+## 升级 runbook（link 面：日常驱动的"活面"）
+
+上两节讲的是 **payload 面**（installer 拷贝 + 版本戳，适合发布/冻结版本）。
+日常"驱动后续升级"用的是另一条路：**profile 直接 `link:` 指向权威检出**，于是
+每次提交都成为候选版本，升级 = 让该面重新装载。2026-10-17 实测的两个 live 面：
+
+| 项 | 值（机器本地状态记在 `<DSH_HOME>/profiles/<p>/REGISTRY.md`） |
+| --- | --- |
+| 面 | profile `matt-dev`（web，端口 19501；另有 `headless` 一个无 web 面的同款 link 面）|
+| DSH_HOME | `~/dsh-matt-home`（msys 侧；与桌面端 `%USERPROFILE%\.dsh`、邻仓 home 完全隔离）|
+| 挂载 | `"dsh-matt-preset": "link:<repo>"`（**直连权威检出，无副本 → 无漂移**）|
+| 启动 | `<DSH_HOME>/start-matt-dev.sh`（构建脚本 `build-matt-dev.sh`；日志 `<DSH_HOME>/instance.{out,err}.log`）|
+| 运行时 | msys 侧源码部署 `<src>`（`<src>/apps/cli/lib/bin.js`，tag 见 REGISTRY.md）|
+
+**升级（link 面）**：权威树 `verify-all` + `privacy-scan` 绿（pre-commit 已强制）→ `git push` →
+`<DSH_HOME>/start-matt-dev.sh` 重启该面 → 检查点：
+
+```bash
+DSH_HOME=~/dsh-matt-home node <src>/apps/cli/lib/bin.js --profile matt-dev --dump-config \
+  | grep -n 'dsh-matt-preset'      # 期望见 `# == dsh-matt-preset` 与 `preset-dsh-matt-preset` 行
+```
+
+（`--dump-config` 是只读组合树 dump，实测 exit 0 / 1479 行、含 workflow-core 行即为装好。）
+
+**回滚（link 面）**：把权威树切回上一个绿提交再重启该面。**注意**：权威树同时是 agent 的
+工作树，切提交会打断正在写它的会话 —— 回滚要么在无会话写它时做，要么改用 payload 面
+（上一节的 `install --force --from <旧版本>.tgz`）。
+
+**桌面端（`desktop`）不能这样装**：profile 由 Electron 应用独占管理，CLI 直接拒绝 ——
+
+```text
+$ dsh --profile desktop --dump-config
+error: profile "desktop" is managed exclusively by the Electron application
+```
+
+要在日常 GUI 里用 matt，须走**应用侧**（Plugins 页 / `plugin_manager` 工具的
+`install_bundle` / `set_bundle`），形态与桌面既有的 `link:` 依赖一致；装完用应用自述确认活行
+（Host Inspect 的 `Config.listConfigs`, `name: "dsh-matt-preset"`，`total: 0` = 没装上）。
+那条路是**外部动作**（改的是日常 profile），且 bundle 形态若按 #76 拍板改变，需要重装一次。
+
+**只让绿树成为 live**：link 面没有"安装"这道闸，权威树的任何状态都会直达该面。故约定
+升级前跑唯一入口（`node scripts/verify-all.mjs`）与 `privacy-scan`——`.githooks/pre-commit`
+已经把二者绑在提交上，绕过它（`SKIP_HOOKS=1`）就意味着把未验证的树推给 live 面。
+
 ## 版本条目（Changelog）模板（ADR-0007）
 
 规范：每个版本条目只描述与上一个 tag 的 diff，收录标准 = **升级用户是否会注意
