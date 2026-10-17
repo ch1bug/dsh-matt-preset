@@ -46,6 +46,13 @@
    那棵树"与提交物不是同一份（而 verify-all 照样绿）。`.githooks/pre-commit` 已机械拦 staged 的
    `tests/*` **新增行**（`grep -E '^\+.*\[(DEBUG|MUTATION)-'`，只看 tests/：文档里叙述这套做法不算）；
    判据由 `tests/verify-precommit-hook.mjs` H5/H6 钉住。
+7. **复核改动面用 `git diff`，不要重读全文**：review 阶段要确认"某文件改成了什么样"时，
+   取 `git diff <base> -- <file>`（或 `git diff --stat` 先看形状）——**整读只在 diff 不足以判断时才做**。
+   #71 实测：`read` 19 次共 **156,720 字符**，其中一半是`workflow-enforcer.mjs` 与
+   `tests/verify-enforcer.mjs` **各整读 4 次**（侦察一次是必要的，改动后复核又整读一次是白烧；
+   两个文件累计 103,898 字符）。本仓的实现改动**常是纯追加**（#71 的 `workflow-enforcer.mjs`
+   最终 `323 插入 / 0 删除`），此时 diff 就是改动面本身，全文一个字都不必再进上下文。
+   **复读不是免费的**：`read` 默认不带 `limit`，一次整读就是全量进窗口。
 
 ## 3. standards 源（本仓）
 
