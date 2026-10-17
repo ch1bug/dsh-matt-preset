@@ -11,6 +11,10 @@
  *   E2 汇总行与退出码：`FAILED — 2/4`（含 loud skip / 缺环境跳过两个计数）→ 修好后
  *      `OK — 3/4` 且退出码 0
  *   E3 老守卫不被吞掉：`core.hooksPath` advisory 仍打印（#69 的修复面）
+ *   E4 门禁反向：`DSH_MATT_INSTALLER=1` 时该档**真被执行**（SKIP → PASS）
+ *
+ * **环境隔离**：E1–E3 的子进程清掉全部 `DSH_MATT_*` —— 门禁变量会把夹具那档从 SKIP 变成
+ * 执行，计数随之漂移（2026-10-17 在 msys 全流程口径下实测红）；门禁方向由 E4 显式钉住。
  *
  * 非空洞：把入口的 `loud` 判定改成 `false`（PASS* 退化成 PASS）→ E1/E2 红（已实测）。
  */
@@ -44,8 +48,16 @@ try {
   // advisory 的可复现面：git 仓库在位、core.hooksPath 未设置
   spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8' })
 
-  const run = () => {
-    const r = spawnSync(process.execPath, [join(root, 'scripts', 'verify-all.mjs')], { cwd: root, encoding: 'utf8' })
+  /** 入口自测必须**自己隔离环境**：`DSH_MATT_INSTALLER=1` 一类门禁变量会把夹具里那档
+   *  从 SKIP 变成真的执行，计数与分档随之漂移（2026-10-17 在 msys 全流程口径下实测红）。
+   *  清掉 `DSH_MATT_*` 让 E1–E3 确定；门禁打开的行为由 E4 显式钉住。 */
+  const envFor = (extra = {}) => {
+    const env = { ...process.env }
+    for (const key of Object.keys(env)) if (key.startsWith('DSH_MATT_')) delete env[key]
+    return { ...env, ...extra }   // 先清、再合：否则刚给的门禁变量会被同一条清理删掉
+  }
+  const run = (extra) => {
+    const r = spawnSync(process.execPath, [join(root, 'scripts', 'verify-all.mjs')], { cwd: root, encoding: 'utf8', env: envFor(extra) })
     return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
   }
 
@@ -81,10 +93,21 @@ try {
   // E3：core.hooksPath 未设置时应出 advisory（#69 的修复面，别被后续改动吞掉）
   if (has(/pre-commit 钩子未启用/)) ok('E3. core.hooksPath advisory 仍打印（未设置 → 响亮提示）')
   else bad('E3. hooksPath advisory 丢了', first.out.slice(0, 200))
+
+  // E4：门禁打开的反向 —— `DSH_MATT_INSTALLER=1` 时那一档**真的被执行**（PASS 而非 SKIP）。
+  // 这条同时是 E1 里"清 DSH_MATT_*"的理由：入口的分档随环境变量而变，自测必须控制它。
+  await writeFile(join(root, 'tests', 'fail.mjs'), 'console.log("✓ fail fixture fixed")\n')
+  await rm(ran, { force: true })
+  const gated = run({ DSH_MATT_INSTALLER: '1' })
+  if (gated.status === 0 && existsSync(ran) && /PASS\s+verify-installer\.mjs/.test(gated.out) && !/SKIP\s+verify-installer\.mjs/.test(gated.out)) {
+    ok('E4. 门禁打开时该档真被执行（SKIP → PASS，夹具标记为证）')
+  } else {
+    bad('E4. 门禁方向不对', `status=${gated.status} fixtureRan=${existsSync(ran)} | ${(gated.out.split('\n').filter(l => l.includes('verify-installer'))[0] ?? '').trim()}`)
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }
 
-console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E3) ===')
+console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E4) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
