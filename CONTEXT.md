@@ -94,6 +94,8 @@
 
 - **D46（2026-10-17，#76 拍板）** — **`dsh-matt-workflow` 形态：不独立分包、不独立建仓（追认 #54 的同包 row 形态）**：确立 **"独立可挂载（L1）≠ 独立包（L2）"**——组件经包 subpath exports 以一行 `dsh-matt-preset/<file>.mjs` 被别的 preset 单独挂载的能力，正是 #57 的目的，且已由 #54 实测达成；L2/L3 不做。附带三项维持现状：无新包名、无第二条版本线（单锚 ADR-0008 `0.2.0-rc.2-r1`）、安装器与载体生成/锁定不动。**不引入第二套档位机制**——上游表达"同一工作流多档位"用多个 preset 声明 + 每份完整 roster，matt 已用 profile delta（ADR-0011/0012）以零重复表达同一件事。**历史补记**：#54 票面原计划是独立可安装包 `dsh-matt-workflow`，落地改道为同包 row 而 ADR-0010 未记录，本决策追认该改道并留下四条复活触发条件（出现第二个真实消费者 / 组件需脱节奏发版 / 包名成实际阻碍 / 需要不含 matt 人设的独立 preset）。详见 [docs/adr/0014-matt-workflow-bundle-shape.md](docs/adr/0014-matt-workflow-bundle-shape.md)。
 
+- **D47（2026-10-17，#69 拍板）** — **静默通过的防线等于没有防线（防线缺席必须响亮）**：两类防线会整体缺席而应用逻辑照常——① 依赖**每 clone 一次的本地配置**（`.githooks/pre-commit` ← `core.hooksPath`）；② 依赖**环境门禁变量**（`DSH_MATT_INSTALLER` / `DSH_MATT_E2E` / `DSH_MATT_LIVE_*` / `DEEPSEEK_API_KEY`）。**规则：防线缺席必须响亮 —— 要么失败、要么打印一行说明；静默通过视为缺陷。** 落地形态三件：① `scripts/verify-all.mjs` 汇总行带 `hooks=<on|off|未设置>`（把既有 advisory 升级成汇总行的一段，不改 exit code）；② 高危清单**只收依赖仓外状态、且会真红**的三类（`<DSH_HOME>` 运行时依赖 / 技能镜像 / 端口与实例假设），其余后议；③ **不做 `gates=` 等传感器堆叠**（D29 —— 门禁状态看 `SKIP` / `PASS*` 行即可）。逐条口径与清单在 [docs/dev-environment.md](docs/dev-environment.md) §0.3。
+
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 
 ## 观察记录（2026-08-19，IRIS ef2ef0b5 会话复盘）
