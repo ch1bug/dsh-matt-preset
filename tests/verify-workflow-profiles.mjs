@@ -19,10 +19,10 @@
  *      renderPrompt (what the model actually reads), with the workflow-core
  *      plugin mounted by a synthetic creator preset.
  *
- * AC1: `profile: standard` is BYTE-IDENTICAL to the ticket-1 baseline
- *      (tests/fixtures/workflow-body-v1.txt — the #54 body, captured from
- *      this working tree BEFORE the restructure, so the freeze survives this
- *      commit landing; ADR-0010 precedent).
+ * AC1: `profile: standard` is BYTE-IDENTICAL to the frozen baseline
+ *      (tests/fixtures/workflow-body-v1.txt — captured before #55 and
+ *      re-taken at #85 with the workflow text-policy change: an intentional
+ *      baseline move, not drift; ADR-0010 precedent).
  * AC2: `profile: creative` injects the adapted text under a creator preset,
  *      with the seven gates present and unmodified in wording.
  * AC3: the delta structure duplicates no workflow section between profiles —
@@ -39,7 +39,8 @@ import { expandEntry } from '../lib/payload.mjs'
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const lf = (s) => s.replace(/\r\n/g, '\n')
 
-/** The ticket-1 baseline: the #54 workflow body, frozen (LF — what the plugin injects). */
+/** The frozen baseline: the plugin's standard body (LF — what the plugin injects);
+ *  captured before #55, re-taken at #85 with the workflow text-policy change. */
 const BASELINE = lf(readFileSync(new URL('./fixtures/workflow-body-v1.txt', import.meta.url), 'utf8'))
 /** The sectioned shared skeleton on disk (markers still in place). */
 const SECTIONED = lf(readFileSync(REPO + '/workflow-body.txt', 'utf8'))
@@ -85,9 +86,9 @@ if (Object.hasOwn(core.PROFILES ?? {}, 'standard') && Object.hasOwn(core.PROFILE
   ok('P2. profiles registered', Object.keys(core.PROFILES).join(', '))
 else bad('P2. profiles registered', JSON.stringify(core.PROFILES))
 
-// ── AC1: standard == ticket-1 baseline (verbatim) ────────────────────────────
+// ── AC1: standard == the frozen baseline (verbatim) ──────────────────────────
 const standard = await core.profileBody('standard')
-if (standard === BASELINE) ok('AC1. profile: standard verbatim-identical to the ticket-1 baseline', `${standard.length} chars`)
+if (standard === BASELINE) ok('AC1. profile: standard verbatim-identical to the frozen baseline', `${standard.length} chars`)
 else bad('AC1. profile: standard vs baseline', divergence(standard, BASELINE))
 
 if (!standard.includes('@@')) ok('AC1b. section markers never reach the injected text')

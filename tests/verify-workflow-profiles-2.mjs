@@ -37,7 +37,8 @@
  * AC1 (#56): ptc and minimal inject under their target shapes with all seven
  *      gates present; the ptc delta never assumes shell-host (D41).
  * AC2 (#56): minimal is roughly one third of standard (the token-budget probe).
- * AC3 (#56): standard is still byte-identical to the frozen #54 baseline.
+ * AC3 (#56): standard is still byte-identical to the frozen baseline
+ *      (re-taken at #85 with the workflow text-policy change).
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -50,7 +51,8 @@ import { expandEntry } from '../lib/payload.mjs'
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const lf = (s) => s.replace(/\r\n/g, '\n')
 
-/** The frozen #54 baseline (LF — what the plugin injects), #55's AC1 fixture. */
+/** The frozen baseline (LF — what the plugin injects), #55's AC1 fixture;
+ *  captured before #55, re-taken at #85 with the workflow text-policy change. */
 const BASELINE = lf(readFileSync(new URL('./fixtures/workflow-body-v1.txt', import.meta.url), 'utf8'))
 /** The sectioned shared skeleton on disk (markers still in place). */
 const SECTIONED = lf(readFileSync(REPO + '/workflow-body.txt', 'utf8'))
@@ -149,7 +151,7 @@ else bad('T5. malformed marker', 'parsed as body text')
 
 // ── AC3: standard is still the frozen #54 body, split section by section ────
 const standard = await core.profileBody('standard')
-if (standard === BASELINE) ok('AC3. profile: standard still verbatim-identical to the #54 baseline', `${standard.length} chars`)
+if (standard === BASELINE) ok('AC3. profile: standard still verbatim-identical to the frozen baseline', `${standard.length} chars`)
 else bad('AC3. standard vs baseline', divergence(standard, BASELINE))
 
 const parsed = core.parseSections(SECTIONED)

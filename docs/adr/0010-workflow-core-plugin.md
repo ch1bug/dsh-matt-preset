@@ -52,4 +52,5 @@ unknown 引用直接抛错），正文里的示例代码若带双花括号需转
 - 验证：tests/verify-workflow-core.mjs（spike S1 / L1 / AC2 / G1 / E1；L1 基线
   冻结在 tests/fixtures/persona-prefix-v1.txt——从 #54 前的 git HEAD 捕获，
   不随本提交落地失效）+ tests/verify.mjs A0（改读 persona+workflow-body
-  拼接文本）。
+  拼接文本）。**（#85 更新：该基线随 workflow 文本政策变更重取——仍逐字节
+  冻结、断言不变，见 CONTEXT D48；persona 导语本身未动。）**

@@ -27,7 +27,8 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
    节 → 抛错（响亮，不许静默错位）。
 3. **档位注册表**：`workflow-core.mjs` 的 `PROFILES` = 档名 → delta 文件 URL
    （`null` = 骨架 verbatim）。`standard: null`，所以重构零漂移由
-   `tests/fixtures/workflow-body-v1.txt`（#54 正文，落地前冻结）逐字节断言（AC1）。
+   `tests/fixtures/workflow-body-v1.txt`（#54 正文，落地前冻结；#85 随文本政策重取，
+   见 CONTEXT D48）逐字节断言（AC1）。
    加档 = 落一个 delta 文件 + 注册表一行，共享文本一字不改。
 4. **creative 档**（创作者 preset 适配，**只增不改**，三节）：`creator-context`（框定：
    产物是运行时扩展，地图与七门照旧）；`creator-gate-extension`
@@ -56,8 +57,9 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
   （词对匹配，只读 `list_*` 不触发）。否则"清单是穷举的"那句基线提醒会与注入文本
   自相矛盾。
 - 打包面：`workflow-profile-*.txt` 进 package `files`（安装器 payload 断言覆盖）。
-- 已知遗留（不在本票，立票跟踪）：基线正文第 26 行仍写 "six hard gates" 而其下枚举
-  七门（#54 时期旧文案）——修它即改变 AC1 的逐字节基线，须连同 fixture 重取一起做。
+- **已处置（#85，2026-10-17）**：基线首行由 "six hard gates" 改为 "seven hard gates"，其下枚举
+  1–7 自洽；修它即改变 AC1 的逐字节基线，故 fixture（body 与 persona 载体两份）同批重取，
+  L1/AC1 断言语义不变（CONTEXT D48）。
 
 ## See also
 

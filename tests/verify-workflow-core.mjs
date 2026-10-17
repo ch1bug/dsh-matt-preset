@@ -10,9 +10,10 @@
  *     registers both variables per assembly — proven here end-to-end.
  * L1: with workflow-core mounted by the matt-shaped preset, the rendered
  *     model-facing system prompt is VERBATIM-IDENTICAL to the current
- *     persona-carried version (old prefix frozen in tests/fixtures/
- *     persona-prefix-v1.txt — captured from git HEAD at #54, NOT re-read
- *     from git, so the baseline survives this commit landing).
+ *     persona-carried version (the full text frozen in tests/fixtures/
+ *     persona-prefix-v1.txt — read from disk, never re-derived from git).
+ *     Captured at #54 and re-taken at #85 with the workflow text-policy
+ *     change, so it stays a live carrier check, not a stale historical copy.
  * AC2: a preset other than matt mounts workflow-core with ONE plugin row
  *     (scope: 'all') and receives the workflow text.
  * G1: marker scope guard — with the default scope ('marker'), a session
@@ -32,8 +33,8 @@ const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 const WORKFLOW_CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
 
-/** The OLD full persona prefix, frozen at #54 (the L1 baseline). */
-const OLD_PREFIX = readFileSync(new URL('./fixtures/persona-prefix-v1.txt', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+/** The full persona-carried text (intro + body): the L1 baseline, re-taken at #85. */
+const PERSONA_CARRIED = readFileSync(new URL('./fixtures/persona-prefix-v1.txt', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 /** Extract the `prefix: |` block scalar (same shape as verify-production). */
 function personaPrefix(yml) {
@@ -59,19 +60,19 @@ const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' �
 
 // The split contract: the new persona prefix must be a strict prefix of the
 // old one, split at a blank-line boundary, and must still carry the marker.
-if (OLD_PREFIX.startsWith(NEW_PREFIX)) ok('split: new persona prefix is a strict prefix of the old')
+if (PERSONA_CARRIED.startsWith(NEW_PREFIX)) ok('split: new persona prefix is a strict prefix of the old')
 else bad('split: new persona prefix is a strict prefix of the old')
-if (OLD_PREFIX.length > NEW_PREFIX.length) ok('split: workflow body left the persona prefix', `${OLD_PREFIX.length} → ${NEW_PREFIX.length} chars`)
-else bad('split: workflow body left the persona prefix', `${OLD_PREFIX.length} → ${NEW_PREFIX.length} chars`)
+if (PERSONA_CARRIED.length > NEW_PREFIX.length) ok('split: workflow body left the persona prefix', `${PERSONA_CARRIED.length} → ${NEW_PREFIX.length} chars`)
+else bad('split: workflow body left the persona prefix', `${PERSONA_CARRIED.length} → ${NEW_PREFIX.length} chars`)
 if (NEW_PREFIX.includes('ask-matt')) ok('split: persona intro keeps the ask-matt marker')
 else bad('split: persona intro keeps the ask-matt marker')
 
 const ctx = await bootHarness([
-  // old-style: the workflow rides in the persona prefix (git HEAD shape).
-  { id: 'matt-old', plugins: [
-    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: OLD_PREFIX } },
+  // persona-carried: the workflow rides in the persona prefix (the pre-split carrier shape).
+  { id: 'matt-carried', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: PERSONA_CARRIED } },
   ] },
-  // new-style: persona intro + workflow-core injection (the #54 shape).
+  // plugin-carried: persona intro + workflow-core injection (the #54 shape).
   { id: 'matt-new', plugins: [
     { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: NEW_PREFIX } },
     { id: 'workflow-core', name: WORKFLOW_CORE },
@@ -129,16 +130,16 @@ if (spike.includes('{{model}}') || spike.includes('{{cwd}}')) bad('S1b. no liter
 else ok('S1b. no literal {{…}} remains in the injected text')
 
 // ── L1: verbatim-identical injection diff ───────────────────────────────────
-const oldPrompt = await render('matt-old', '/tmp/wc-l1-cwd')
-const newPrompt = await render('matt-new', '/tmp/wc-l1-cwd')
-if (oldPrompt === newPrompt) {
-  ok('L1. model-facing prompt verbatim-identical (old persona-carried vs new plugin-injected)', `${oldPrompt.length} chars`)
+const carriedPrompt = await render('matt-carried', '/tmp/wc-l1-cwd')
+const injectedPrompt = await render('matt-new', '/tmp/wc-l1-cwd')
+if (carriedPrompt === injectedPrompt) {
+  ok('L1. model-facing prompt verbatim-identical (persona-carried vs plugin-injected)', `${carriedPrompt.length} chars`)
 } else {
   bad('L1. verbatim-identical prompt')
   let i = 0
-  while (i < oldPrompt.length && i < newPrompt.length && oldPrompt[i] === newPrompt[i]) i++
-  console.error(`  first divergence at offset ${i}:\n    old: ${JSON.stringify(oldPrompt.slice(i, i + 120))}\n    new: ${JSON.stringify(newPrompt.slice(i, i + 120))}`)
-  console.error(`  lengths old=${oldPrompt.length} new=${newPrompt.length}`)
+  while (i < carriedPrompt.length && i < injectedPrompt.length && carriedPrompt[i] === injectedPrompt[i]) i++
+  console.error(`  first divergence at offset ${i}:\n    carried: ${JSON.stringify(carriedPrompt.slice(i, i + 120))}\n    injected: ${JSON.stringify(injectedPrompt.slice(i, i + 120))}`)
+  console.error(`  lengths carried=${carriedPrompt.length} injected=${injectedPrompt.length}`)
 }
 
 // ── AC2: one-row mount for a non-matt preset ────────────────────────────────

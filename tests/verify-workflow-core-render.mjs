@@ -8,7 +8,7 @@
  *   R1. persona 前缀不含工作流正文（导语量级 450 chars，无 MAIN FLOW）；
  *   R2. 渲染结果含 workflow:core 注入节，正文完整（5 个标志段）；
  *   R3. {{model}}/{{cwd}} 已插值、无字面残留；
- *   R4. L1 等价：真实 composition 渲染 == 旧 persona 承载版（fixture 基线）渲染；
+ *   R4. L1 等价：真实 composition 渲染 == persona 承载版（fixture 基线，于 #85 重取）渲染；
  *   R5. 离线挂载契约：composition 里存在 workflow-core 行，且用 package
  *       subpath 形式寻址（不得写成 profile 目录相对的 ./ 路径——enforcer 行
  *       注释记录的同款陷阱）。
@@ -53,7 +53,7 @@ const personaPrefix = (yml) => {
 
 const composition = readFileSync(REPO + '/agent.cordis.yml', 'utf8').replace(/\r\n/g, '\n')
 const NEW_PREFIX = personaPrefix(composition)
-const OLD_PREFIX = readFileSync(REPO + '/tests/fixtures/persona-prefix-v1.txt', 'utf8').replace(/\r\n/g, '\n')
+const PERSONA_CARRIED = readFileSync(REPO + '/tests/fixtures/persona-prefix-v1.txt', 'utf8').replace(/\r\n/g, '\n')
 const CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
 
 const ctx = await bootHarness([
@@ -61,8 +61,8 @@ const ctx = await bootHarness([
     { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: NEW_PREFIX } },
     { id: 'workflow-core', name: CORE },
   ] },
-  { id: 'matt-old', plugins: [
-    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: OLD_PREFIX } },
+  { id: 'matt-carried', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: PERSONA_CARRIED } },
   ] },
 ])
 
@@ -81,7 +81,7 @@ const render = async (id, cwd, model) => {
 
 const CWD = REPO
 const real = await render('matt-real', CWD, 'render-check-model')
-const old = await render('matt-old', CWD, 'render-check-model')
+const carried = await render('matt-carried', CWD, 'render-check-model')
 
 // R1: persona 前缀已瘦身
 if (NEW_PREFIX.length < 800 && !NEW_PREFIX.includes('MAIN FLOW')) ok('R1. persona prefix carries no workflow body', NEW_PREFIX.length + ' chars')
@@ -99,12 +99,12 @@ if (real.includes('render-check-model') && real.includes(CWD) && !real.includes(
 else bad('R3. interpolation', real.slice(0, 200))
 
 // R4: L1 等价
-if (real === old) ok('R4. real-composition render verbatim-identical to persona-carried baseline', real.length + ' chars')
+if (real === carried) ok('R4. real-composition render verbatim-identical to persona-carried baseline', real.length + ' chars')
 else {
   bad('R4. verbatim-identical')
   let i = 0
-  while (i < real.length && i < old.length && real[i] === old[i]) i++
-  console.error('  divergence at ' + i + '\n  new: ' + JSON.stringify(real.slice(i, i + 100)) + '\n  old: ' + JSON.stringify(old.slice(i, i + 100)))
+  while (i < real.length && i < carried.length && real[i] === carried[i]) i++
+  console.error('  divergence at ' + i + '\n  real: ' + JSON.stringify(real.slice(i, i + 100)) + '\n  carried: ' + JSON.stringify(carried.slice(i, i + 100)))
 }
 
 // R5: 离线挂载契约（不依赖实例在跑）

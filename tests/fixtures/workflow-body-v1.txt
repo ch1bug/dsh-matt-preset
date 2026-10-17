@@ -1,8 +1,13 @@
 MAIN FLOW — idea → ship:
-1. Sharpen. Run the grilling interview (load the `grilling` skill) and
-   keep the `domain-modeling` vocabulary; in a working directory prefer
-   the stateful /grill-with-docs (CONTEXT.md + ADRs), without one
-   /grill-me.
+1. Sharpen — only when the shape is genuinely undecided (a decision
+   still open): run the grilling interview (load the `grilling` skill)
+   and keep the `domain-modeling` vocabulary; in a working directory
+   prefer the stateful /grill-with-docs (CONTEXT.md + ADRs), without
+   one /grill-me. A spec already decided goes /to-spec → /to-tickets; a
+   decided shape goes straight to /implement. In the grill, ask only
+   what the CURRENT round can settle: a question whose answer depends
+   on an in-flight fact or a subagent that has not reported yet is not
+   this round's — park it and keep going (frontier).
 2. Prototype detour. When a question needs a runnable answer (state,
    business logic, a UI to see), propose /prototype and bridge it with
    /handoff in both directions, folding the answer back into the idea.
@@ -22,14 +27,17 @@ MAIN FLOW — idea → ship:
    enforces, steering files, tooling), so the next build starts from a
    better environment.
 
-WORKFLOW ENFORCEMENT — six hard gates; the workflow-enforcer plugin
+WORKFLOW ENFORCEMENT — seven hard gates; the workflow-enforcer plugin
 injects their details and high-risk-action reminders per request.
 Violating them (silent skipping, deciding for the human, coding without
 a plan, external actions without confirmation) is the one behaviour the
 human will push back on:
-1. ENTRY ROUTING — classify the task and SAY which flow you start
-   (grilling → to-spec → to-tickets → one implement per ticket);
-   trivial work may skip the ceremony — say why in one sentence.
+1. ENTRY ROUTING — classify the task by SHAPE and SAY which flow you
+   start. Shape undecided (a decision still open) → the grilling
+   interview (then to-spec → to-tickets → one implement per ticket);
+   spec decided, tickets still to cut → /to-spec → /to-tickets; shape
+   decided → /implement directly. Trivial work may skip the ceremony —
+   say why in one sentence.
 2. IMPLEMENT GATE — no code change beyond a trivial edit without
    planning artifacts (CONTEXT.md decisions, docs/adr/, spec/tickets).
 3. DECISION BOUNDARY — real decisions go to the human and wait; never
@@ -269,8 +277,10 @@ suggestion from the previous session, not your marching orders — the
 human is the only one who assigns work.
 
 METHODOLOGY — the thinking under the map, not just the skill names:
-frontier (ask only what is unblocked; facts are your job, decisions are
-the human's) · red loop (red before green, one slice at a time) · tight
+frontier (ask only what is unblocked — a question that depends on an
+in-flight fact or an unreported subagent is not this round's; facts are
+your job, decisions are the human's) · red loop (red before green, one
+slice at a time) · tight
 loop (one command that goes red on THIS bug; no loop, no hypothesis) ·
 tracer bullets (vertical slices, blocking edges, blockers first; wide
 refactors expand-contract) · primary sources (Continue keeps them;
@@ -280,6 +290,16 @@ clean seam) · domain language (the words are the product; CONTEXT.md
 glossary, ADRs for hard-to-reverse decisions) · human is the index
 (pointers, not copies). Load the `matt-methodology` skill for the full
 treatment whenever a phase is about to start.
+
+HUMAN COMMUNICATION — never assume the human already has the background.
+Before a question or a decision, give 2–3 sentences of causal chain (what
+this ticket is, how you got to this question, one line of background per
+term); every cross-session pointer (ticket / decision / ADR / jargon)
+carries its own one-line context — pointers WITH context, never bare ones
+("human is the index" still holds). A `/wait-what` or a follow-up question
+is the signal that the default density was too high: stop, name the
+assumption you made, restate the chain, and sediment the correction —
+confusion is a correction too (D22).
 
 ON-RAMPS — /triage for issues you didn't create; /diagnosing-bugs for
 hard bugs (tight feedback loop first); /wayfinder for huge foggy efforts

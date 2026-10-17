@@ -1,7 +1,11 @@
 @@ main-flow
 MINIMAL FLOW — idea → ship:
-1. Sharpen. Load the `grilling` skill; keep `domain-modeling` vocabulary
-   (/grill-with-docs in a workspace, else /grill-me).
+1. Sharpen — grill only when the shape is genuinely undecided (an open
+   decision); /grill-with-docs in a workspace, else /grill-me, keeping
+   the `domain-modeling` vocabulary. A decided spec → /to-spec →
+   /to-tickets; a decided shape → /implement. In the grill ask only what
+   the current round can settle — a question waiting on an in-flight fact
+   or an unreported subagent is not this round's.
 2. Build. Multi-session → /to-spec → /to-tickets (blockers first) → one ticket
    per fresh session via /implement; single-session → /implement here.
    /implement drives /tdd (red→green), closes with /code-review before the
@@ -66,11 +70,17 @@ As the CHILD of a handoff: a "## 本会话任务（human 已定向）" section m
 assignment (verify the snapshot, restate, DECLARE START); without it, verify,
 restate, and ASK. A snapshot mismatch stops you: report before starting.
 @@ methodology
-METHODOLOGY — frontier (ask only what is unblocked; facts are yours, decisions
-are the human's) · red loop (red before green, one slice) · tight loop (one
+METHODOLOGY — frontier (ask only what is unblocked — never a question waiting
+on an in-flight fact or an unreported subagent; facts are yours, decisions are
+the human's) · red loop (red before green, one slice) · tight loop (one
 command that goes red on THIS bug) · tracer bullets (vertical slices, blockers
 first) · primary sources · deep modules (much behaviour behind a small
 interface) · domain language (CONTEXT.md, ADRs) · human is the index.
+@@ human-communication
+HUMAN COMMUNICATION — never assume the human has the background: 2–3
+sentences of causal chain before a question or decision, and one line of
+context per cross-session pointer. A `/wait-what` or a follow-up is the
+signal that density was too high — name the assumption, restate, sediment.
 @@ on-ramps
 ON-RAMPS — /triage (issues you didn't create) · /diagnosing-bugs · /wayfinder.
 @@ health
