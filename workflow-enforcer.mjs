@@ -1065,11 +1065,13 @@ async function reminderText(agent, config, ctx, assembled) {
           'session\'s retro first, then read EVERY `.scratch/retro/*.md` written by',
           'this batch, dedupe (merge the same issue and record its count), sort by',
           'severity, and present it to the human ONCE, each candidate naming its',
-          'source ticket / session. The `retro:` marker in `.scratch/batch-state.md`',
-          'is what keeps this to once per batch: do NOT re-read the batch\'s old',
-          'sessions wholesale, the per-session candidate files are the material.',
-          'After presenting, write `.scratch/retro/.aggregated` — that marker is',
-          'what stops every LATER session in this batch from aggregating again.',
+          'source ticket / session. Two markers answer two different facts: the',
+          '`retro:` line in `.scratch/batch-state.md` says the batch-end retro has',
+          'RUN (that is the trigger for this face); what suppresses a SECOND',
+          'presentation is `.scratch/retro/.aggregated`, which YOU write after',
+          'presenting — that is what stops every LATER session in this batch from',
+          'aggregating again. Do NOT re-read the batch\'s old sessions wholesale:',
+          'the per-session candidate files are the material.',
         ].join(' '))
       }
     } else if (probe.kind !== 'ok' || !probe.content.includes(RETRO_TRIGGER.retroMarker)) {

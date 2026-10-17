@@ -982,9 +982,33 @@ if (!aggregateText(v29c) && retroText(v29c)) ok('V29c. a THIRD session of the sa
 else bad('V29c. third-session suppression lost', v29c.slice(-240))
 // The aggregation reminder must TELL the agent to write the marker — otherwise
 // the suppression could never engage in a real run.
-if (v27.includes('After presenting, write `.scratch/retro/.aggregated`'))
+if (v27.includes('.scratch/retro/.aggregated') && /which YOU write after\s+'?\s*presenting|write after/.test(v27))
   ok('V29d. the aggregation reminder instructs the agent to write `.aggregated` (the suppressor is agent-written)')
 else bad('V29d. aggregation reminder omits the .aggregated instruction', v27.slice(-260))
+
+// V29f: the aggregation text must not carry the RETRACTED claim that `retro:` is
+// the suppressor. This is the same negative lock C2f-2 applies to the body and
+// docs — but C2f-2 reads ONLY those two surfaces, and the ENFORCER's injected
+// prompt was left out. Measured on HEAD: the injected line still read "The
+// `retro:` marker … is what keeps this to once per batch" while the sentence two
+// lines later said `.aggregated` does the suppressing — a self-contradiction in
+// the one text the model actually reads at the batch end (defect class D3,
+// 文档说谎). Red for the fix is simply restoring that sentence.
+//
+// The retracted claim is matched by the PHRASE ALONE (not "retro: … phrase"):
+// the perturbation that reddens this may leave the `retro:` mention far earlier
+// in the joined string, so anchoring on proximity makes the lock vacuous —
+// measured, first draft stayed green under a restored claim.
+const RETRACTED = [
+  /is what keeps (?:this|it) to once per batch/i,
+  /(?:that|the) marker\s+is what stops every LATER session/i,
+  /retro:`?\s+marker[^.]{0,80}is what keeps/i,
+]
+const retained = RETRACTED.filter(re => re.test(v27)).map(re => String(re))
+if (retained.length === 0 && v27.includes('.aggregated') && /suppresses a SECOND/i.test(v27))
+  ok('V29f. aggregation text names `.aggregated` as the suppressor and drops the retracted `retro:` claim (D3 guard)')
+else bad('V29f. aggregation text still credits the retracted suppressor, or lost the correct one',
+  `retained=${retained.join(' | ') || '—'} | has .aggregated=${v27.includes('.aggregated')}`)
 // the inverse: batch-state.md WITHOUT `retro:` → 落盘, not 聚合.
 const noMarkRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-nomark-'))
 await mkdir(join(noMarkRoot, '.scratch'), { recursive: true })
