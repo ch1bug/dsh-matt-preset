@@ -208,6 +208,64 @@ per-issue push rhythm.
   missing any is BLOCKED, not done —
   this adds evidence, it does NOT relax the CI confirmation (DONE and
   the batch-end gate keep their full force).
+- PUSH-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
+  richest retro material is the batch itself: many tickets, many
+  sessions, usually rework and handoff loss. Two obligations, keyed on a
+  REAL push:
+  - PER-TICKET PUSH → WRITE CANDIDATES TO DISK: on a real push, run this
+    session's retro at once and write the candidates to
+    .scratch/retro/<batch>-<session>.md — content = candidates (ordered
+    by severity) + evidence (command / output) + source (session id /
+    ticket number) + why it was not landed. CANDIDATES ONLY, never
+    land them (landing is still the human's call, D22/D27). Writing a
+    local candidate file is NOT an external action (D21 covers push /
+    closing / creating issues), so it is CONFIRMATION-FREE and
+    NON-BLOCKING: keep going, never stop the wrap to ask. Re-running in
+    the same session overwrites the same file (idempotent).
+  - BATCH-END PUSH → RUN THIS SESSION'S RETRO FIRST, THEN AGGREGATE: read
+    every landed file of the same batch, DEDUPE AND MERGE (the same
+    problem recurring across sessions is merged with a COUNT — that
+    merge is the whole point of aggregating), order by severity, and
+    present ONCE to the human, every line tagged with its source ticket
+    number / session. Never re-read the whole batch history at batch end
+    — the landed files replace that. Then wait for CI green (or the push
+    itself when the repo has no CI), and write the completion marker
+    `retro: done @ <commit>` into .scratch/batch-state.md. That marker says
+    the batch-end retro has RUN — it is NOT what keeps the presentation to
+    once per batch, because it is written BEFORE the batch-end push, so
+    every later session of the same batch would aggregate again. Two
+    markers, two facts: after actually PRESENTING the aggregation, write
+    the second existence marker `.scratch/retro/.aggregated` — that one is
+    the CROSS-SESSION suppressor (每批至多一次 constrains the
+    PRESENTATION, never the material). A later session in an
+    already-aggregated batch does NOT aggregate or re-present; it still
+    runs its own retro and LANDS its candidates, so no material is lost
+    (不静默丢素材). Both markers are written by YOU (this rule); the
+    enforcer only READS them and writes no file. The batch-state shape is
+    .scratch/batch-state.md per docs/batch-state.md.
+  - TRIGGER FACE — A REAL PUSH CALL ONLY (宁严勿宽): the trigger is the
+    (toolName, argv) pair — the tool layer plus the command layer of a
+    shell tool, judged at the COMMAND POSITION (`git push`). Words in a
+    session, in thinking, or in a document NEVER trigger it: merely
+    writing or discussing "推送 / push" — a plan, a retro doc, a handoff
+    body (this repo's handoffs are full of it) — must not trigger
+    anything. Indirect pushes (inside a script) and PTY fragment writes
+    do NOT trigger either; they are DECLARED NOT COVERED, and a false
+    trigger costs more than a missed one (a wasted retro run plus junk
+    candidates polluting the batch-end aggregation), so the face stays
+    narrow and never grows a keyword fallback.
+  - FALLBACK — NEVER DROP MATERIAL SILENTLY: the injection rides the next
+    prompt assembly, so a push that is a session's LAST action can lose
+    its reminder, and indirect / PTY pushes are outside the trigger face
+    by construction. Before session/disposed, probe FACTS — `git log
+    origin/<branch>..HEAD` and `git status -sb` — and when the probe says
+    "pushed but nothing landed", re-run the retro or record a marker.
+    Silent loss of retro material is the one failure this rule forbids.
+- BATCH DECLARATION INITIALIZES THE STATE FILE: when the human declares
+  a batch, write .scratch/batch-state.md — 成员 (members and order),
+  结束点 (the end point), the progress log, and the unpushed-commit
+  list — in the shape given by docs/batch-state.md (the single source of
+  truth for that shape; do not re-derive it here).
 - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
   the next code push.
 - BATCH STATE IS EXPLICIT (this is what keeps batches from piling up):

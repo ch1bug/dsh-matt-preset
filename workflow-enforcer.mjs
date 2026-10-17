@@ -50,6 +50,54 @@
  * execution that cannot be judged structurally (nested scripts, PTY writes) —
  * stays uncovered by design and is left to #71's fact probe, not to fuzzy
  * matching.
+ *
+ * PUSH-TRIGGERED RETRO (#71): a REAL push call arms the per-ticket retro
+ * writing reminder, and a real push in a batch whose `.scratch/batch-state.md`
+ * already carries the `retro:` completion marker arms the batch-end aggregation
+ * reminder instead. The trigger face is the SAME structured core as the ⚠ gate
+ * (`RETRO_TRIGGER.push` = the command-position word run `git push` over the
+ * call's declared action field), and 宁严勿宽 holds: a false trigger burns a
+ * retro run and pollutes the batch-end aggregation with junk candidates, which
+ * costs more than a missed one — so the judgement stays narrow and never grows
+ * a fallback. `write` / `edit` / `pty_send` and every other tool without a
+ * declared action field NEVER arm it, and neither do the text events
+ * (`assistant/message`, `user/message`, `text-chunks`, `agent/inbox/spliced`):
+ * a session that merely discusses "推送/push" (a plan, a retro doc, a handoff
+ * body) is inert.
+ *
+ * Two faces, deliberately different (not an inconsistency):
+ *   - push is a TOOL event — it has a `(toolName, argv)` action surface, so it
+ *     is judged there and ONLY there. The text layer is structurally excluded.
+ *   - a batch declaration (攒批) is something the HUMAN SAYS — it has no tool
+ *     call at all, so its only possible face is the text event layer, exactly
+ *     like `BATCH_CLOSE_KEYWORDS`. Reading a declaration off a tool call would
+ *     be inventing an action that does not exist; reading a push off free text
+ *     would be the false positive #71 outlaws.
+ *
+ * 每批至多一次 (#71 fix): the aggregation PRESENTATION is suppressed
+ * cross-session by a SECOND existence marker, `.scratch/retro/.aggregated`,
+ * which the agent writes AFTER it presents. `retro:` alone cannot do this — it
+ * is written before the batch-end push, so it selects the aggregation face for
+ * every later session in the batch too (measured: 3 sessions → 3 aggregations).
+ * The two markers answer different questions: `retro:` = "the batch-end retro
+ * has run"; `.aggregated` = "the aggregation has already been PRESENTED". Once
+ * `.aggregated` exists, later pushes fall back to the LANDING face — the
+ * constraint is on the presentation, never on the material (不静默丢素材).
+ *
+ * FAIL-LOUD probing (#71 fix): the `.scratch/batch-state.md` probe keeps three
+ * DISTINCT states — ok / absent / error. A read FAILURE (EISDIR, EACCES, IO
+ * error) is reported in its own injected section and then treated as the landing
+ * face, never flattened into "no marker": routing the batch-end face off an
+ * unreadable file is exactly the silent degradation the ticket forbids. The
+ * plugin still never throws out of the assemble hook — the existing try/catch
+ * keeps "a filter bug must never brick every request".
+ *
+ * Indirect / PTY pushes (`node deploy.mjs` doing the push, `pty_send` fragment
+ * writes, another workspace tool face) are NOT covered — declared rather than
+ * guessed, the #79 口径. They are left to the FACT PROBE at wrap-up
+ * (`git log origin/<branch>..HEAD` / `git status -sb`): 已推但无落盘 → 补跑或
+ * 记 marker，不静默丢素材. This plugin never runs that probe itself — it is
+ * reminder-only and writes no file.
  */
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -127,6 +175,24 @@ const batchClose = new WeakMap()
  * (one issue per session keeps a session inside one phase anyway). */
 const grillMode = new WeakMap()
 
+/** Sessions whose latest call was a REAL push (#71) — armed by the tool/call
+ * hook on the push trigger's structured surface, consumed by the next
+ * assemble, which then injects the retro reminder inside the SAME
+ * `workflow:gates` section as the ⚠ line: one assemble, one shot, no extra
+ * section and no repeat. ONE armed state covers both faces — whether this push
+ * is a per-ticket 落盘 or the batch-end 聚合 depends on `.scratch/batch-state.md`
+ * at CONSUME time (see `reminderText`), because the arming hook is
+ * fire-and-forget and cannot await a file read. */
+const retroPush = new WeakMap()
+
+/** Sessions where the human has declared a batch (#71) — armed by the TEXT
+ * event hook (a declaration has no tool call; see `RETRO_TRIGGER`),
+ * consumed by the next assemble, which then injects the batch-state
+ * initialization reminder pointing at `docs/batch-state.md`. Per-session
+ * one-shot: the declaration is an opening move, not a checkpoint to re-nag
+ * on every assembly (the same one-shot shape as `batchClose`). */
+const batchDeclared = new WeakMap()
+
 /** Skill-tool names that put a session into grill/triage interview mode. */
 const GRILL_SKILL_NAMES = ['grilling', 'grill-with-docs', 'grill-me', 'triage']
 
@@ -187,6 +253,88 @@ export const TICKET_LIFECYCLE = {
  * a sink is warned about at runtime and reddens V23 — never silently dropped). */
 const TICKET_ARMED = { close: ticketClosed, create: ticketCreated }
 
+/** Retro-trigger detections (#71): the arming decision for the push-triggered
+ * retro reminders (落盘 / 批末聚合) and the batch-declaration reminder.
+ *
+ * TWO FACES, ON PURPOSE — see the header note. The split is a property of the
+ * events, not a stylistic choice:
+ *   - `push.words` — a REAL push call. Judged on the SAME structured core as
+ *     the ⚠ gates and the ticket-lifecycle nudges (#79 `actionSurface` +
+ *     `matchesSurface`): word runs at the COMMAND POSITION of the call's
+ *     declared action field. `write` / `edit` / `pty_send` have no action
+ *     field → no surface → they can never arm it, by construction. Free text
+ *     never reaches this judgement: a body, an `echo`, a commit message, a
+ *     `--grep` pattern or an inline `--body` that merely says `git push` is
+ *     inert (and so is the Chinese word 推送 — it is not an argv at all).
+ *   - `batchDeclare.words` — a batch declaration by the HUMAN ("这批攒批 /
+ *     系列处理 / 大系列"). A declaration has NO TOOL CALL: the only layer it
+ *     can possibly arrive on is the text event layer, exactly like
+ *     `BATCH_CLOSE_KEYWORDS`. This is the inverse of `push` — not an
+ *     inconsistency: push is a tool event judged as an action, a declaration is
+ *     a speech act judged as text. Judging a push from text would be #71's
+ *     outlawed false positive; judging a declaration from a tool call would be
+ *     inventing an action nobody took.
+ *   - `retroMarker` — the batch-end completion marker, matched as EXISTENCE
+ *     only: `.scratch/batch-state.md` mentioning `retro:` (however its Progress
+ *     row spells the rest) means the batch-end wrap already ran, so the next
+ *     real push in the same batch suppresses 聚合呈现 (每批至多一次, 跨会话 —
+ *     the marker lives in the FILE, not in a session's WeakMap). The table is
+ *     never parsed and no other field is validated: reading a shape here would
+ *     couple the trigger to a format it does not own (that shape's single
+ *     source of truth is `docs/batch-state.md`). */
+export const RETRO_TRIGGER = {
+  push: { words: ['git push'] },
+  batchDeclare: {
+    words: ['攒批', '批量模式', '系列处理', '大系列', '这批攒批'],
+  },
+  retroMarker: 'retro:',
+  // The AGGREGATION-COMPLETED probe (#71 fix): a SECOND, independent existence
+  // marker — `.scratch/retro/.aggregated` — that the agent writes per the body
+  // rule AFTER it has presented the batch-end aggregation. The `retro:` marker
+  // alone cannot suppress the aggregation ACROSS SESSIONS: it is written BEFORE
+  // the batch-end push, so every later session in the same batch would re-take
+  // the aggregation branch (measured: 3 sessions → 3 aggregations). `retro:`
+  // answers "has the batch-end retro run"; `.aggregated` answers "has the
+  // aggregation already been PRESENTED" — two different facts, so two markers.
+  //
+  // EXISTENCE ONLY, same shape as `retroMarker` (the file's content is never
+  // read). Deliberately a DOT-FILE inside the retro dir rather than a row in
+  // batch-state.md: the aggregation's completion is retro-MATERIAL state (it
+  // lives with the candidate files, same lifecycle), not batch-status state —
+  // and, critically, a `.md` name would be swept up by the aggregation's own
+  // `read EVERY .scratch/retro/*.md` and be mistaken for a candidate file.
+  aggregatedMarker: '.scratch/retro/.aggregated',
+}
+
+/** The field NAMES of `.scratch/batch-state.md` that this plugin's reminders
+ * DEPEND on — the SUPERSET-free list, deliberately not a template.
+ *
+ * The SHAPE of that file lives in exactly ONE place: `docs/batch-state.md`. This
+ * constant used to be a hand-copied skeleton, and it drifted (missing the
+ * declaration/mode lines, the 结束点 criteria, the second member row and the
+ * progress log) while its own comment claimed the two "cannot drift apart
+ * unnoticed" — a second copy of a single source of truth is a second source of
+ * truth. It is therefore reduced to what the reminders actually READ/POINT AT,
+ * so there is no structure left to drift (D49: 口径与指针，不复述字段表).
+ *
+ * Every listed name is load-bearing for a REMINDER, never for parsing (nothing
+ * here is parsed — the probe reads existence, the marker reads a substring):
+ *   - 成员 / 结束点 — the declared batch boundary the declaration reminder asks
+ *     for (D31 guardrail a/c);
+ *   - 证明命令 / exit code / 证据路径 — the Progress row's three evidence
+ *     elements; a row missing any is BLOCKED, not done (same rule as the
+ *     batch-close nudge);
+ *   - lane — which lane the ticket ran in (D38);
+ *   - 后继票 — the successor the AUTO-HANDOFF nudge reads;
+ *   - `retro:` — the batch-end retro completion marker (#71).
+ * Written by the AGENT (workflow-body rule), never by this plugin: the enforcer
+ * is reminder-only and writes no file. */
+export const BATCH_STATE_TEMPLATE = [
+  '成员', '结束点',
+  '证明命令', 'exit code', '证据路径',
+  'lane', '后继票', 'retro:',
+]
+
 /** Keywords that mark a fold-in claim (lowercased match). */
 /** Keywords that arm context evidence: fold-in claims (agent) or
  * context-capacity assessments (user asking how much window is left). */
@@ -222,6 +370,58 @@ async function hasBatchState(cwd) {
   } catch {
     return false
   }
+}
+
+/** The `.scratch/batch-state.md` probe result, as ONE of three DISTINCT states
+ * — never a `string | null` that flattens a read failure into "no file":
+ *
+ *   - `{ kind: 'ok', content }` — read succeeded.
+ *   - `{ kind: 'absent' }` — ENOENT: the file genuinely is not there (or there
+ *     is no cwd at all). The normal "not in a batch" path.
+ *   - `{ kind: 'error', code, message }` — the file is there but could NOT be
+ *     read (EISDIR, EACCES, EPERM, IO error…). This MUST stay distinguishable:
+ *     silently routing it to "no marker" would decide the batch-end face on a
+ *     failed probe, which the ticket's fail-loud AC forbids.
+ *
+ * This function never throws — the caller decides how loud to be. */
+async function probeBatchState(cwd) {
+  if (!cwd) return { kind: 'absent' }
+  try {
+    return { kind: 'ok', content: await readFile(join(cwd, '.scratch', 'batch-state.md'), 'utf8') }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { kind: 'absent' }
+    return { kind: 'error', code: String(error?.code ?? 'UNKNOWN'), message: String(error?.message ?? error) }
+  }
+}
+
+/** Whether the `.scratch/retro/.aggregated` existence marker is present (#71's
+ * 每批至多一次 suppressor for the AGGREGATION face). EXISTENCE ONLY — the
+ * content is never read. `false` on any failure: a suppressor that cannot be
+ * read must never SUPPRESS, because suppressing on a failed probe would drop the
+ * aggregation silently; the loud reporting of a failed `batch-state.md` probe
+ * covers the diagnostics (this probe's own failure only ever widens behaviour
+ * back to the aggregation face, which the marker would have suppressed only if
+ * it demonstrably existed). */
+async function hasAggregatedMarker(cwd) {
+  if (!cwd) return false
+  try {
+    await readFile(join(cwd, RETRO_TRIGGER.aggregatedMarker), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Whether a tool call is a REAL push, judged on the declared action surface —
+ * the same structured core as the ⚠ gate and the ticket-lifecycle nudges. The
+ * face is declared in `RETRO_TRIGGER.push.words`; a tool with no action field
+ * (write / edit / pty_send / …) has no surface and can never arm it. This is
+ * deliberately the SAME judgement the ⚠ line's push follow-ups use — one
+ * declaration, so the retro trigger and the gate cannot disagree. */
+function pushTriggerHit(call) {
+  const surface = actionSurface(call)
+  if (surface === null) return false
+  return RETRO_TRIGGER.push.words.some(word => matchesSurface(word, surface))
 }
 
 /** Parse a tool call's arguments (JSON string or object). */
@@ -727,6 +927,17 @@ export const INJECTIONS = [
   { id: 'batch-close', marker: 'AUTO-HANDOFF', config: 'batchCloseCheck' },
   { id: 'context-evidence', marker: 'context:', config: 'contextEvidence' },
   { id: 'grill-contract', marker: 'GRILL QUESTION CONTRACT', config: 'grillContract' },
+  // #71 — the push-triggered retro reminders. Two distinct sections on the same
+  // config knob: exactly one of them fires per push (marker in the file →
+  // aggregation, otherwise → 落盘), never both.
+  { id: 'retro-push', marker: 'Retro candidate — file it now', config: 'retroTriggerCheck' },
+  { id: 'retro-batch-end', marker: 'Batch-end retro aggregation', config: 'retroTriggerCheck' },
+  // #71 fix — the fail-loud report for a batch-state probe that could NOT read
+  // the file. Distinct marker (no `⚠` prefix: that prefix belongs to the
+  // high-risk ACTION gate, and reusing it here would read as a false alarm),
+  // same knob as the retro faces it guards.
+  { id: 'batch-state-probe-failed', marker: 'Batch-state probe FAILED', config: 'retroTriggerCheck' },
+  { id: 'batch-declared', marker: 'Batch declared', config: 'batchDeclareCheck' },
 ]
 
 /** The reminder section text for one request, or null when nothing applies. */
@@ -809,6 +1020,86 @@ async function reminderText(agent, config, ctx, assembled) {
       ].join(' '))
     }
   }
+  if (config.retroTriggerCheck !== false && retroPush.get(agent.session) === true) {
+    retroPush.delete(agent.session) // consume: one retro reminder per push
+    // Which face this push gets is decided HERE, from `.scratch/batch-state.md`
+    // in the agent's cwd — NOT at arm time. `session/event` is fire-and-forget
+    // (the emitter never awaits a listener), so an async file read inside the
+    // arming hook would land after the very assembly meant to consume it;
+    // `reminderText` is already async and the assemble hook is awaited, so the
+    // read belongs here. The marker is read from the FILE, which is what makes
+    // the 每批至多一次 suppression hold ACROSS SESSIONS.
+    const probe = await probeBatchState(agentCwd(agent))
+    // A FAILED probe is reported loudly and then treated as the landing face.
+    // It must never be flattened into "no marker": deciding the batch-end face
+    // on an unreadable file is exactly the silent degradation the ticket's
+    // fail-loud AC forbids (the file may well carry `retro:`).
+    if (probe.kind === 'error') {
+      parts.push([
+        `Batch-state probe FAILED (${probe.code}): could not read`,
+        '`.scratch/batch-state.md`, so the batch-end retro face cannot be decided',
+        '— treating this push as the per-ticket landing face. Verify the file by',
+        'hand (permissions / a corrupt path) and re-run the probe; do NOT assume',
+        'the batch is unaggregated.',
+      ].join(' '))
+    }
+    if (probe.kind === 'ok' && probe.content.includes(RETRO_TRIGGER.retroMarker)) {
+      // batch-state.md WITH the `retro:` marker → the batch-end wrap has been
+      // reached. The aggregation is injected ONLY while the batch has not been
+      // aggregated yet: `.scratch/retro/.aggregated` (written by the agent after
+      // it presents) is the CROSS-SESSION suppressor, so the SECOND and later
+      // sessions of the same batch fall through to the landing face instead of
+      // re-presenting. A later session still lands its own candidates — 每批至多
+      // 一次 constrains the PRESENTATION, never the material (不静默丢素材).
+      if (await hasAggregatedMarker(agentCwd(agent))) {
+        parts.push([
+          'Retro candidate — file it now: this batch\'s end aggregation has already',
+          'been presented (`.scratch/retro/.aggregated`), so do NOT aggregate or',
+          're-present it. Still run this session\'s retro and WRITE its candidates to',
+          '`.scratch/retro/<batch>-<session>.md` so the material is not lost',
+          '(re-running overwrites the same name, idempotent).',
+        ].join(' '))
+      } else {
+        parts.push([
+          'Batch-end retro aggregation — before presenting the wrap-up: run this',
+          'session\'s retro first, then read EVERY `.scratch/retro/*.md` written by',
+          'this batch, dedupe (merge the same issue and record its count), sort by',
+          'severity, and present it to the human ONCE, each candidate naming its',
+          'source ticket / session. The `retro:` marker in `.scratch/batch-state.md`',
+          'is what keeps this to once per batch: do NOT re-read the batch\'s old',
+          'sessions wholesale, the per-session candidate files are the material.',
+          'After presenting, write `.scratch/retro/.aggregated` — that marker is',
+          'what stops every LATER session in this batch from aggregating again.',
+        ].join(' '))
+      }
+    } else if (probe.kind !== 'ok' || !probe.content.includes(RETRO_TRIGGER.retroMarker)) {
+      // No batch, a batch that has not reached its end marker, or a failed
+      // probe → the per-ticket 落盘 face.
+      parts.push([
+        'Retro candidate — file it now: this was a real push, so run this',
+        'session\'s retro and WRITE the candidates to',
+        '`.scratch/retro/<batch>-<session>.md` (candidates by severity + evidence',
+        '— command / output — + source: session id and ticket, + why each stayed',
+        'unlanded). It is a LOCAL file: no human confirmation needed and it never',
+        'blocks the wrap-up, re-running the same session OVERWRITES the same name',
+        '(idempotent), and it records CANDIDATES ONLY — landing them still goes',
+        'through the human (D22/D27). In batch mode this is the per-ticket',
+        '落盘 that the batch-end aggregation later reads.',
+      ].join(' '))
+    }
+  }
+  if (batchDeclared.get(agent.session) === true && config.batchDeclareCheck !== false) {
+    batchDeclared.delete(agent.session) // consume: one initialization reminder per declaration
+    parts.push([
+      'Batch declared — write `.scratch/batch-state.md` now (members, end point,',
+      'the Progress rows\' three evidence elements — proving command / exit code /',
+      'evidence path — a lane marker per ticket, the successor ticket, and the',
+      '`retro: done @ <commit>` completion marker at the batch end). Its shape is',
+      '`docs/batch-state.md` — copy that template, do not invent fields. Update it',
+      'after every ticket; the `retro:` line is the agent\'s to write (this plugin',
+      'only reads the marker).',
+    ].join(' '))
+  }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null
 }
 
@@ -842,6 +1133,28 @@ export function apply(ctx, config = {}) {
     if (String(call.name ?? '').toLowerCase() === 'skill'
         && GRILL_SKILL_NAMES.includes(String(call.arguments?.name ?? '').toLowerCase())) {
       grillMode.set(session, true)
+    }
+    // Push-triggered retro (#71): a REAL push arms the per-ticket 落盘 reminder,
+    // or the batch-end 聚合 reminder when `.scratch/batch-state.md` already
+    // carries the `retro:` marker. Judged on the SAME structured surface as the
+    // ⚠ gate (`pushTriggerHit` → `matchesSurface('git push', …)`), never on the
+    // serialized call: a document body, an `echo` or an inline `--body` that
+    // mentions the push stays inert, and so does every tool without a declared
+    // action field (write / edit / pty_send / …). The marker is read HERE (the
+    // hook has the session; only the assemble hook has the agent's cwd), so the
+    // file read is best-effort and a read failure degrades to 落盘 — never to a
+    // missing reminder. The cwd is REQUIRED for that read: without one there is
+    // no file to look at, so the marker cannot be claimed (an undefined cwd must
+    // never read as "marker present").
+    if (pushTriggerHit(call)) {
+      // `session/event` is a fire-and-forget notification: the emitter does NOT
+      // await an async listener, so the WeakMap must be written SYNCHRONOUSLY,
+      // before this callback returns — a read awaited inside the hook lands
+      // after the assemble that was supposed to consume it (measured: the ⚠ line
+      // fired while both retro branches stayed silent). The marker is therefore
+      // resolved at CONSUME time instead, where `reminderText` is already async
+      // and has the agent's cwd; arm BOTH here and let the assembly pick.
+      retroPush.set(session, true)
     }
   })
 
@@ -877,6 +1190,16 @@ export function apply(ctx, config = {}) {
     text = text.toLowerCase()
     if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
     if (BATCH_CLOSE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) batchClose.set(session, true)
+    // Batch declaration (#71): judge it HERE and ONLY here — a declaration is
+    // something the HUMAN SAYS ("这批攒批 / 系列处理 / 大系列"), it has no tool
+    // call to judge, so the text layer is its only possible face (the exact
+    // inverse of the push trigger, which is judged on the action surface and
+    // structurally excludes this layer). Keywords are matched as substrings over
+    // the assembled text, the same shape as `BATCH_CLOSE_KEYWORDS`; the
+    // reminder is injected whether or not `.scratch/batch-state.md` exists yet,
+    // because creating it is precisely the declaration's job (an initialization
+    // reminder gated on the file already existing would never fire once).
+    if (RETRO_TRIGGER.batchDeclare.words.some(kw => text.includes(kw.toLowerCase()))) batchDeclared.set(session, true)
     // Directed handoff docs start with /grill… or /triage — arm interview
     // mode (inbox/spliced events carry the handoff as inserted user text;
     // the JSON.stringify fallback below guarantees the prefix is visible).

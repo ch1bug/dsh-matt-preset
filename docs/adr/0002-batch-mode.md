@@ -34,6 +34,8 @@ IRIS 2026-08-25 会话收到 GitHub Actions 分钟告警：ch1bug 账户私有�
 
 落地位置：`agent.cordis.yml`（gate 6 例外、DONE 双模式、BATCH MODE 节、TEXT PUSHES EXCLUDE ACTIONS 规范）+ `workflow-enforcer.mjs`（基线提醒与 push 后提醒补批次例外，保持无状态）+ CONTEXT.md D31。
 
+**指针（不复述字段）**：批次状态文件的**形状**（模板、必需字段、落盘契约、`retro:` 完成标记）单一事实源在 [docs/batch-state.md](../batch-state.md)——本 ADR 不复述字段表，字段要改先改那里。#71 的 **push 触发面**（真 push 调用 → 每票落盘 / 批末聚合去重一次呈现；文本面永不 arm；间接/PTY push 声明不覆盖交事实探测）口径、判定面与不覆盖清单见 [docs/workflow-enforcer.md](../workflow-enforcer.md)；决策记录见 CONTEXT.md D49。
+
 ## Considered Options
 
 - **本地部署自托管 runner**（把远程 CI 变免费）——评估过：机器是 8 核 i7-1065G7 / 7.6G 内存 / WSL2 / 会重启（uptime 2h56m），只能串行 1 job、可用性不稳定；纯省钱角度不成立（超量费率 $0.006/分，月超 1000 分钟才 ~$6）。**否**，除非未来要恢复逐票 push + 远程 CI 门禁才值得再议。

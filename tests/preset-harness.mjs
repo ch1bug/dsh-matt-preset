@@ -16,7 +16,7 @@
  * they do not throw. Register presets only after the harness services.
  */
 import { realpath } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse } from 'yaml'
 import { Context } from '@deepseek-ai/cordis'
@@ -57,8 +57,23 @@ import SessionProjection from '@deepseek-ai/dsh-session-projection'
 export const RUNTIME = await realpath(fileURLToPath(new URL('./node_modules/@deepseek-ai', import.meta.url)))
 /** baseUrl for the harness Context: package-name rows resolve against it. */
 export const RUNTIME_URL = pathToFileURL(RUNTIME).href + '/'
-/** The repo's workflow-enforcer plugin, as a loader-resolvable file:// name. */
-export const ENFORCER_PLUGIN = pathToFileURL(fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))).href
+/**
+ * The repo's workflow-enforcer plugin, as a loader-resolvable file:// name.
+ *
+ * Overridable via `DSH_MATT_ENFORCER` (an absolute or cwd-relative path to a
+ * different enforcer module) so a PERTURBATION can be run against the module the
+ * harness actually MOUNTS. That is the whole point: `smokePlugins()` mounts this
+ * constant, so editing only the test file's own `import` would leave the real
+ * module mounted and the "perturbation" would produce false green evidence —
+ * see `docs/code-review-brief.md` §2 (扰动要打在运行时真正读的那份上).
+ * Unset or empty → byte-for-byte the previous behaviour. The override is test
+ * infrastructure only: production never sets it.
+ */
+export const ENFORCER_PLUGIN = (() => {
+  const override = process.env.DSH_MATT_ENFORCER
+  if (typeof override === 'string' && override !== '') return pathToFileURL(resolve(override)).href
+  return pathToFileURL(fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))).href
+})()
 
 /**
  * Boot the shared cordis stack every mount-level verify test uses (loader +

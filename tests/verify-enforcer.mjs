@@ -1,8 +1,9 @@
 /**
- * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V24; the
+ * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V31; the
  * structured gate-matching block added by #79 is V18–V20, the structured
- * ticket-lifecycle nudge arming added by #82 is V21–V23, and V24 pins the
- * doc's「What it injects」+ config block against `INJECTIONS`).
+ * ticket-lifecycle nudge arming added by #82 is V21–V23, V24 pins the doc's
+ * 「What it injects」+ config block against `INJECTIONS`, and the
+ * push-triggered retro added by #71 is V25–V31).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -10,11 +11,66 @@
  *     assembly carries a one-shot "High-risk action detected" line.
  *  V4 no noise: a benign tool/call adds no ⚠ line; baseline stays single.
  *
+ * ── #71 perturbation discipline (NON-VACUITY, the hard requirement) ─────────
+ * V25–V30 are only worth their lines if they go RED when #71's push judgement is
+ * widened back to a substring over the serialized call. The recipe below is
+ * REPRODUCIBLE — run it as written and you get real red, not false green.
+ *
+ * WHY IT NEEDS `DSH_MATT_ENFORCER`: this file's own `import` is NOT what gets
+ * mounted. `tests/preset-harness.mjs` resolves the plugin path itself and
+ * `smokePlugins()` mounts THAT module, so perturbing a copy and only repointing
+ * this file's import leaves the real `workflow-enforcer.mjs` mounted — every
+ * behavioural assertion then reads the UNPERTURBED plugin and stays green
+ * (false evidence; `docs/code-review-brief.md` §2: 扰动要打在运行时真正读的那份上).
+ * `preset-harness.mjs` therefore honours `DSH_MATT_ENFORCER`, and the recipe
+ * below uses it. Unset → the harness behaves exactly as before.
+ *
+ * RECIPE (PowerShell; the copy lives in gitignored `.scratch/`, never under
+ * `tests/` — a stray `tests/*.mjs` would be picked up as a test case by
+ * `verify-all`):
+ *
+ *   $env:DSH_MATT_ENFORCER = "$PWD/.scratch/perturb/enforcer-substring.mjs"
+ *   # copy workflow-enforcer.mjs there, then widen BOTH anchors:
+ *   #   function actionSurface(call) {  → prepend a fallback returning
+ *   #       { segments:[{ primary:[JSON.stringify({name,arguments})], … }], __blob }
+ *   #       for tools that declare NO action field (the pre-#79 bug shape)
+ *   #   function matchesSurface(gate, surface) { → if (surface.__blob)
+ *   #       return surface.__blob.toLowerCase().includes(gate.toLowerCase())
+ *   node tests/verify-enforcer.mjs
+ *
+ * Hard constraints from `docs/code-review-brief.md` §2 that this recipe obeys:
+ *   (1) self-check the NEEDLE HITS before editing (`$src.Contains($anchor)`) —
+ *       zero hits is false evidence, not "no drift";
+ *   (2) the perturbation lives in a COPY, so the committed tree is never the
+ *       perturbed tree (「标记死了才叫实验」) and `workflow-enforcer.mjs` is never
+ *       mutated (it also happens to be under concurrent edit by another lane);
+ *   (3) leave no experiment marker (the DEBUG- / MUTATION- bracketed form) in
+ *       this file — the pre-commit hook rejects those in staged `tests/*`
+ *       additions, and this recipe needs no marker at all: the perturbation
+ *       lives entirely in the copy under `DSH_MATT_ENFORCER`.
+ *
+ * MEASURED RESULT (the copy widened as above, `DSH_MATT_ENFORCER` set):
+ * V30a / V30a2 / V30a3 / V30c / V30c2 / V30e go RED — a `write` body, an
+ * `edit`, an `echo`, a commit message, a `--grep` pattern and a PTY fragment
+ * each arm the retro reminder, i.e. the very false positives #71 outlaws —
+ * alongside the pre-existing V18–V23 false-positive cases (33 red total).
+ * Remove the copy / unset the variable → all-green again.
+ *
+ * The case that keeps the FIX honest WITHOUT the perturbation is V30a3: it
+ * asserts the push judgement and the ⚠ gate judgement agree case by case on the
+ * same samples (they share `actionSurface` + `matchesSurface`), so a second,
+ * drifting matcher reddens it.
+ *
+ * PROGRAMMATIC alternative (what CI-less review used): a scratch runner can
+ * copy `workflow-enforcer.mjs` + `tests/preset-harness.mjs` into a mirror tree
+ * and repoint the latter's plugin path — equivalent, but it must copy the
+ * HARNESS too; repointing only the test file's import is the false-green trap.
+ *
  * Run with the same dep wiring as the deployment (`tests/node_modules/@deepseek-ai`
  * is a junction to the dsh install's `node_modules/@deepseek-ai`; wire it with
  * `node scripts/link-runtime-deps.mjs`), like the matt-preset verify suite.
  */
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -700,6 +756,7 @@ else bad('V23c. doc/declaration drift',
 // are prose), the same shape as V17/V23c; the red scene is deleting a bullet or
 // a knob line from the doc, or adding an injection nobody documented.
 import { INJECTIONS } from '../workflow-enforcer.mjs'
+import { RETRO_TRIGGER } from '../workflow-enforcer.mjs'
 const docAll = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
 const injectSection = docAll.split(/^## /m).find(s => s.startsWith('What it injects')) ?? ''
 const configSection = docAll.split(/^### /m).find(s => s.startsWith('Per-row config')) ?? ''
@@ -712,7 +769,523 @@ else bad('V24. injection documentation drift',
   `${injectSection === '' ? 'no "What it injects" section' : ''}${configSection === '' ? ' no "Per-row config" section' : ''}` +
   ` | missing injections: ${missingInject.join(', ') || '—'} | missing knobs: ${missingKnobs.join(', ') || '—'}`)
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── V25–V29 (#71): push-triggered retro. A REAL push call arms the per-ticket
+// 落盘 reminder; a real push in a batch whose `.scratch/batch-state.md` ALREADY
+// carries the `retro:` marker arms the batch-end 聚合 presentation instead
+// (每批至多一次, suppressed ACROSS SESSIONS by the file marker). A batch
+// DECLARATION (攒批) is a thing the human SAYS, so its only face is the text
+// event layer — the exact inverse of the push trigger, which is judged on the
+// action surface and structurally excludes that layer.
+//
+// ── V30a–V30g (#71 非空洞性 / false-positive defence): the trigger face of
+// #71 must be the SAME structured core #79 built (`actionSurface` +
+// `matchesSurface`) — NOT a fresh text / whole-string judgement. Non-vacuous:
+// V30a/a2/a3/c/c2/e go RED when the push judgement is widened back to a
+// substring over the serialized call, with no fallback for tools that declare no
+// action field. Measured through the reproducible `DSH_MATT_ENFORCER` copy
+// recipe documented in the file header — NOT by editing the committed module.
+//
+// The high-value negative fixture is REAL text: this repo's own handoff docs,
+// ticket bodies and retro docs are full of the words "推送/push", and none of
+// them may trigger anything.
+const RETRO_MARK = {
+  push: 'Retro candidate — file it now',
+  aggregate: 'Batch-end retro aggregation',
+  declare: 'Batch declared',
+}
+const retroText = (text) => text.includes(RETRO_MARK.push)
+const aggregateText = (text) => text.includes(RETRO_MARK.aggregate)
+const declareText = (text) => text.includes(RETRO_MARK.declare)
+const noRetro = (text) => !retroText(text) && !aggregateText(text) && !declareText(text)
+const retroDown = (label, text) => bad(label, (text.split('\n').find(l =>
+  retroText(l) || aggregateText(l) || declareText(l)) ?? text.slice(-200)))
+
+// ── V25: a REAL push (`git push origin main`) injects the retro-filing
+// instruction in the SAME assembly as the existing ⚠ line — one parts array,
+// one section, no extra section. And it is ONE-SHOT: the next assembly is clean.
+const v25 = await afterCall('bash', { command: 'git push origin main' }, 301)
+if (v25.includes('High-risk action detected') && retroText(v25)
+  && (v25.match(/Retro candidate — file it now/g) ?? []).length === 1) {
+  ok('V25. real push → retro-filing instruction in the SAME ⚠ assembly (exactly once)')
+} else {
+  bad('V25. push did not inject the retro instruction alongside ⚠', v25.slice(-260))
+}
+const v25b = await render()
+if (!retroText(v25b) && !aggregateText(v25b)) ok('V25b. retro instruction consumed after firing (no repeat)')
+else bad('V25b. retro instruction repeated', v25b.slice(-200))
+
+// ── V26: the per-ticket 落盘 reminder carries the WRITING CONTRACT — the exact
+// landing path, 免确认/不阻断, and 只写候选不落地 (D22/D27: landing candidates
+// still goes through the human).
+const v26 = await afterCall('bash', { command: 'git push origin main' }, 307)
+const v26path = v26.includes('.scratch/retro/<batch>-<session>.md')
+const v26free = v26.includes('no human confirmation needed') && v26.includes('never')
+  && v26.includes('blocks the wrap-up')
+const v26cand = v26.includes('CANDIDATES ONLY')
+if (v26path && v26free && v26cand)
+  ok('V26. 落盘 reminder carries the path contract + 免确认/不阻断 + candidates-only')
+else bad('V26. 落盘 contract incomplete',
+  `path: ${v26path} | no-confirm/no-block: ${v26free} | candidates-only: ${v26cand}`)
+
+// ── V27: batch-end push (cwd HAS batch-state.md WITH the `retro:` marker) →
+// the AGGREGATION reminder: read every same-batch file, dedupe (merge + count),
+// sort by severity, present ONCE, and name each candidate's source.
+const batchEndRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-retroend-'))
+await mkdir(join(batchEndRoot, '.scratch', 'retro'), { recursive: true })
+await writeFile(join(batchEndRoot, '.scratch', 'batch-state.md'), [
+  '# Batch state — 71',
+  '',
+  '| # | 票 | 状态 |',
+  '| --- | --- | --- |',
+  '| 1 | #71 | 进行中 |',
+  '',
+  '- retro: done @ deadbee',
+  '',
+].join('\n'))
+const handleBE = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+const agentBE = handleBE.agent
+const renderBE = async () => {
+  const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agentBE, signal))
+  return renderPrompt(assembly)
+}
+await emitSessionEvent(ctx, agentBE.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 302, name: 'bash', arguments: JSON.stringify({ command: 'git push origin feat/71' }) },
+})
+const v27 = await renderBE()
+const v27parts = {
+  'read every same-batch file': v27.includes('read EVERY `.scratch/retro/*.md`'),
+  'dedupe + count': v27.includes('dedupe (merge the same issue and record its count)'),
+  'sort by severity': v27.includes('sort by severity'),
+  'present ONCE': v27.includes('present it to the human ONCE'),
+  'source ticket/session': v27.includes('source ticket / session'),
+}
+const v27missing = Object.entries(v27parts).filter(([, hit]) => !hit).map(([k]) => k)
+if (aggregateText(v27) && !retroText(v27) && v27missing.length === 0)
+  ok('V27. batch-end push (retro: marker present) → 聚合呈现 reminder (dedupe/sort/once/source)')
+else bad('V27. aggregation reminder incomplete',
+  `marker: ${aggregateText(v27)} | per-ticket leaked: ${retroText(v27)} | missing: ${v27missing.join(', ') || '—'}`)
+// and it is 每批至多一次: the same session does not re-present.
+const v27b = await renderBE()
+if (!aggregateText(v27b)) ok('V27b. 聚合呈现 consumed (no repeat)')
+else bad('V27b. aggregation repeated', v27b.slice(-200))
+
+// ── V28: a batch DECLARATION ("这批攒批 / 系列处理", a text event) injects EXACTLY
+// ONE initialization reminder pointing at `docs/batch-state.md` — and it fires
+// whether or not that file already exists (creating it IS the declaration's job;
+// an init reminder gated on the file existing would never fire once).
+const v28src = readFileSync(new URL('../workflow-enforcer.mjs', import.meta.url), 'utf8')
+const v28decl = Array.isArray(RETRO_TRIGGER.batchDeclare?.words) && RETRO_TRIGGER.batchDeclare.words.length > 0
+if (v28decl) ok('V28pre. RETRO_TRIGGER.batchDeclare.words declared (text-face declaration)', RETRO_TRIGGER.batchDeclare.words.join('/'))
+else bad('V28pre. batchDeclare declaration missing')
+
+// (a) cwd WITHOUT batch-state.md → still reminds (initialization).
+const declRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl-'))
+const handleDecl = await ctx.agents.create({
+  sessionId: SessionId('enforcer-decl'),
+  meta: { cwd: declRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+const agentDecl = handleDecl.agent
+const renderDecl = async () => {
+  const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agentDecl, signal))
+  return renderPrompt(assembly)
+}
+await emitSessionEvent(ctx, agentDecl.session, {
+  type: 'user/message',
+  data: { turn: 1, step: 303, source: { kind: 'user' }, message: { role: 'user', content: [{ type: 'text', text: '这批攒批，一起处理 #71 #73' }] } },
+})
+const v28a = await renderDecl()
+if (declareText(v28a) && v28a.includes('docs/batch-state.md') && !retroText(v28a) && !aggregateText(v28a))
+  ok('V28a. batch declaration without batch-state.md → initialization reminder → docs/batch-state.md')
+else bad('V28a. declaration reminder missing/does not point at the template',
+  `declare: ${declareText(v28a)} | points at docs/batch-state.md: ${v28a.includes('docs/batch-state.md')}`)
+// exactly once: the next assembly is clean.
+const v28b = await renderDecl()
+if (!declareText(v28b)) ok('V28b. declaration reminder is one-shot (consumed, no repeat)')
+else bad('V28b. declaration reminder repeated', v28b.slice(-200))
+// (b) cwd WITH batch-state.md → same reminder (the file existing is not a gate).
+const declRoot2 = await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl2-'))
+await mkdir(join(declRoot2, '.scratch'), { recursive: true })
+await writeFile(join(declRoot2, '.scratch', 'batch-state.md'), '# Batch state\n\n| 1 | #71 | ok |\n')
+const handleDecl2 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-decl2'),
+  meta: { cwd: declRoot2 },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleDecl2.agent.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 304, message: { role: 'assistant', content: [{ type: 'text', text: '好，这批攒批我按模板开工' }] } },
+})
+const v28c = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleDecl2.agent, signal)))
+if (declareText(v28c)) ok('V28c. declaration reminder fires even with batch-state.md present (file is not the gate)')
+else bad('V28c. declaration gated on the file existing', v28c.slice(-200))
+// (c) the whole family of declared words arms, and NOTHING about push does.
+const declProbe = RETRO_TRIGGER.batchDeclare.words.every(w =>
+  typeof w === 'string' && w.length > 0 && v28src.includes(w))
+if (declProbe) ok('V28d. every declared batch-declaration word is present in the source declaration')
+else bad('V28d. declared batch words not found in source')
+
+// ── V29 (#71 AC「每批至多一次」／跨会话抑制): TWO markers decide the face, BOTH
+// read from FILES in the session's cwd (never a per-session WeakMap, which is
+// what makes the suppression hold across sessions):
+//   `retro:` in `.scratch/batch-state.md`        → the batch reached its end
+//   `.scratch/retro/.aggregated` (agent-written) → the aggregation was PRESENTED
+// The second one is written by the AGENT after presenting; the enforcer only
+// READS it (this plugin writes no file). So the test must write it — expecting
+// suppression WITHOUT writing it would be requiring the plugin to write a file.
+//
+// (a) `retro:` present, `.aggregated` ABSENT → aggregation is due. A FIRST
+// session in that state gets 聚合呈现 (already asserted by V27 on the same root).
+// (b) then the agent presents and writes `.aggregated` → every LATER session of
+// the same batch must NOT aggregate again, and must fall through to the LANDING
+// face rather than going silent (不静默丢素材: the material still lands).
+await writeFile(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), '2026-10-17T18:00:00Z\n')
+const handleBE2 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend-other-session'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleBE2.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 305, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29 = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE2.agent, signal)))
+if (!aggregateText(v29) && retroText(v29)
+  && v29.includes('already') && v29.includes('.scratch/retro/.aggregated'))
+  ok('V29. after the agent wrote `.aggregated`, a LATER session does not re-aggregate — it lands (每批至多一次, 素材不丢)')
+else bad('V29. cross-session aggregation suppression lost',
+  `aggregate: ${aggregateText(v29)} | lands: ${retroText(v29)} | names .aggregated: ${v29.includes('.scratch/retro/.aggregated')}`)
+// A THIRD session (yet another session id, same batch) confirms it is the FILE
+// that suppresses, not any one session's state.
+const handleBE3 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend-third-session'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleBE3.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 3051, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29c = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE3.agent, signal)))
+if (!aggregateText(v29c) && retroText(v29c)) ok('V29c. a THIRD session of the same batch also does not aggregate (the file is the suppressor)')
+else bad('V29c. third-session suppression lost', v29c.slice(-240))
+// The aggregation reminder must TELL the agent to write the marker — otherwise
+// the suppression could never engage in a real run.
+if (v27.includes('After presenting, write `.scratch/retro/.aggregated`'))
+  ok('V29d. the aggregation reminder instructs the agent to write `.aggregated` (the suppressor is agent-written)')
+else bad('V29d. aggregation reminder omits the .aggregated instruction', v27.slice(-260))
+// the inverse: batch-state.md WITHOUT `retro:` → 落盘, not 聚合.
+const noMarkRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-nomark-'))
+await mkdir(join(noMarkRoot, '.scratch'), { recursive: true })
+await writeFile(join(noMarkRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n| 1 | #71 | 进行中 |\n')
+const handleNM = await ctx.agents.create({
+  sessionId: SessionId('enforcer-nomark'),
+  meta: { cwd: noMarkRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleNM.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 306, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29b = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleNM.agent, signal)))
+if (retroText(v29b) && !aggregateText(v29b)) ok('V29b. batch-state.md WITHOUT the `retro:` marker → 落盘 (the marker is the discriminator)')
+else bad('V29b. marker discrimination lost', v29b.slice(-240))
+// A batch that reached `retro:` but never aggregated (no `.aggregated`) still
+// aggregates for EVERY session that runs — the marker, not the session count, is
+// what gates it. (Guards against "only the first session ever" being hard-coded.)
+const freshAggRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-freshagg-'))
+await mkdir(join(freshAggRoot, '.scratch'), { recursive: true })
+await writeFile(join(freshAggRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n- retro: done @ abc123\n')
+let freshAggMisses = []
+for (const [i, sid] of ['fresh-a', 'fresh-b'].entries()) {
+  const h = await ctx.agents.create({
+    sessionId: SessionId(`enforcer-${sid}`),
+    meta: { cwd: freshAggRoot },
+    agentOptions: { provider: 'mock', model: 'mock' },
+    setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+  })
+  await emitSessionEvent(ctx, h.agent.session, {
+    type: 'tool/call',
+    data: { turn: 1, step: 307 + i, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+  })
+  const text = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(h.agent, signal)))
+  if (!aggregateText(text)) freshAggMisses.push(sid)
+  await h.dispose()
+}
+if (freshAggMisses.length === 0)
+  ok('V29e. without `.aggregated`, EVERY session of an ended batch aggregates (the marker gates it, not a session counter)')
+else bad('V29e. aggregation suppressed without the `.aggregated` marker', freshAggMisses.join(', '))
+
+// ── V30a: 层面断言 — the judgement input is ALWAYS `(toolName, argv)`, and the
+// push trigger walks the SAME structured road as the ⚠ gate. Behavioural half:
+// `write`/`edit` doc bodies full of "git push" arm NOTHING (not the retro
+// reminders, and not the ⚠ push follow-up lines either).
+const w1 = await afterCall('write', { file_path: 'docs/handoff.md', content: '下一步 git push origin feat/71，然后跑 retro 落盘' }, 401)
+if (noRetro(w1) && clean(w1)) ok('V30a. write body carrying `git push` → no retro trigger, no ⚠ (tool layer, not text)')
+else retroDown('V30a. write body armed the retro trigger', w1)
+const w2 = await afterCall('edit', { file_path: 'notes.md', old_string: 'a', new_string: 'git push 之后再 retro' }, 402)
+if (noRetro(w2) && clean(w2)) ok('V30a2. edit body carrying `git push` → no retro trigger, no ⚠')
+else retroDown('V30a2. edit body armed the retro trigger', w2)
+// Source-level half: the trigger reads the declaration's words through the
+// structured core. The invariANT is not "gateMatches returns true" (that helper
+// takes whatever gate string it is HANDED, so it can be true while the wiring is
+// wrong) — it is that on the SAME samples, "the ⚠ gate hit `git push`" and "the
+// retro reminder was injected" agree case by case, because both walk
+// `actionSurface` + `matchesSurface`. `write`/`pty_send`/`echo` flip BOTH ways
+// together under the substring perturbation.
+const SAME_TRUTH = [
+  ['bash', { command: 'git push origin main' }, true],
+  ['bash', { command: 'write', file_path: 'x', content: 'git push' }, false],
+  ['write', { file_path: 'x', content: 'git push' }, false],
+  ['pty_send', { id: 'p', data: 'git push\n' }, false],
+  ['bash', { command: 'echo "git push"' }, false],
+  ['bash', { command: 'gh issue create --body "git push"' }, false],
+]
+const disagree = []
+for (const [name, args, wantPush] of SAME_TRUTH) {
+  const gate = gateMatches('git push', { name, arguments: args })
+  const text = await afterCall(name, args, 500)
+  const injected = text.includes(RETRO_MARK.push) || text.includes(RETRO_MARK.aggregate)
+  if (gate !== wantPush || injected !== wantPush) disagree.push(`${name}: gate=${gate} retro=${injected} want=${wantPush}`)
+}
+if (disagree.length === 0)
+  ok('V30a3. push judgement ≡ the ⚠ gate judgement on the same samples (both walk actionSurface+matchesSurface)')
+else bad('V30a3. push judgement drifted from the structured core', disagree.join(' | '))
+
+// ── V30b: merely DISCUSSING push/推送 in ANY text event is inert. Real fixture
+// text: this repo's handoff/ticket/retro prose is full of the word.
+const TEXT_NEGATIVES = [
+  ['assistant/message', { turn: 1, step: 403, message: { role: 'assistant', content: [{ type: 'text', text: '接下来 git push origin main，推送后等 CI 全绿，再跑 retro 落盘' }] } }],
+  ['user/message', { turn: 1, step: 404, source: { kind: 'user' }, message: { role: 'user', content: [{ type: 'text', text: 'push 之前先把 retro 候选落盘，推送别忘了' }] } }],
+  ['text-chunks', { turn: 1, step: 405, texts: ['已完成 push，推送完成，可以 retro 了'] }],
+  ['agent/inbox/spliced', { turn: 1, step: 406, target: 'next-turn', start: 0, removedCount: 0, inserted: [{ id: 'v30b-inbox', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'handoff：本票收尾需 push，推送后跑 retro；见 docs/handoff 正文里的 push 讨论' }] }] }],
+]
+let v30bBad = []
+for (const [type, data] of TEXT_NEGATIVES) {
+  await emitSessionEvent(ctx, agent.session, { type, data })
+  const text = await render()
+  if (!noRetro(text)) v30bBad.push(type)
+}
+if (v30bBad.length === 0) ok('V30b. discussion of push/推送 in every text-event shape → no trigger (text layer inert)')
+else bad('V30b. text event armed the retro trigger', v30bBad.join(', '))
+
+// ── V30c: a command that MENTIONS the push but does not EXECUTE it — the
+// payload is text (doc body, commit message, issue body, --grep pattern).
+const MENTION_ONLY = [
+  ['bash', { command: 'echo "git push"' }, 407],
+  ['bash', { command: 'git commit -m "note: git push 之后再 retro"' }, 408],
+  ['bash', { command: 'git log --grep="git push"' }, 410],
+]
+let v30cBad = []
+for (const [name, args, step] of MENTION_ONLY) {
+  const text = await afterCall(name, args, step)
+  if (!noRetro(text)) v30cBad.push(String(args.command))
+}
+if (v30cBad.length === 0) ok('V30c. mention-only commands (echo / -m / --grep) → no retro trigger')
+else bad('V30c. mention-only command armed the retro trigger', v30cBad.join(' | '))
+// The ticket's inline-body vector on its REAL surface: `gh issue create --body
+// "…git push…"` IS a genuine external action, so the ⚠ GATE fires — but the
+// mention inside its body must not arm the retro trigger, and must not drag in
+// the push follow-up line either (V19g asserts the same on the ⚠ side).
+const v30cBody = await afterCall('bash', { command: 'gh issue create --body "记得 git push"' }, 409)
+if (v30cBody.includes('High-risk action detected') && noRetro(v30cBody) && !v30cBody.includes('remote CI run'))
+  ok('V30c2. gh issue create --body "…git push…" → ⚠ on the ACTION, but no retro trigger / no push follow-up')
+else bad('V30c2. inline-body gh call armed the retro trigger',
+  `⚠: ${v30cBody.includes('High-risk action detected')} | retro: ${!noRetro(v30cBody)} | CI follow-up: ${v30cBody.includes('remote CI run')}`)
+
+// ── V30d: the text layer NEVER arms — PIN (same shape as V18f/V21h). Arm every
+// text-event shape with push words, then assemble TWICE; neither may carry a
+// retro/aggregate line. (Red only if text events start arming tool/call.)
+await emitSessionEvent(ctx, agent.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 411, message: { role: 'assistant', content: [{ type: 'text', text: 'git push origin main 推送 push' }] } },
+})
+await emitSessionEvent(ctx, agent.session, { type: 'text-chunks', data: { turn: 1, step: 412, texts: ['git push origin main push 推送'] } })
+const v30d1 = await render()
+const v30d2 = await render()
+if (noRetro(v30d1) && noRetro(v30d2)) ok('V30d. text events armed with push words, two assemblies → still nothing (never arm)')
+else retroDown('V30d. text layer armed the retro trigger', noRetro(v30d1) ? v30d2 : v30d1)
+
+// ── V30e: indirect / PTY pushes are DECLARED NOT COVERED (#79 口径) — the fact
+// probe is the fallback, not a guess. `node deploy.mjs` (the push happens inside
+// a script), a PTY fragment write, and an undeclared tool face are all inert.
+const INDIRECT = [
+  ['bash', { command: 'node deploy.mjs' }, 413],
+  ['pty_send', { id: 'p1', data: 'git push\n', submit: true }, 414],
+  ['gh', { args: 'issue create --body "git push"' }, 415],
+]
+let v30eBad = []
+for (const [name, args, step] of INDIRECT) {
+  const text = await afterCall(name, args, step)
+  if (!noRetro(text)) v30eBad.push(name)
+}
+if (v30eBad.length === 0) ok('V30e. indirect script push / pty_send fragment / undeclared face → no trigger (declared not covered)')
+else bad('V30e. uncovered face armed the retro trigger', v30eBad.join(', '))
+
+// ── V30f (#71 AC「文本事件结构上永不 arm push」— STRUCTURAL, not symptomatic).
+// V30b/V30d only pin the SYMPTOM (text carrying push words → no retro text). This
+// pins the GUARD ITSELF through real harness behaviour, without a brittle
+// "source contains this string" scan: the push arming hook is a `tool/call`
+// handler that returns early for every other event type, so a text event can
+// never CONSUME the one-shot either. Shown by contrast — a real push arms a
+// reminder that the NEXT assembly consumes; if the text events had reached the
+// same arming path, the reminder would be re-armed and reappear here.
+await emitSessionEvent(ctx, agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 416, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v30fArmed = await render()   // consumes the one-shot
+if (!retroText(v30fArmed)) {
+  bad('V30f. setup: real push did not arm (cannot test the guard)', v30fArmed.slice(-200))
+} else {
+  // Re-send every text-event shape, with a FRESH inbox id each time (the inbox
+  // projection rejects a repeated message id, so the shape must differ per use).
+  for (const [type, data] of TEXT_NEGATIVES) {
+    await emitSessionEvent(ctx, agent.session, {
+      type,
+      data: type === 'agent/inbox/spliced'
+        ? { ...data, inserted: data.inserted.map(m => ({ ...m, id: 'v30f-inbox' })) }
+        : data,
+    })
+  }
+  const v30f = await render()
+  const v30f2 = await render()
+  if (noRetro(v30f) && noRetro(v30f2))
+    ok('V30f. text events cannot re-arm the one-shot after a real push (non-`tool/call` events never reach the arming hook)')
+  else retroDown('V30f. a text event reached the push arming hook', noRetro(v30f) ? v30f2 : v30f)
+}
+
+// ── V30g (#71 AC「落盘不触外部动作门」): the retro reminders are REMINDER-ONLY —
+// a session whose push armed a retro reminder must not thereby show the
+// external-action gate for anything else. Same `clean()` semantics as V18/V19
+// (⚠ line absent), so this cannot be satisfied by weakening those.
+const v30g = await afterCall('bash', { command: 'git push origin main' }, 417)
+const v30gretro = retroText(v30g) || aggregateText(v30g)
+if (v30gretro && v30g.includes('High-risk action detected'))
+  ok('V30g. retro reminder rides the SAME assembly as the ⚠ for the push itself (no extra gate)')
+else bad('V30g. retro assembly shape unexpected', v30g.slice(-220))
+// the discrimination: a non-push action that carries retro wording in its TEXT
+// must show NEITHER the retro reminder NOR a ⚠.
+const v30g2 = await afterCall('bash', { command: 'echo "retro 落盘 .scratch/retro/x.md"' }, 418)
+if (noRetro(v30g2) && clean(v30g2))
+  ok('V30g2. retro wording in a command\'s text → no retro reminder and no ⚠ (reminder-only, gate untouched)')
+else bad('V30g2. retro wording armed a gate or the retro reminder', v30g2.slice(-220))
+
+// ── V31 (#71 fail-loud AC): an UNREADABLE `.scratch/batch-state.md` must not be
+// flattened into "no marker". A failed probe reports LOUDLY and then treats the
+// push as the per-ticket landing face — deciding the batch-end face on a file it
+// could not read is precisely the silent degradation the AC forbids (the file
+// may well carry `retro:`).
+// The loud section carries NO ⚠ prefix — that prefix belongs to the high-risk
+// action gate, and borrowing it here would train the model to treat a local
+// bookkeeping failure as a dangerous action.
+if (RETRO_TRIGGER.aggregatedMarker === '.scratch/retro/.aggregated')
+  ok('V31pre. RETRO_TRIGGER.aggregatedMarker declares the aggregation suppressor path')
+else bad('V31pre. aggregatedMarker declaration', String(RETRO_TRIGGER.aggregatedMarker))
+
+const ERR_MARK = 'Batch-state probe FAILED'
+const errRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeerr-'))
+await mkdir(join(errRoot, '.scratch'), { recursive: true })
+// A DIRECTORY masquerading as the file → EISDIR. Portable (chmod 000 is a no-op
+// on Windows, which is why this is the fixture A-line measured as stable).
+await mkdir(join(errRoot, '.scratch', 'batch-state.md'), { recursive: true })
+const handleErr = await ctx.agents.create({
+  sessionId: SessionId('enforcer-probeerr'),
+  meta: { cwd: errRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleErr.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 421, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v31 = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleErr.agent, signal)))
+const v31loud = v31.includes(ERR_MARK)
+const v31code = /Batch-state probe FAILED \(([A-Z]+)\)/.exec(v31)?.[1] ?? ''
+const v31lands = retroText(v31) && !aggregateText(v31)
+if (v31loud && v31code === 'EISDIR' && v31lands
+  && v31.includes('could not read') && v31.includes('per-ticket landing face')
+  && !v31.includes('⚠ ' + ERR_MARK))
+  ok('V31. unreadable batch-state.md → loud probe-failure section (EISDIR) + landing face, no ⚠ prefix')
+else bad('V31. fail-loud probe reporting incomplete',
+  `loud: ${v31loud} | code: ${v31code || '—'} | lands: ${v31lands} | ⚠-prefixed: ${v31.includes('⚠ ' + ERR_MARK)}`)
+
+// The DISCRIMINATION the AC turns on: absent (ENOENT) must NOT report a failure.
+// A missing file is a normal non-batch session, not a broken one — flattening the
+// two together would either cry wolf on every ordinary push or hide a real fault.
+const absentRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeabsent-'))
+await mkdir(join(absentRoot, '.scratch'), { recursive: true })
+const handleAbsent = await ctx.agents.create({
+  sessionId: SessionId('enforcer-probeabsent'),
+  meta: { cwd: absentRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleAbsent.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 422, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v31b = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleAbsent.agent, signal)))
+if (!v31b.includes(ERR_MARK) && retroText(v31b) && !aggregateText(v31b))
+  ok('V31b. ABSENT batch-state.md (ENOENT) → no failure section, plain landing face (absent ≠ error)')
+else bad('V31b. absent/error discrimination lost',
+  `loud: ${v31b.includes(ERR_MARK)} | lands: ${retroText(v31b)}`)
+
+// A `.aggregated` probe that itself FAILS (here: a directory in its place) must
+// NOT suppress — failing open to the aggregation face is the safe direction, the
+// opposite of the batch-state probe (which must not fail open to "no batch").
+const aggErrRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-aggerr-'))
+await mkdir(join(aggErrRoot, '.scratch', 'retro', '.aggregated'), { recursive: true })
+await writeFile(join(aggErrRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n- retro: done @ abc123\n')
+const handleAggErr = await ctx.agents.create({
+  sessionId: SessionId('enforcer-aggerr'),
+  meta: { cwd: aggErrRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleAggErr.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 423, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v31c = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleAggErr.agent, signal)))
+if (aggregateText(v31c) && !retroText(v31c))
+  ok('V31c. an UNREADABLE `.aggregated` probe does not suppress (fails open to the aggregation face)')
+else bad('V31c. unreadable .aggregated suppressed the aggregation',
+  `aggregate: ${aggregateText(v31c)} | lands: ${retroText(v31c)}`)
+
+// Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
+// the same class of defect; `dispose()` frees the session, NOT the temp dir).
+await handleBE3.dispose()
+await handleAggErr.dispose()
+await handleAbsent.dispose()
+await handleErr.dispose()
+await handleNM.dispose()
+await handleBE2.dispose()
+await handleDecl2.dispose()
+await handleDecl.dispose()
+await handleBE.dispose()
+await rm(declRoot, { recursive: true, force: true })
+await rm(declRoot2, { recursive: true, force: true })
+await rm(noMarkRoot, { recursive: true, force: true })
+await rm(freshAggRoot, { recursive: true, force: true })
+await rm(errRoot, { recursive: true, force: true })
+await rm(absentRoot, { recursive: true, force: true })
+await rm(aggErrRoot, { recursive: true, force: true })
+await rm(batchEndRoot, { recursive: true, force: true })
+
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V24) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V31) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

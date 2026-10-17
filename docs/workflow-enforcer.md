@@ -31,13 +31,20 @@ everywhere, or change `marker:`.
 
 ## What it injects
 
-Seven sections, each with its own switch in the per-row config below (the ⚠ line
+Eleven sections, each with its own switch in the per-row config below (the ⚠ line
 has none). The baseline and the grill contract re-render on every assembly; the
-rest fire once and are consumed. Three judge an **action** through the structured
-判定面 below — the ⚠ high-risk line, the ticket close, the ticket create — while
-three are **conversation observations** armed by text keywords (batch close-out,
-fold-in/capacity evidence, grill/triage mode), so those never fire from a tool
-call alone; the baseline is unconditional.
+rest fire once and are consumed. Five judge an **action** through the structured
+判定面 below — the ⚠ high-risk line, the ticket close, the ticket create, and
+#71's push-triggered retro (the per-ticket 落盘 reminder, the batch-end
+aggregation when the batch already carries the `retro:` marker, or the loud
+probe-failure report when that file could not be read) — while four are
+**conversation observations** armed by text keywords (batch close-out,
+fold-in/capacity evidence, grill/triage mode, and the batch declaration), so
+those never fire from a tool call alone; the baseline is unconditional.
+The split is deliberate, not incidental: a push **has** a `(toolName, argv)`
+action surface, so it is judged there and only there (the text layer is
+structurally excluded — 宁严勿宽, #71); a batch declaration has no tool call at
+all, so its only possible face is the text layer.
 
 - Every prompt assembly gets a short **baseline** reminder (`WORKFLOW GATES`:
   external/destructive actions → report + wait for confirmation; corrections →
@@ -71,6 +78,58 @@ call alone; the baseline is unconditional.
   `/grill` / `/triage`) gets the **GRILL QUESTION CONTRACT** re-injected on every
   assembly: one decision per message, status line, four-piece block, time
   estimate, opt-in batch only on request.
+- A **real push call** (#71, structured — see 判定面 below) gets a one-shot
+  **Retro candidate — file it now** reminder on the next assembly (consumed after
+  firing, never a second section): run this session's retro and write the
+  candidates to `` `.scratch/retro/<batch>-<session>.md` `` (candidates by
+  severity + evidence — command / output — + source: session id and ticket, + why
+  each stayed unlanded). It is a LOCAL file: `no human confirmation needed` and
+  it never `blocks the wrap-up`, re-running the same session overwrites the same
+  name (idempotent), and it records `CANDIDATES ONLY` — landing them still goes
+  through the human (D22/D27). This is the per-ticket 落盘 the batch-end
+  aggregation later reads.
+- A real push whose `.scratch/batch-state.md` **already carries the `retro:`
+  marker** gets the **Batch-end retro aggregation** reminder instead — but only
+  while the batch has **not** been aggregated yet. The cross-session suppressor
+  is a SECOND existence marker, `.scratch/retro/.aggregated`, which the agent
+  writes after it presents; once it exists, later sessions fall back to the
+  landing face (`Retro candidate — file it now`, with the "do NOT aggregate or
+  re-present" wording) so the material is still landed and never silently
+  dropped. The `retro:` marker alone cannot hold this: it is written **before**
+  the batch-end push, so on its own every later session in the same batch would
+  re-take the aggregation branch (measured: 3 sessions → 3 aggregations). Two
+  different facts, so two markers — `retro:` answers "has the batch-end retro
+  run", `.aggregated` answers "has the aggregation already been PRESENTED". The
+  aggregation section itself: run this session's retro first, then
+  `read EVERY `.scratch/retro/*.md`` written by this batch, `dedupe` (merge the
+  same issue and `record its count`), `sort by severity`, and `present it to the
+  human ONCE`, each candidate naming its `source ticket / session`; after
+  presenting, write `.scratch/retro/.aggregated`. Do not re-read the batch's old
+  sessions wholesale — the per-session candidate files are the material. Both
+  markers are read as **existence only** (never parsed), and 每批至多一次
+  constrains the **presentation**, never the material.
+- A push whose `.scratch/batch-state.md` probe **failed to read** gets the
+  one-shot **Batch-state probe FAILED** report — the loud path for a read failure
+  (EISDIR / EACCES / EPERM / IO, `code` named in the text), deliberately distinct
+  from `ENOENT` "the file is not there" (the normal not-in-a-batch path). It is
+  pushed **without** a `⚠` prefix — that prefix belongs to the high-risk *action*
+  gate, and reusing it here would read as a false alarm — and it treats the push
+  as the per-ticket landing face (落盘), telling the agent to verify the file by
+  hand and re-run the probe rather than assume the batch is unaggregated.
+  Flattening a read failure into "no marker" would decide the batch-end face on a
+  failed probe: that is exactly the silent degradation the fail-loud rule
+  forbids (D47).
+- A **batch declaration** in the conversation (关键词：攒批/批量模式/系列处理/
+  大系列/这批攒批, see `RETRO_TRIGGER.batchDeclare`) gets a one-shot
+  **Batch declared** reminder — a **text-layer observation**, deliberately unlike
+  the push trigger above (the declaration is something the human says; it has no
+  tool call at all): `` write `.scratch/batch-state.md` now `` (members, end point,
+  the Progress rows' three evidence elements — proving command / exit code /
+  evidence path — a lane marker per ticket, the successor ticket, and the
+  `` `retro: done @ <commit>` completion marker `` at the batch end). Its shape is
+  `docs/batch-state.md` — copy that template, do not invent fields. The `retro:`
+  line is the **agent's** to write; this plugin only reads the marker and is
+  reminder-only (it writes no file).
 
 ## Gate list
 
@@ -100,6 +159,7 @@ a reminder the model is supposed to obey.
 | `plugin_manager` | `arguments.action` | 工具名 + action 两词序列（`plugin_manager install_bundle`） |
 | 单个词的门（`sandcastle` / `run-ticket`） | 同上 | 调用链（`RUNNERS`：`npx`/`pnpm`/`tsx`/`node`/`python`/`sh`/`bash`/`pwsh`…）上目标的**名字**匹配：basename 去扩展名或任一路径组件等于该门——`.sandcastle/run-ticket.mts` 命中 `sandcastle`/`run-ticket`；`sandcastle-notes.mjs`、`run-ticket-helpers.mjs` 不命中（名字相等，不是子串） |
 | **票生命周期 nudge**（关票 fresh-subagent 抽查 O5 / 建票 D20，`TICKET_LIFECYCLE`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（#82）：关票 = 命令位置词串 `gh issue close`；**关票的 API 形态**仍走 shell 的 `command` 字段，但其判定面**显式声明**为 `gh api`（命令位置 + 子命令）+ 声明的方法 flag（`-X`/`--method` = `PATCH`）+ 声明的载荷 flag（`-f`/`--raw-field`、`-F`/`--field` = `state=closed`）+ `issues/<n>` 路径 token；建票 = 命令位置词串 `gh issue create`。`write`/`edit`/`str_replace_editor` 正文、`echo`、commit 消息、`--grep`、`--body`/`--title` 里提到这些命令**永不** arm；`gh api` 的其余面显式不覆盖（`--input -` 读 stdin、非 `PATCH` 方法、其它字段、紧跟未声明 flag 的 endpoint——那个 token 可能是该 flag 的值——交 #71 事实探测） |
+| **#71 push 触发面**（retro：每票落盘 / 批末聚合，`RETRO_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**：push = 命令位置词串 `git push`（`RETRO_TRIGGER.push.words`），判定输入**恒为** `(toolName, argv)`；工具层 + 命令层都经 `matchesSurface`，与 ⚠ 门的 push 追随行**同一次判定、同一个声明**（两者不可能分歧）。**文本事件层永不 arm push**（`assistant/message` / `user/message` / `text-chunks` / `agent/inbox/spliced` 结构上无动作字段；会话/思考里讨论"推送/push"、retro 文档、handoff 正文一律不触发——宁严勿宽）。**批宣告是唯一允许文本面的面**：`RETRO_TRIGGER.batchDeclare` 的关键词组（`攒批`/`批量模式`/`系列处理`/`大系列`/`这批攒批`）——宣告是**人说的话**，根本没有工具调用，文本层是它唯一可能的判定面（与 `BATCH_CLOSE_KEYWORDS` 同构），读成两个**存在性** marker——`RETRO_TRIGGER.retroMarker`（`retro:`）与 `RETRO_TRIGGER.aggregatedMarker`（`.scratch/retro/.aggregated`），都只判**存在性**、不解析任何表格/内容，两者组合决定落盘 vs 聚合（`retro:` 且无 `.aggregated` → 聚合；`retro:` 且有 `.aggregated` → 落盘，不聚合但不丢素材）。**探针失败是独立的响亮路径**：读 `` `.scratch/batch-state.md` `` 失败（非 `ENOENT`）走 `Batch-state probe FAILED` 节（**无 `⚠` 前缀**），绝不静默降级成"无 marker"。**声明不覆盖**：PTY 分片写（`pty_send`）、经脚本/`xargs`/`node deploy.mjs` 间接 push、其它工作区工具面（`write`/`edit` 无动作字段）一律不触发——与 #79 declared-not-covered 同口径，交**事实探测**兜底（`git log origin/<branch>..HEAD` / `git status -sb`），本插件**不为它长模糊匹配** |
 | `write` / `edit` / `str_replace_editor` / `pty_send` / `pty_open` / `run_code` / 其它工作区工具面 | — | **显式不覆盖**：带正文、分片写入或**程序正文**的参数永不命中，不用模糊匹配弥补（PTC 下经 SDK 的嵌套调用是真实 `tool/call`，仍按该调用的动作字段照常判定） |
 
 Which flag values are executed is **declared** (`EXEC_FLAGS`: shell `-c`,
@@ -137,7 +197,10 @@ to cover them.
 > arming really reads `TICKET_LIFECYCLE` (a runtime-added word run arms, removing
 > it disarms), V23c that this 判定面 row documents every declared element (the
 > doc↔code drift guard, same idea as V17), V24 that 「What it injects」and the
-> per-row config block cover every entry of `INJECTIONS`.
+> per-row config block cover every entry of `INJECTIONS` — the same discipline
+> covers #71's `RETRO_TRIGGER`, whose declared elements (`push.words` /
+> `batchDeclare.words` / `retroMarker` / `aggregatedMarker`) are written verbatim
+> in the row above, so extending the guard to that declaration cannot drift.
 
 ### Per-project override: `workflow-gates.yml`
 
@@ -170,6 +233,8 @@ config:
   ticketClosedCheck: true        # fresh-subagent spot check after a ticket close (default true)
   ticketCreatedCheck: true       # ONE ISSUE PER SESSION after a ticket create (default true)
   batchCloseCheck: true          # AUTO-HANDOFF nudge on a batch close-out (default true)
+  retroTriggerCheck: true        # #71: per-ticket 落盘 / batch-end aggregation after a real push (default true)
+  batchDeclareCheck: true        # #71: batch-state.md initialization on a batch declaration (default true)
   gatesFile: workflow-gates.yml  # project file name/path (default)
   includeDefault: false          # merge project file with the default list
   extraExternal: ["./release.sh"]
@@ -187,4 +252,7 @@ config:
 - Depends on the `yaml` package resolvable from the plugin (user-owned dir,
   e.g. `~/.dsh/node_modules`): `npm install --prefix ~/.dsh yaml`.
 - Hooks: `session/event` (`tool/call`) + `system-prompt/assemble` (prepend).
-  A filter bug degrades to no-reminder, never breaks a request.
+  A filter bug degrades to no-reminder, never breaks a request. The same hook
+  also arms the **text-layer** observations — the batch declaration (#71) joins
+  `foldIntent` / `batchClose` there; that is the *only* text-layer face in this
+  plugin, and it never decides a push (see 判定面).
