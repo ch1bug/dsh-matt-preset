@@ -414,7 +414,7 @@ try {
             bad('D2. turn: enforcer gates baseline in the agent request', JSON.stringify(String(agentReq?.system ?? '').slice(0, 200)))
           }
           // ── D3 turn：注入节插值完毕（无字面 {{…}} 残留）────────────────────
-          if (agentReq?.system !== undefined && !agentReq.system.includes('{{model}}') && !agentReq.system.includes('{{cwd}}')) {
+          if (agentReq?.system !== undefined && !agentReq.system.includes('{{model}}')) {
             ok('D3. turn: no literal {{…}} left in the live agent system prompt')
           } else {
             bad('D3. turn: system-prompt interpolation', JSON.stringify(String(agentReq?.system ?? '').slice(0, 300)))

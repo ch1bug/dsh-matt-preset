@@ -54,3 +54,8 @@ unknown 引用直接抛错），正文里的示例代码若带双花括号需转
   不随本提交落地失效）+ tests/verify.mjs A0（改读 persona+workflow-body
   拼接文本）。**（#85 更新：该基线随 workflow 文本政策变更重取——仍逐字节
   冻结、断言不变，见 CONTEXT D48；persona 导语本身未动。）**
+   **（#89 更新：persona 导语**动了**——上游 0.2.1 删掉了 agent-loop 的
+   `variable('cwd', …)`，导语里 "Your working directory is {{cwd}}." 子句已删，
+   `tests/fixtures/persona-prefix-v1.txt` 随 #89 再次重取（导语换、正文逐字节保留）。
+   spike S1 的样本从 `{{model}}/{{cwd}}` 收窄为 `{{model}}`；`tests/verify-persona.mjs`
+   新增「含 `{{cwd}}` 的 persona 必须渲染前抛错」的反向锚。）**

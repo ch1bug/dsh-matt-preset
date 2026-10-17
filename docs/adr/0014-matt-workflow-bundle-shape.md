@@ -41,7 +41,8 @@ Status: accepted（2026-10-17，human 拍板，决策会话落盘）
    agent preset 声明**（不做 `presets/*.patch.yml`），保持单 patch 文件、单 preset 声明。
 4. **附带三项**（票面要求一并定）：
    - **npm 包名与版本锚**：无新包 → 无新包名、无第二条版本线；沿用单锚 ADR-0008 的
-     **`0.2.0-rc.2-r1`**（跟宿主 rc 线）。
+     **`0.2.0-rc.2-r1`**（跟宿主 rc 线）。**（2026-10-17，#88 更新：锚点已前移为
+      `0.2.1-rc.1-r1`；本条**形态结论不变**——仍无新包名、无第二条版本线。）**
    - **与安装器的关系**：**不变**——单目录 payload 拷进 `<DSH_HOME>/.agent-presets/matt/`
      （`bin/install.mjs` 本次不动）。
    - **`cordis.patch.yml` 生成/锁定**：**不变**——`scripts/regen-bundle.mjs` 生成、

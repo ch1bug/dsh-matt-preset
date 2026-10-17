@@ -7,7 +7,7 @@
  * 看到的面成立：
  *   R1. persona 前缀不含工作流正文（导语量级 450 chars，无 MAIN FLOW）；
  *   R2. 渲染结果含 workflow:core 注入节，正文完整（5 个标志段）；
- *   R3. {{model}}/{{cwd}} 已插值、无字面残留；
+ *   R3. {{model}} 已插值、无字面残留；
  *   R4. L1 等价：真实 composition 渲染 == persona 承载版（fixture 基线，于 #85 重取）渲染；
  *   R5. 离线挂载契约：composition 里存在 workflow-core 行，且用 package
  *       subpath 形式寻址（不得写成 profile 目录相对的 ./ 路径——enforcer 行
@@ -94,8 +94,8 @@ if (missing.length === 0) ok('R2. injected workflow:core carries the full body',
 else bad('R2. injected body incomplete', 'missing: ' + missing.join(', '))
 
 // R3: 插值
-if (real.includes('render-check-model') && real.includes(CWD) && !real.includes('{{model}}') && !real.includes('{{cwd}}'))
-  ok('R3. {{model}}/{{cwd}} interpolate in the rendered prompt')
+if (real.includes('render-check-model') && !real.includes('{{model}}'))
+  ok('R3. {{model}} interpolate in the rendered prompt')
 else bad('R3. interpolation', real.slice(0, 200))
 
 // R4: L1 等价

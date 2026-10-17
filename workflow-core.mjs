@@ -13,7 +13,7 @@
  *
  * Rendering contract (spike-proven, tests/verify-workflow-core.mjs S1):
  * the assemble waterfall runs BEFORE renderPrompt interpolates, and
- * agent-loop registers {{model}}/{{cwd}} per assembly — so the injected
+ * agent-loop registers {{model}} per assembly — so the injected
  * section interpolates exactly like persona-carried text did. The body is
  * split from the persona prefix at a blank-line boundary, and the sections
  * join with "\n\n" exactly where that blank line was, so a preset that

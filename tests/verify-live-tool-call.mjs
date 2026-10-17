@@ -210,7 +210,7 @@ try {
       `agent request not found among ${captured.length} request(s); systems: ` +
       JSON.stringify(captured.map(c => String(c.system ?? '').slice(0, 60))))
   }
-  if (agentReq !== undefined && !agentReq.system.includes('{{model}}') && !agentReq.system.includes('{{cwd}}')) {
+  if (agentReq !== undefined && !agentReq.system.includes('{{model}}')) {
     ok('T4b. no literal {{…}} left in the live agent system prompt')
   } else {
     bad('T4b. live system prompt interpolation', JSON.stringify(String(agentReq?.system ?? '')).slice(0, 300))

@@ -42,9 +42,19 @@ import AgentPreset from '@deepseek-ai/dsh-agent-preset'
 import AgentPresetRegistry from '@deepseek-ai/dsh-agent-preset-registry'
 import SessionProjection from '@deepseek-ai/dsh-session-projection'
 
-const loaderEntry = fileURLToPath(import.meta.resolve('@deepseek-ai/cordis-plugin-loader'))
-/** The installed dsh runtime's @deepseek-ai package table (realpath, junction-safe). */
-export const RUNTIME = await realpath(join(loaderEntry, '..', '..', '..'))
+/**
+ * The `@deepseek-ai` package table the harness resolves rows against — that is
+ * **this harness's own dependency table**, populated by
+ * `scripts/link-runtime-deps.mjs` (per-package absolute junctions into the runtime).
+ *
+ * #88：旧实现从 loader 入口上溯三级（`realpath(loaderEntry + '/../../..')`），那**依赖安装布局**：
+ * 旧锚是扁平安装，上溯正好落在 `<root>/node_modules/@deepseek-ai`；pnpm workspace 布局下
+ * loader 包的真实路径在 `<src>/vendor/*`，上溯得到 `<src>/vendor`——**那里没有包表**，于是所有
+ * 包名行 import 失败、注册表逐行报 `never started`（12/12 挂载型用例红，2026-10-17 实测）。
+ * 直接用挂具自己的表，它同时满足两个用途：① `ctx.baseUrl` 的 node_modules 上溯能找到
+ * `@deepseek-ai/*`；② `verify-production` 直接读 `RUNTIME/dsh-web-app/presets/*.patch.yml`。
+ */
+export const RUNTIME = await realpath(fileURLToPath(new URL('./node_modules/@deepseek-ai', import.meta.url)))
 /** baseUrl for the harness Context: package-name rows resolve against it. */
 export const RUNTIME_URL = pathToFileURL(RUNTIME).href + '/'
 /** The repo's workflow-enforcer plugin, as a loader-resolvable file:// name. */
@@ -60,7 +70,11 @@ export async function bootHarness(presets = [], dataRoot) {
   const { Storage } = await import('@deepseek-ai/dsh-storage')
   const StorageJsonMod = await import('@deepseek-ai/dsh-storage-json')
   const StorageDomainMod = await import('@deepseek-ai/dsh-storage-domain')
-  const { default: JsonlSessionPersistence } = await import('@deepseek-ai/dsh-session-persistence-jsonl')
+  // 0.2.1（#89）：本包改为函数插件——命名导出 `name`/`Config`/`apply`，**无默认导出**
+  // （见 docs/upgrade-guide/v0.2.1-alpha.1/jsonl-persistence-plugin/guide.md）。
+  // 旧写法 `const { default: X } = await import(…)` 在新版拿到 undefined，
+  // dataRoot 分支会在 ctx.plugin(undefined) 抛错。直接传模块命名空间即合法挂载（上游迁移指南逐字如此）。
+  const JsonlSessionPersistence = await import('@deepseek-ai/dsh-session-persistence-jsonl')
   const { WorkspaceRegistry } = await import('@deepseek-ai/dsh-workspace')
   const StorageJsonPlugin = { name: StorageJsonMod.name, apply: StorageJsonMod.apply, Config: StorageJsonMod.Config, inject: StorageJsonMod.inject }
   const StorageDomainPlugin = { name: StorageDomainMod.name, apply: StorageDomainMod.apply, Config: StorageDomainMod.Config, inject: StorageDomainMod.inject }
@@ -174,12 +188,28 @@ export function inertService() {
 }
 
 /**
+ * 组合内**自己提供**的服务名：绝不能被 inert stub 抢注。
+ *
+ * #88/#89：新注册表的 audit 会把「兄弟行还没起来」的等待报成 `waiting for <名>`，于是
+ * 盲补循环会给 `workflowEngine` 打 inert stub——随后真 provider（`dsh-workflow-ptc`）注册时
+ * 报 `service "workflowEngine" has been registered at <root>`，整棵子树挂不上
+ * （`verify-workflow-profiles-2.mjs` 的 PTC 形状实测，2026-10-17）。
+ * 清单与服务提供者来自 [docs/dsh-runtime-cheatsheet.md](../docs/dsh-runtime-cheatsheet.md)
+ * 「挂载级测试的 stub 配方」：`dsh-ptc-runtime-node` 提供 `ptcRuntime`，`dsh-workflow-ptc`
+ * 提供 `workflowEngine`。
+ */
+const SELF_PROVIDED = new Set(['workflowEngine', 'ptcRuntime'])
+
+/**
  * Pre-flight a full-preset mount: the 0.2.0-rc registry refuses to mount a
  * preset whose rows still wait for Host services (old runtime tolerated
  * pending injects). The mount-level harness cannot supply the real host
  * stack (subagents, workflowEngine, sandboxPolicy, ptcRuntime, …), so stub
  * each still-missing service name with an inert object until the registry
- * audit is clean. Rows that then fail activation surface as real errors.
+ * audit is clean — **except** the services a row in this composition itself
+ * provides (SELF_PROVIDED): stubbing one of those makes the real provider's
+ * registration collide.
+ * Rows that then fail activation surface as real errors.
  */
 export async function ensurePresetMountable(ctx, id, maxRounds = 6) {
   let last = ''
@@ -191,6 +221,7 @@ export async function ensurePresetMountable(ctx, id, maxRounds = 6) {
       .flatMap((m) => m[1].split(',').map((s) => s.trim()))
     const stubbed = new Set()
     for (const name of waiting) {
+      if (SELF_PROVIDED.has(name)) continue
       if (ctx.get(name) === undefined) {
         ctx.provide(name, inertService())
         stubbed.add(name)

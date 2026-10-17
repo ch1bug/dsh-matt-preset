@@ -1,6 +1,6 @@
 {
   "name": "dsh-matt-preset",
-  "version": "0.2.0-rc.2-r1",
+  "version": "0.2.1-rc.1-r1",
   "private": true,
   "description": "Matt 工作流 agent preset (ask-matt): persona + workflow-enforcer + tool roster, installed by bin/install.mjs into $DSH_HOME/.agent-presets/matt and mounted as a bundle patch via dsh plugin add (rc.2 preset registry does no directory scanning, #28). agent.cordis.yml is the source of truth; cordis.patch.yml is its generated bundle carrier.",
   "type": "module",

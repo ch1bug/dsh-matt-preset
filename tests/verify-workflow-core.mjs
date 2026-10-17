@@ -4,16 +4,18 @@
  * The ask-matt workflow body moves out of the persona prefix into the
  * workflow-core plugin, injected through the system-prompt/assemble path.
  *
- * S1 (SPIKE — the ticket's one technical unknown, run FIRST): {{model}} and
- *     {{cwd}} interpolate inside a plugin-injected section. The assemble
- *     waterfall runs BEFORE renderPrompt interpolates, and agent-loop
- *     registers both variables per assembly — proven here end-to-end.
+ * S1 (SPIKE — the ticket's one technical unknown, run FIRST): {{model}}
+ *     interpolates inside a plugin-injected section. The assemble waterfall
+ *     runs BEFORE renderPrompt interpolates, and agent-loop registers the
+ *     variable per assembly — proven here end-to-end. （0.2.1 起 `{{cwd}}`
+ *     不再是变量，样本改用 `{{model}}`；见 #89。）
  * L1: with workflow-core mounted by the matt-shaped preset, the rendered
  *     model-facing system prompt is VERBATIM-IDENTICAL to the current
  *     persona-carried version (the full text frozen in tests/fixtures/
  *     persona-prefix-v1.txt — read from disk, never re-derived from git).
- *     Captured at #54 and re-taken at #85 with the workflow text-policy
- *     change, so it stays a live carrier check, not a stale historical copy.
+ *     Captured at #54, re-taken at #85 with the workflow text-policy
+ *     change, and re-taken at #89 when the persona intro dropped its
+ *     `{{cwd}}` clause, so it stays a live carrier check, not a stale copy.
  * AC2: a preset other than matt mounts workflow-core with ONE plugin row
  *     (scope: 'all') and receives the workflow text.
  * G1: marker scope guard — with the default scope ('marker'), a session
@@ -33,7 +35,7 @@ const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 const WORKFLOW_CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
 
-/** The full persona-carried text (intro + body): the L1 baseline, re-taken at #85. */
+/** The full persona-carried text (intro + body): the L1 baseline, re-taken at #85 and #89. */
 const PERSONA_CARRIED = readFileSync(new URL('./fixtures/persona-prefix-v1.txt', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 /** Extract the `prefix: |` block scalar (same shape as verify-production). */
@@ -88,7 +90,7 @@ const ctx = await bootHarness([
     { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: 'You are a minimal agent.' } },
     { id: 'workflow-core', name: WORKFLOW_CORE, config: {
       scope: 'all',
-      text: 'Spike session on {{model}} in {{cwd}}.\n\nMAIN FLOW — idea → ship:',
+      text: 'Spike session on {{model}}.\n\nMAIN FLOW — idea → ship:',
     } },
   ] },
   // G1: default marker scope, marker-less persona → nothing injected.
@@ -121,12 +123,12 @@ const signal = new AbortController().signal
 
 // ── S1: spike — interpolation at the injection point ────────────────────────
 const spike = await render('spike-vars', '/tmp/wc-spike-cwd')
-if (spike.includes('Spike session on mock-model-1 in /tmp/wc-spike-cwd.')) {
-  ok('S1. {{model}}/{{cwd}} interpolate inside the plugin-injected section (spike proven)')
+if (spike.includes('Spike session on mock-model-1.')) {
+  ok('S1. {{model}} interpolates inside the plugin-injected section (spike proven)')
 } else {
   bad('S1. spike: interpolation at injection point', spike.slice(0, 300))
 }
-if (spike.includes('{{model}}') || spike.includes('{{cwd}}')) bad('S1b. no literal {{…}} remains', spike.slice(0, 300))
+if (spike.includes('{{model}}')) bad('S1b. no literal {{…}} remains', spike.slice(0, 300))
 else ok('S1b. no literal {{…}} remains in the injected text')
 
 // ── L1: verbatim-identical injection diff ───────────────────────────────────

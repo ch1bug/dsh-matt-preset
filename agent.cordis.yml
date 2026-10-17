@@ -23,18 +23,19 @@
 # workflow BODY (MAIN FLOW + gates + batch mode + auxiliary sections) lives in
 # the workflow-core plugin below — it injects through the system-prompt/
 # assemble path, so any preset can mount the workflow with one plugin row.
-# {{model}}/{{cwd}} in the intro interpolate at render, and the "ask-matt"
+# {{model}} in the intro interpolates at render, and the "ask-matt"
 # marker here keeps the enforcer's scope guard working.
+# ⚠ {{cwd}} 是**上游 0.2.1 起已移除**的变量（未注册变量在渲染前抛错）——导语里不得再用；
+#   会话的工作目录由 working-directory 服务作为**用户上下文**提供（不进系统提示词）。#89
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
     # 0.1.5 起 dsh-persona schema: text → prefix(必填)+suffix; 语义不变
     prefix: |
       You are a coding agent powered by the {{model}} model, operating Matt
-      Pocock's AI-coding workflow ("ask-matt"). Your working directory is
-      {{cwd}}. Route every piece of work through this map; the flow skills
-      are slash commands the human invokes (a few, like /pr, are
-      model-invoked) — to follow one that is not in your
+      Pocock's AI-coding workflow ("ask-matt"). Route every piece of work
+      through this map; the flow skills are slash commands the human invokes
+      (a few, like /pr, are model-invoked) — to follow one that is not in your
       skill catalog, read its instructions at ~/.dsh/skills/<name>/SKILL.md and
       follow them. Facts are your job; decisions are the human's.
 # workflow-core（内置插件，随 preset 分发；#54 工作流插件化 + #55 profile 机制 + #56 两档）：
@@ -51,8 +52,9 @@
 # （七门节 verbatim、其余压缩到 ~1/3）；各有 workflow-profile-<name>.txt 与
 # ADR-0011 / ADR-0012。注入经 system-prompt/assemble 为
 # workflow:core 节（order 10，紧随 persona 前缀）——渲染后与 persona 承载版
-# verbatim-identical（tests/verify-workflow-core.mjs L1 断言）。{{model}}/{{cwd}} 在注入节内
-# 照常插值（spike 实证：waterfall 先于 renderPrompt 插值，agent-loop 每次组装注册变量）。
+# verbatim-identical（tests/verify-workflow-core.mjs L1 断言）。{{model}} 在注入节内
+# 照常插值（spike 实证：waterfall 先于 renderPrompt 插值，agent-loop 每次组装注册变量）；
+# {{cwd}} 自上游 0.2.1 起不再注册，注入正文里也**不得**出现。
 # scope 守卫默认 'marker'：仅当组装结果含 ask-matt 标记才注入，绝不泄漏到非
 # 工作流会话；其他 preset 以单行挂载时显式 config scope: 'all'（挂载即 opt-in）。
 # 挂载 = 一行 `dsh-matt-preset/workflow-core.mjs`（经包 subpath exports 解析，
@@ -262,14 +264,12 @@
         provider: spawn
         toolName: subagent
         modelSelectionSettings: true
-        backgroundMode: continuable
 
     - id: tool-subagent-fork
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
         provider: fork
         toolName: subagent_fork
-        backgroundMode: continuable
 
     # Production dsh does not install these optional providers. An opting-in
     # Profile mounts each provider once on the host plane; copy this preset,
@@ -280,7 +280,6 @@
       config:
         provider: codex
         toolName: subagent_codex
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: tool-subagent-claude-code
@@ -289,7 +288,6 @@
       config:
         provider: claude-code
         toolName: subagent_claude_code
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     # 0.2.0: workflowEngine 由 dsh-workflow-ptc 提供（与内置 standard preset 一致；

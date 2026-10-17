@@ -6,11 +6,11 @@
 
 | 通道 | git tag | npm version（tag 去 `dsh-v` 前缀） | 例 |
 |---|---|---|---|
-| latest（跟 RC） | `dsh-v<official>-r<N>` | `<official>-r<N>` | `dsh-v0.2.0-rc.2-r1` ↔ `0.2.0-rc.2-r1` |
+| latest（跟 RC） | `dsh-v<official>-r<N>` | `<official>-r<N>` | `dsh-v0.2.1-rc.1-r1` ↔ `0.2.1-rc.1-r1` |
 | next（跟 alpha） | `dsh-v<official>-a<N>` | `<official>-a<N>` | `dsh-v0.2.1-alpha.1-a1` ↔ `0.2.1-alpha.1-a1` |
-| 打包产物 | `npm pack` → `dsh-matt-preset-<npm version>.tgz` | 同左 | `dsh-matt-preset-0.2.0-rc.2-r1.tgz` |
+| 打包产物 | `npm pack` → `dsh-matt-preset-<npm version>.tgz` | 同左 | `dsh-matt-preset-0.2.1-rc.1-r1.tgz` |
 
-`<official>` 对齐 DSH 运行时版本（当前 0.2.0-rc.2）；同一 official 上的 preset
+`<official>` 对齐 DSH 运行时版本（当前 0.2.1-rc.1）；同一 official 上的 preset
 迭代递增 `<N>`。通道节奏参考上游 DSH 分发：latest 跟 RC（按需重锚，不做空转
 bump），next 跟 alpha；next 版本不进 latest 升级路径。
 安装副本的 `VERSION.json` 记录 npm version + 安装时间 + 来源（source/dir/tarball）。
@@ -29,7 +29,7 @@ npm pack                      # 产物即安装源；npm publish 由 human 拍�
 ```bash
 npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 新用户一条命令；npm 默认禁 git 源 fetch（EALLOWGIT，故需 allow-git；取值随 npm 版本而异，见 npm 文档），等价于以下任一形式
 node bin/install.mjs install                 # 默认从本仓源码安装（包发布后可 npx .）
-node bin/install.mjs install --from dsh-matt-preset-0.2.0-rc.2-r1.tgz   # 从 tarball
+node bin/install.mjs install --from dsh-matt-preset-0.2.1-rc.1-r1.tgz   # 从 tarball
 node bin/install.mjs install --from /path/to/checkout                   # 从源码目录
 node bin/install.mjs install --root <dir>           # 默认 root = $DSH_HOME/.agent-presets
 node bin/install.mjs install --profile <name>       # 默认挂到 profile web；layer 不存在时自动创建

@@ -254,7 +254,7 @@ const ptcCtx = await bootHarness([
   {
     id: 'ptc-shape',
     plugins: [
-      personaRow('You are a PTC agent powered by {{model}}, working in {{cwd}}.'),
+      personaRow('You are a PTC agent powered by {{model}}.'),
       corePlugin({ profile: 'ptc', scope: 'all' }),
       { id: 'ptc-runtime', name: '@deepseek-ai/dsh-ptc-runtime-node' },
       { id: 'workflow-ptc', name: '@deepseek-ai/dsh-workflow-ptc' },
@@ -292,8 +292,8 @@ if (countOf(ptcRender, gatesText) === 1)
   ok('AC1h. exactly one seven-gate block reaches the model on the ptc mount')
 else bad('AC1h. ptc gate copies', String(countOf(ptcRender, gatesText)))
 
-if (ptcRender.includes('ptc-model') && ptcRender.includes('/tmp/wp2-ptc-cwd') && !ptcRender.includes('{{model}}'))
-  ok('AC1i. {{model}}/{{cwd}} interpolate on the ptc mount')
+if (ptcRender.includes('ptc-model') && !ptcRender.includes('{{model}}'))
+  ok('AC1i. {{model}} interpolates on the ptc mount')
 else bad('AC1i. ptc interpolation', ptcRender.slice(0, 200))
 
 const ptcMarkerless = await render(ptcCtx, 'ptc-markerless', '/tmp/wp2-ptc-cwd', 'ptc-model')
@@ -401,9 +401,9 @@ else bad('AC2i. lost rule anchors', lostAnchors.join(', '))
 // of its own — see the header); the standard mount is the control it is
 // measured against, and the markerless one proves the scope guard holds.
 const profilesCtx = await bootHarness([
-  { id: 'minimal-shape', plugins: [personaRow('You are an agent powered by {{model}}, working in {{cwd}}.'), corePlugin({ profile: 'minimal', scope: 'all' })] },
+  { id: 'minimal-shape', plugins: [personaRow('You are an agent powered by {{model}}.'), corePlugin({ profile: 'minimal', scope: 'all' })] },
   { id: 'minimal-markerless', plugins: [personaRow('You are a plain agent.'), corePlugin({ profile: 'minimal' })] },
-  { id: 'standard-shape', plugins: [personaRow('You are an agent powered by {{model}}, working in {{cwd}}.'), corePlugin({ profile: 'standard', scope: 'all' })] },
+  { id: 'standard-shape', plugins: [personaRow('You are an agent powered by {{model}}.'), corePlugin({ profile: 'standard', scope: 'all' })] },
 ])
 const minimalRender = await render(profilesCtx, 'minimal-shape', '/tmp/wp2-min-cwd', 'min-model')
 const standardRender = await render(profilesCtx, 'standard-shape', '/tmp/wp2-min-cwd', 'min-model')
@@ -418,9 +418,9 @@ if (minimalRender.length < standardRender.length * 0.75)
   ok('AC2k. the rendered prompt shrinks with the profile', `${minimalRender.length} vs ${standardRender.length} chars`)
 else bad('AC2k. rendered shrink', `${minimalRender.length} vs ${standardRender.length}`)
 
-if (minimalRender.includes('min-model') && minimalRender.includes('/tmp/wp2-min-cwd') &&
+if (minimalRender.includes('min-model') &&
     !minimalRender.includes('{{model}}') && minimalRender.includes('MINIMAL FLOW'))
-  ok('AC2l. {{model}}/{{cwd}} interpolate on the minimal mount')
+  ok('AC2l. {{model}} interpolates on the minimal mount')
 else bad('AC2l. minimal interpolation', minimalRender.slice(0, 200))
 
 const minimalMarkerless = await render(profilesCtx, 'minimal-markerless', '/tmp/wp2-min-cwd', 'min-model')

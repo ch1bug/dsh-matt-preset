@@ -197,11 +197,11 @@ const plain = 'You are a plain agent.'
 const personaRow = (prefix) => ({ id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix } })
 const corePlugin = (config) => ({ id: 'workflow-core', name: CORE, ...(config === undefined ? {} : { config }) })
 const ctx = await bootHarness([
-  { id: 'creator', plugins: [personaRow('You are a creator agent powered by {{model}}, working in {{cwd}}.'), corePlugin({ profile: 'creative', scope: 'all' })] },
+  { id: 'creator', plugins: [personaRow('You are a creator agent powered by {{model}}.'), corePlugin({ profile: 'creative', scope: 'all' })] },
   { id: 'creator-markerless', plugins: [personaRow(plain), corePlugin({ profile: 'creative' })] },
   { id: 'standard-explicit', plugins: [personaRow(plain), corePlugin({ profile: 'standard', scope: 'all' })] },
   { id: 'standard-default', plugins: [personaRow(plain), corePlugin({ scope: 'all' })] },
-  { id: 'text-override', plugins: [personaRow(plain), corePlugin({ profile: 'creative', scope: 'all', text: 'CUSTOM {{model}} on {{cwd}}.' })] },
+  { id: 'text-override', plugins: [personaRow(plain), corePlugin({ profile: 'creative', scope: 'all', text: 'CUSTOM {{model}}.' })] },
 ])
 const render = async (id, cwd, model) => {
   const handle = await ctx.agents.create({
@@ -230,9 +230,8 @@ if (countOf(creativeText, gateSection.text) === 1)
   ok('AC2c. the seven-gate block is byte-identical to the shared skeleton (wording unmodified)')
 else bad('AC2c. gate wording', `${countOf(creativeText, gateSection.text)} copies`)
 
-if (creatorText.includes('creator-model') && creatorText.includes('/tmp/wp-creator-cwd') &&
-    !creatorText.includes('{{model}}') && !creatorText.includes('{{cwd}}'))
-  ok('AC2d. {{model}}/{{cwd}} interpolate on the creative mount (persona + injected section render together)')
+if (creatorText.includes('creator-model') && !creatorText.includes('{{model}}'))
+  ok('AC2d. {{model}} interpolates on the creative mount (persona + injected section render together)')
 else bad('AC2d. creative interpolation', creatorText.slice(0, 200))
 
 const markerless = await render('creator-markerless', '/tmp/wp-plain-cwd', 'plain-model')
@@ -250,7 +249,7 @@ if (countOf(standardExplicit, gateSection.text) === 1 && !standardExplicit.inclu
 else bad('AC2g. standard mount leaked creative deltas')
 
 const override = await render('text-override', '/tmp/wp-custom-cwd', 'custom-model')
-if (override.includes('CUSTOM custom-model on /tmp/wp-custom-cwd.') && !override.includes('MAIN FLOW'))
+if (override.includes('CUSTOM custom-model.') && !override.includes('MAIN FLOW'))
   ok('AC2h. config.text still overrides the profile entirely (#54 escape hatch intact)')
 else bad('AC2h. config.text override', override.slice(0, 200))
 

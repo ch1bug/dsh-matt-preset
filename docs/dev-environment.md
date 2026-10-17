@@ -234,15 +234,22 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 
 ## 2. 宿主锚点（ADR-0008）
 
-跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.0-rc.2-r1` ↔ 宿主 tag
-`dsh-v0.2.0-rc.2`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
+跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.1-rc.1-r1` ↔ 宿主 tag
+`dsh-v0.2.1-rc.1`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
 与锚不符 —— 必须显式 checkout tag。
+
+| 锚 | 宿主 tag | tag 指向的 commit | 落地 |
+| --- | --- | --- | --- |
+| **当前** | `dsh-v0.2.1-rc.1` | `1600d8a1` | #88（2026-10-17） |
+| 上一锚 | `dsh-v0.2.0-rc.2` | `639ed015` | #42/#22 线 |
+
+（§0.0 那张 tag↔hash 表记的是 2026-10-16 隐私重写时的**历史对象**，与本表是两回事，勿混用。）
 
 ## 3. 源码部署步骤（msys2 侧）
 
 ```bash
 git clone https://github.com/deepseek-ai/deepseek-harness.git <src>
-cd <src> && git fetch --depth 1 origin tag dsh-v0.2.0-rc.2 && git checkout tags/dsh-v0.2.0-rc.2
+cd <src> && git fetch --depth 1 origin tag dsh-v0.2.1-rc.1 && git checkout tags/dsh-v0.2.1-rc.1
 pnpm install --ignore-scripts --package-import-method=copy     # 见 §4 工具链
 pnpm run clean                                                 # 见 §4 切 tag
 pnpm run build                                                 # 必须经 pnpm，见 §4
@@ -256,13 +263,14 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 **2026-10-16 实测**：Windows 侧 agent shell 与 msys 登录 shell 的 PATH 上**都没有** `dsh`
 （`Get-Command dsh` / `which -a dsh` 均空），但**运行时是可达的**——msys 侧部署副本
 `$HOME/dsh-matt-src`（tag `dsh-v0.2.0-rc.2`）与 DSH_HOME `$HOME/dsh-matt-home` 都在位。
+（该 tag 已于 2026-10-17 前移至 `dsh-v0.2.1-rc.1`，见 §2；本条其余结论是当时实测，仍然成立。）
 把"PATH 无 dsh"读成"本机没有 dsh / 有 dsh 那半边无法验证"是**错的**：#67 会话据此把
 `verify-installer` 的 4 条 link 断言判成"本机不可验证"，写进了已 push 的 commit。
 
 | 用途 | 命令 |
 | --- | --- |
 | 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
-| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.0-rc.2` |
+| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.1-rc.1` |
 
 **PATH 型工具**（`bin/install.mjs`、测试里的 `dsh --version` 探针）shell out 到字面 `dsh`，需要一个
 包装（临时放 `%TEMP%`，跑完可弃；`<src>\node_modules\.bin` 提供 `dsh plugin` 需要的 pnpm，见 §4.5）：
@@ -275,7 +283,7 @@ exit /b %ERRORLEVEL%
 
 ```powershell
 $env:PATH = "<shim 目录>;<src>\node_modules\.bin;$env:PATH"
-dsh --version                                                  # → 0.2.0-rc.2
+dsh --version                                                  # → 0.2.1-rc.1
 $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 11/11、exit 0、零 loud skip
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）
 ```
