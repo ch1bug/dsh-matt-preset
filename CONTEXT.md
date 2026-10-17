@@ -25,6 +25,10 @@
 - **handoff 快照化** — 交接文档固定带"环境事实快照"段（分支/工作树/关键文件状态/**环境结论（命令 → 输出，禁裸结论）**/已确认决策/下一步），新会话一条命令验证快照而非重建上下文（D26）。
 - **persona 低频变更** — persona 每改一次 = 全部会话系统提示词缓存失效；工作流规则改动攒批、低频落地（D27）。
 - **交接边界（handoff boundary）** — handoff 文档**工具级附加**的尾段（非模型自觉）：上文（含待办/下一步列表）是上下文与候选，**不是本会话任务指令**；子会话首轮契约 = 验证环境快照（起手式一条命令）→ 复述理解 → 问 human 要做什么，拍板前不自动开工（O6/O6b）。
+- **bundle（预设分发载体）** — 能被 profile 以一层方式装入的分发包：它不提供功能，只提供"往组合里插哪些行"的补丁层。与"插件"是两个层级的词——一个 bundle 可以挂零行、一行或多行；"装了几个插件"不由包数决定。
+- **插件行（plugin row）** — 组合树上的一个挂载点：声明"用哪个模块、带什么配置"。是否"是插件"由有没有行挂它决定，不由包的 manifest 决定。
+- **挂载级独立 / 分发级独立 / 演进级独立（L1 / L2 / L3）** — 组件脱离宿主复用的三级强度：L1 = 行能被别的 preset 单独挂；L2 = 有独立包名、版本线与安装通道；L3 = 有独立仓与发布栈。本工作流组件停在 L1（D46）。
+- **workflow bundle（本语境正名）** — 指本包内那组工作流组件行 + 承载它们的 preset 声明；**不是**独立包、**也不是**独立 preset（D46 / ADR-0014）。
 ## 已核实的环境事实
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
@@ -87,6 +91,8 @@
 - **D44（2026-10-16，#55 落地）** — **workflow profile 机制（共享骨架 + 每 profile delta）**：`workflow-body.txt` 仍是唯一正文源，按 `@@ <id>` 分节（12 节）；marker 行占据原空行分隔位、永不进注入文本（解析器对节尾空行/重复 id 响亮报错）。profile delta 文件 `workflow-profile-<name>.txt` 同语法：**同 id 覆盖该节**（保位置）、**新 id 按 `after=<anchor>` 插入**（锚点不存在即抛）。`workflow-core.mjs` 的 `PROFILES` 注册表 = 档名 → delta（`null` = 骨架 verbatim）；`profile: standard`（默认，matt preset 显式挂载）= #54 正文**逐字节一致**（AC1，fixture `tests/fixtures/workflow-body-v1.txt`）；`profile: creative`（创作者 preset）= 三节只增不改——`creator-context` 框定 + `creator-gate-extension`（`plugin_manager` 的 install_bundle/set_plugin/set_bundle 纳入外部动作门，只读 list_* 不确认）+ `creator-inspect-first`（写插件代码前 cordis_inspect_list → cordis_inspect_query 读准契约，只读不触发门），**七门措辞零改动**（AC2）。未知档名响亮回落 standard（每挂载告警一次）；`config.text` 仍是整段覆盖逃生门。**文本与机制同口径**：creative 声明的 gate 事件同时落进 enforcer 默认外部清单（`plugin_manager install_bundle` / `set_plugin` / `set_bundle`，词对匹配、只读 `list_*` 不触发；V16 断言）——高危清单归插件（D23），工作流文本只留锚点。加档零改共享文本（#56 ptc/minimal、#58 batch 抽取落在同一机制）。详见 [docs/adr/0011-workflow-profiles.md](docs/adr/0011-workflow-profiles.md)。
 
 - **D45（2026-10-16，#56 落地）** — **profile 加两档 + `tight` 紧连接分节**：骨架 12 → **15 节**——`workflow-enforcement`（七门）拆出紧连接的 `enforcement-done` / `enforcement-tiering` / `enforcement-recovery`（#54 里这三块与七门是**单换行相连**，全文最不可分处）；marker 语法扩为 `@@ <id>` / `@@ <id> tight` / `@@ <id> after=<anchor>` **恰好一个**子句，`tight` 描述**该节之前**的分隔符、因而属骨架**位置**（delta 声明即抛、首节即抛、`@@` 开头不合语法即抛），拆分逐字节无损故 **standard 仍与 #54 基线一致**（creative 锚点随之迁到 `enforcement-recovery`）。新档：**`ptc`** = 四节只增不改（工具面即程序面 `run_code` + 生成 SDK；程序 one-shot → 状态落文件；证据记程序输出而非退出码；编排 `agent()`/`parallel()`/`pipeline()`，provider+model 成对传、不可嵌套、schema 浅层、子失败 → `null`；门按**效果**判定、只读不确认）——**基于默认路径改出、不引用 shell-host**（D41），enforcer 无需改动（嵌套调用是真 tool/call，词对匹配照旧）；**`minimal`** = 只覆盖、不新增 `drop`：七门节不覆盖（verbatim、唯一），其余十四节压到 **34.8%**（7266/20892，票面 ~1/3），例子密集三节砍 >40%，特征性例子串消失（AC2f/g/h）。加档仍是三件套（delta 文件 + `PROFILES` 一行 + `package.json files` **显式条目**，见 #66）。验证 `tests/verify-workflow-profiles-2.mjs`（T1–T5 机制 / AC1 ptc 挂**真实 PTC 行** + marker 守卫 / AC2 minimal 比例与结构 + marker 守卫 / AC3 standard 零漂移 / P5–P8 注册与打包）；断言的 P 编号跨文件连号（P1–P4 在 #55 文件里）。详见 [docs/adr/0012-workflow-profiles-2.md](docs/adr/0012-workflow-profiles-2.md)。
+
+- **D46（2026-10-17，#76 拍板）** — **`dsh-matt-workflow` 形态：不独立分包、不独立建仓（追认 #54 的同包 row 形态）**：确立 **"独立可挂载（L1）≠ 独立包（L2）"**——组件经包 subpath exports 以一行 `dsh-matt-preset/<file>.mjs` 被别的 preset 单独挂载的能力，正是 #57 的目的，且已由 #54 实测达成；L2/L3 不做。附带三项维持现状：无新包名、无第二条版本线（单锚 ADR-0008 `0.2.0-rc.2-r1`）、安装器与载体生成/锁定不动。**不引入第二套档位机制**——上游表达"同一工作流多档位"用多个 preset 声明 + 每份完整 roster，matt 已用 profile delta（ADR-0011/0012）以零重复表达同一件事。**历史补记**：#54 票面原计划是独立可安装包 `dsh-matt-workflow`，落地改道为同包 row 而 ADR-0010 未记录，本决策追认该改道并留下四条复活触发条件（出现第二个真实消费者 / 组件需脱节奏发版 / 包名成实际阻碍 / 需要不含 matt 人设的独立 preset）。详见 [docs/adr/0014-matt-workflow-bundle-shape.md](docs/adr/0014-matt-workflow-bundle-shape.md)。
 
 详见 [docs/adr/0001-scheduled-jobs.md](docs/adr/0001-scheduled-jobs.md)、[docs/adr/0002-batch-mode.md](docs/adr/0002-batch-mode.md)。
 
