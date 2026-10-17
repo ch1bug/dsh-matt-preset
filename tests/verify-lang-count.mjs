@@ -19,7 +19,6 @@ import SessionProjectionCache from '@deepseek-ai/dsh-session-projection-cache'
 import { bootHarness, emitSessionEvent, ensurePresetMountable, parsePlugins, resolveLocalNames, disableRows } from './preset-harness.mjs'
 
 const PRESET_DIR = fileURLToPath(new URL('..', import.meta.url))
-const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 const root = await mkdtemp(join(tmpdir(), 'lang-count-'))
 const rustDir = join(root, 'rust-proj')
@@ -37,7 +36,7 @@ const HARNESS_DISABLED = ['delegation', 'compaction', 'tool-pwsh', 'tool-fs', 's
 const mattPlugins = disableRows(resolveLocalNames(parsePlugins(
   await readFile(join(PRESET_DIR, 'agent.cordis.yml'), 'utf8'),
   pathToFileURL(PRESET_DIR).href + '/',
-), PRESET_ROOT), HARNESS_DISABLED)
+), PRESET_DIR), HARNESS_DISABLED)
 const ctx = await bootHarness([{ id: 'dsh-matt-preset', plugins: mattPlugins }])
 await ctx.plugin(SessionProjectionCache)
 await ensurePresetMountable(ctx, 'dsh-matt-preset')

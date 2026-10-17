@@ -25,8 +25,6 @@ import { childStarted, waitForFirstTurn } from '../handoff-tool.mjs'
 
 // Repo-relative: tests/verify.mjs -> the repo root, which IS the matt preset directory.
 const MATT_DIR = fileURLToPath(new URL('..', import.meta.url))
-// The root that CONTAINS the repo: preset-local plugin names resolve under it.
-const PRESET_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 // Custom preset-owned rows only: a full-matt mount failure must never blame
 // these. Shipped rows (tool-bash, str-replace-editor, …) fail on
 // harness-missing host services and are expected.
@@ -235,7 +233,7 @@ try {
     { id: 'dsh-matt-preset', plugins: resolveLocalNames(parsePlugins(
       await readFile(join(MATT_DIR, 'agent.cordis.yml'), 'utf8'),
       pathToFileURL(MATT_DIR).href + '/',
-    ), PRESET_ROOT) },
+    ), MATT_DIR) },
   ])
   results.push('harness B booted (full matt declaration)')
   const listed = await ctxB.agentPresets.list()

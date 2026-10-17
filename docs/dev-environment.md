@@ -38,6 +38,29 @@
 - 同一 workspace 只保留**一份**部署副本；历史上的散落副本（早期 `<repo>/dsh-src`，与
   msys2 侧部署副本 `$HOME/dsh-matt-src` 重复）已清理。本文用 `$HOME` 表示 **msys 侧**
   用户目录（≠ Windows 用户目录，见 §0.1）、`%USERPROFILE%` 表示 Windows 用户目录。
+- **本仓自己的 msys2 侧检出（2026-10-17 起）**：`$HOME/dsh-matt-preset` = 只读部署副本，只用于
+  「拉取 + 在 msys 工具链下验证」；**提交永远只在权威树**。建立与单向同步：
+
+  ```bash
+  git clone https://github.com/ch1bug/dsh-matt-preset.git "$HOME/dsh-matt-preset"
+  node scripts/link-runtime-deps.mjs --runtime <含 node_modules/@deepseek-ai 的目录>   # 依赖接线
+  git config core.hooksPath .githooks                                                  # 每 clone 一次
+  # 之后每次同步（权威 → 副本）：
+  git -C "$HOME/dsh-matt-preset" fetch --prune --tags --force origin
+  git -C "$HOME/dsh-matt-preset" merge --ff-only FETCH_HEAD
+  ```
+
+- **tag 必须一起同步，且要 `--force`**（邻仓 `dsh-shell-host` 2026-10-17 实测；git 语义通用）：只
+  `fetch origin main` 时 tag **不进同步面**——不报错、退出码 0、树干净，副本静默停在旧 tag；已存在的
+  tag 默认 refuse clobber，只打一行 `! [rejected] … (would clobber existing tag)` 就略过该 ref。
+  后果：`main` 同提交、工作树干净，**旧 tag 让重写前的提交仍经 `refs/tags/*` 可达**，副本侧隐私守卫
+  于是判红（看着干净的副本判不出绿）。处置：`git tag -d <tag>` + `fetch --tags --force`，再按
+  [privacy.md](agents/privacy.md) 清本机悬挂对象。
+- **副本目录名不必等于 `dsh-matt-preset`**（2026-10-17 修）：检出目录名曾是硬约束——
+  `tests/verify.mjs` 把生产名 `dsh-matt-preset/x.mjs` 拼到 `<repo>/..` 上，取名 `…-src` 的副本会被
+  改写成不存在的兄弟路径，而 loader 的报错把锅甩给插件行（`workflow-core … never started`）。
+  现在 `resolveLocalNames` 按**包目录本身**解析前缀名，`tests/verify-harness-paths.mjs` P1–P3 钉住；
+  实测改名副本与规范树逐项同结果（数字见 §0.1「msys2 侧全流程验证」）。
 
 ## 0.1 msys2 会话引导（复用 Windows 侧配置）
 
@@ -55,6 +78,31 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 **PATH 顺序是硬约束**：Windows node 必须优先于 msys 的 ucrt64 node —— 后者上报
 `platform=win32-x64-gnu`，跑套件会以 `0xC06D007F`（过程/DLL 找不到）崩在原生依赖上
 （实测 `verify.mjs` / `verify-dual-env.mjs`）。
+
+### msys2 侧全流程验证（副本拉取之后；2026-10-17 实测）
+
+在副本里跑；工具链组合 = **msys 的 git/sh/tar + Windows 的 node**（上一条的硬约束）：
+
+| 口径 | 命令 | 实测结果 |
+| --- | --- | --- |
+| 默认套件 | `. ./scripts/msys-env.sh && node scripts/verify-all.mjs` | **22/24**（当日用例数；与 Windows 默认基线逐项一致） |
+| 全流程：安装 → 配置 → 启动 → 建会话 → 真实调用 | 同上 + 下表三件 PATH 件 + `DSH_MATT_INSTALLER=1 DSH_MATT_LIVE_CLI=<src>/apps/cli/lib/bin.js` | **23/24**（当日用例数）：`verify-installer` 与 `verify-clean-env-e2e` **零 loud skip**、`verify-live-tool-call` / `verify-live-real-llm` 全绿 |
+
+缺任何一件 PATH 件，安装环就红（`dsh: plugin command failed` → preset 未注册 → 两条 live 报
+`Unknown agent preset: dsh-matt-preset`）——**这是环境缺件，不是仓的缺陷**：
+
+1. **Windows node 优先**（`scripts/msys-env.sh` 已覆盖）；
+2. **pnpm 所在目录**：`<src>/node_modules/.bin`（`dsh plugin add` 要 shell out 到 pnpm；msys 默认
+   PATH 上没有 pnpm）；
+3. **Windows 可 spawn 的 `dsh` shim（`.cmd`）**，且 PATH 必须是 **Windows 形态**——实测 msys 形态
+   PATH 下 Windows node 的 `spawn('dsh')` 直接 `ENOENT`；只用 POSIX `sh` 脚本 shim 也能到 23/24，但
+   installer 的 5 条 profile-link 证明会**静默退化成 loud skip**（`PASS*`），「全流程」验收要用 `.cmd` 口径。
+
+> 形态借自邻仓 `dsh-shell-host`：其 e2e 挂具把 node / 插件目录 / 宿主目录 / pnpm 目录全部走
+> **显式 env 参数**（`DSH_E2E_NODE` / `DSH_E2E_PLUGIN_DIR` / `DSH_E2E_HOST_DIR` / `DSH_E2E_PNPM_DIR`），
+> 宿主 CLI 直接 `node … apps/cli/src/bin.ts`，**从不依赖 PATH 上的 `dsh`**。本仓的安装环仍依赖字面
+> `dsh`（`bin/install.mjs` 的 `mountOrWarn`；`tests/verify-installer.mjs` 的 `dshOnPath` 探针），所以
+> msys 侧要 shim；把这份依赖也改成显式参数见 **#83**。
 
 ## 0.2 agent shell 的工具链与内联脚本
 

@@ -117,16 +117,29 @@ export function parsePlugins(yamlText, baseUrl) {
 }
 
 /**
- * Rewrite preset-local plugin names (`dsh-matt-preset/x.mjs`, resolved in
- * production against the installed bundle dir) into absolute file:// URLs
- * rooted at `rootDir` — the directory that CONTAINS the repo. Loader
- * builtins (`cordis:*`) and package names (`@deepseek-ai/…`) pass through.
+ * Rewrite preset-local plugin names into absolute file:// URLs.
+ *
+ * `pkgDir` is the CHECKOUT directory itself (the repo root) and `pkgName` the
+ * package name production spells those rows with (`dsh-matt-preset/x.mjs`, the
+ * installed bundle dir): the prefix is STRIPPED and the rest resolved inside
+ * `pkgDir`. A relative row without the prefix still resolves against `pkgDir` —
+ * the helper stays general, it just no longer assumes the checkout's basename
+ * equals the package name. Loader builtins (`cordis:*`) and package names
+ * (`@deepseek-ai/…`) pass through.
+ *
+ * Why the base is the package dir and not its parent (measured 2026-10-17):
+ * resolving `pkgName/x.mjs` against `<repo>/..` made the checkout directory
+ * name load-bearing — a renamed clone, a `git worktree` or an msys2 `<name>-src`
+ * copy rewrote to a nonexistent sibling path and the loader blamed the plugin
+ * rows (`… never started`). Pinned by `tests/verify-harness-paths.mjs`.
  */
-export function resolveLocalNames(nodes, rootDir) {
-  const rootUrl = pathToFileURL(rootDir).href + '/'
+export function resolveLocalNames(nodes, pkgDir, pkgName = 'dsh-matt-preset') {
+  const pkgUrl = pathToFileURL(pkgDir).href + '/'
   const walk = (rows) => rows?.map((row) => {
-    if (typeof row?.name !== 'string' || row.name.startsWith('@') || row.name.startsWith('cordis:') || row.name.includes('://')) return row
-    return { ...row, name: new URL(row.name, rootUrl).href }
+    const name = row?.name
+    if (typeof name !== 'string' || name.startsWith('@') || name.startsWith('cordis:') || name.includes('://')) return row
+    const rel = name.startsWith(`${pkgName}/`) ? name.slice(pkgName.length + 1) : name
+    return { ...row, name: new URL(rel, pkgUrl).href }
   })
   return (function rewrite(rows) {
     return walk(rows)?.map((row) => {
