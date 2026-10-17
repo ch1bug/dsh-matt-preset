@@ -85,8 +85,8 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 
 | 口径 | 命令 | 实测结果 |
 | --- | --- | --- |
-| 默认套件 | `. ./scripts/msys-env.sh && node scripts/verify-all.mjs` | **22/24**（当日用例数；与 Windows 默认基线逐项一致） |
-| 全流程：安装 → 配置 → 启动 → 建会话 → 真实调用 | 同上 + 下表三件 PATH 件 + `DSH_MATT_INSTALLER=1 DSH_MATT_LIVE_CLI=<src>/apps/cli/lib/bin.js` | **23/24**（当日用例数）：`verify-installer` 与 `verify-clean-env-e2e` **零 loud skip**、`verify-live-tool-call` / `verify-live-real-llm` 全绿 |
+| 默认套件 | `. ./scripts/msys-env.sh && node scripts/verify-all.mjs` | 与 Windows 默认基线**逐项一致**（25 项用例时 **23/25**） |
+| 全流程：安装 → 配置 → 启动 → 建会话 → 真实调用 | 同上 + 下表三件 PATH 件 + `DSH_MATT_INSTALLER=1 DSH_MATT_LIVE_CLI=<src>/apps/cli/lib/bin.js` | **24/25**：`verify-installer` 与 `verify-clean-env-e2e` **零 loud skip**、`verify-live-tool-call` / `verify-live-real-llm` 全绿 |
 
 缺任何一件 PATH 件，安装环就红（`dsh: plugin command failed` → preset 未注册 → 两条 live 报
 `Unknown agent preset: dsh-matt-preset`）——**这是环境缺件，不是仓的缺陷**：
