@@ -26,11 +26,27 @@
  * §5 的操作口径里（"整段粘进"，与 §3.1/§3.2/§4 同一句要求），没有任何树内产物可断言。
  * 真正的结构性防线是**基线冻结**（先提交再复核）：fixed point 成为已存在且不再变动的 commit，
  * "复核期间树在动"这一根本问题**消失**——口径把它列为首选，R3 钉住这句在场。
+ *
+ * **本用例实施期自己抓到的一个真形态（写在这里，别删）**：R1/R2/R3 全是**关键词在场**断言，
+ * 而"关键词在场"**不是**"禁令生效"。两轴复核各独立实测确认了同一个洞，形态是"**词面全在、语义全废**"：
+ *   ① 把整节对冲成建议（"不必真的去 `git checkout`…；`.scratch/` 理论上不该删；扰动最好…"）
+ *      —— R2 仍 **9/9 全绿**；
+ *   ② 把整节降格成**历史叙事**（"历史背景：在 #113 里，一个复核子代理用了 `git checkout`…"）
+ *      —— R2 9/9、R3 也绿，**整体 exit=0**：复核者读完只会"了解一段经过"，不知道**自己不许**做什么。
+ * 这正是本仓 D13（用正则追写法而非钉结构）/ D11（匹配文本形态而非行为）——而 D14 恰恰把这两条
+ * 登记在册。故补三条**结构面**判据（不是措辞判据）：
+ *   R2b 该节必须处于**禁令语气**（禁令标记成规模 + 叙事框架语不得压过它）；
+ *   R3b 禁令不得被**对冲成建议**；R3c 是 R3b 的**双向自检**（引号里的"提及"不误伤 +
+ *   真对冲仍被抓），防"剥引用"剥过头把 R3b 变成恒真。
+ * 五类扰动全部进 R4，各自红在**自己那条**判据上（见运行读数）。
+ * 这是本用例最强的一条判据：它证明的不只是"词在不在"，而是"这句话还立不立得住"。
+ *
+ * 边界仍然明确：本用例判**文本**，判不了"派单者有没有真的粘进去"——那是人的判决。
  */
-import { readFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, cpSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const results = []
@@ -94,12 +110,14 @@ const sec5 = sectionOf(briefText, '## 5. 两轴 brief 模板')
 const sec = sectionOf(sec5, SECTION_TITLE)
 
 // ── R1：§5 模板含该节 ─────────────────────────────────────────────────────────
-if (sec !== '' && sec5 !== '') {
+// 注：`sec` 由 `sectionOf(sec5, …)` 得出，故 `sec !== ''` 蕴含 `sec5 !== ''` ——
+// 中间的 `else if (sec !== '')` 分支是**永假的**（§8 D12 形态，Standards 轴 2026-10-18 实测指出）。
+// 已删：R1 只剩两个真分支（节在 §5 内 / 节不存于 §5）。"节存在于 §5 之外"这个命题
+// 由 `sec` 的定义方式直接排除（我们只在 §5 正文里找它），不需要第三个分支。
+if (sec !== '') {
   ok('R1. §5 模板含固定段落「复核者的写权限 = 无」', `${BRIEF_REL} §5`)
-} else if (sec !== '') {
-  bad('R1. 该节存在但**不在 §5 之内**（票面要求粘进两轴 brief 模板）', `${BRIEF_REL}`)
 } else {
-  bad('R1. brief 缺该固定段落（约束只活在派单者记忆里 —— #113 的病根）',
+  bad('R1. brief §5 缺该固定段落（约束只活在派单者记忆里 —— #113 的病根）',
     `在 ${BRIEF_REL} §5 中未找到「${SECTION_TITLE}」`)
 }
 
@@ -115,6 +133,42 @@ if (sec !== '' && sec5 !== '') {
   }
 }
 
+// ── R2b：禁令处于**禁令语气**，不是被降格成"历史叙事"─────────────────────────
+// **为什么需要这一条（Standards 轴复核实测的 Attack B，必删不得）**：R2 只断言**词面在场**，
+// 而"词面在场"连"这句话在下命令"都不保证。复核实测构造：
+//   "历史背景：在 #113 里，一个复核子代理用了 `git checkout`、`git restore`、`git stash`、
+//    `git clean`，顺手把 `.scratch/` 下的副本也清掉了；当时临时件放 `os.tmpdir()`，扰动在
+//    副本上做。那次基线冻结没做好（当时也说了「先提交再复核」是首选）…"
+// ——**九个 BAN 词全在、R2 9/9、R3/R3b/R3c 全绿、exit=0**，而这一节**一条禁令都没有**，
+// 复核者读完只会"了解一段经过"，不会知道**自己不许**做任何事。正是本仓 D13（追写法非钉结构）
+// 与 D11（匹配文本形态非行为）的形态。
+// 判据：要求本节**同时**具备 ① **禁令标记**（禁/禁止/不得/一律不/无例外/永不/不允许）
+// 且 ② 这些标记**成规模**（叙事化文本里偶然出现一个"不得"骗不过去），并且 ③ **叙事框架语**
+// 不得占主导。三条都是**结构面**判据，不是措辞判据——措辞可以换，"在下命令"这件事换不掉。
+{
+  const PROHIBITIVE = /禁止|严禁|不得|一律不|一概不|无例外|永不|不允许|绝不允许|不许/g
+  const NARRATIVE = /历史背景|当时|那一次|发生过|后来的|曾经的|背景是|事故经过|所以后来/g
+  const prohibitiveCount = (sec.match(PROHIBITIVE) ?? []).length
+  const narrativeCount = (sec.match(NARRATIVE) ?? []).length
+  // 阈值口径：真实本节实测 ≈10 个禁令标记；叙事化 Attack B ≈0。取 ≥4（同一节至少要下 4 道
+  // 命令才谈得上"逐条禁令"——与 §5 要求的 git 写命令族 + `.scratch/` + `os.tmpdir()` 相当）。
+  const PROHIBITIVE_MIN = 4
+  const moodOk = prohibitiveCount >= PROHIBITIVE_MIN
+  // 叙事面：允许它存在（本节**确实**要讲事故背景，否则读者不懂为什么有这条禁令），
+  // 但**不得压过**禁令面——否则读起来是一篇回顾而不是一道命令。
+  const narrativeDominates = narrativeCount > prohibitiveCount
+  if (sec === '') {
+    bad('R2b. 无法判（节缺席，R1 已报）', '')
+  } else if (moodOk && !narrativeDominates) {
+    ok('R2b. 禁令处于禁令语气（禁令标记成规模、未被叙事框架压过）',
+      `禁令标记 ${prohibitiveCount}（≥${PROHIBITIVE_MIN}）/ 叙事语 ${narrativeCount}`)
+  } else {
+    bad('R2b. 该节被降格成"历史叙事"（词面在场但无人在下命令 —— D13/D11 形态）',
+      `禁令标记 ${prohibitiveCount}（需 ≥${PROHIBITIVE_MIN}）| 叙事语 ${narrativeCount}` +
+      ` | 叙事压过禁令=${narrativeDominates}`)
+  }
+}
+
 // ── R3：基线冻结前置声明（结构性缓解是首选，不只是列禁止项）────────────────
 {
   const hasFreeze = /基线冻结|冻结/.test(sec)
@@ -124,6 +178,62 @@ if (sec !== '' && sec5 !== '') {
     ok('R3. 含基线冻结前置声明（首选"先提交再复核" + 兜底"显式声明移动靶"）')
   } else {
     bad('R3. 基线冻结前置声明不完整', `冻结=${hasFreeze} | 首选=${hasPreferred} | 兜底=${hasFallback}`)
+  }
+}
+
+// ── R3b：禁令**不是被对冲成建议**（"不必真的…"/"理论上不该…"/"最好…"）────────────
+// **为什么需要这一条（本票实施期的自检实证，别删）**：R1/R2/R3 都是**关键词在场**断言，
+// 而"关键词在场"**不是**"禁令生效"。实施期自检实测：把本节整段改写成
+// "不必真的去 `git checkout` 或 `git restore`，也别 `git stash`、`git clean`；`.scratch/` 的东西
+// 理论上不该删。临时文件放 `os.tmpdir()`，扰动最好在副本上做。" ——**R2 仍然 9/9 全绿**
+// （每个禁令词都在），只有 R3 因"冻结"一词恰好缺席而红。这正是本仓 D13「用正则追写法而非
+// 钉结构」+ D11「匹配文本形态而非行为」的形态：**对冲语把硬禁令降级成建议，而词面毫发无损**。
+// 判据刻意**收窄**（只抓明确的降级词，不抓任何温和措辞）：宽泛的"语气检查"会误伤合法表述，
+// 那比漏抓更贵。这条抓的是"**照做与不照做都不算错**"的那种句子 —— 而 §5 那一节的全部价值
+// 就在于让"不照做 = 违规"。
+{
+  // **本条的自身陷阱（实施期实测踩到，见下）**：第 1 版对整节原文匹配，被自己的正文
+  // `**这不是"尽量别用"**` **误伤** —— 那句话是**引用对冲语来否定它**，却因引号里含
+  // "尽量别用" 而判红。这正是本仓 **D11**「负例守卫匹配了文本形态而非行为（禁'写'变成禁'说'）」
+  // 的同一形态，上一票刚登记过。修法：**先剥掉被引号/加粗括起来的"提及"**，只对**生效面**
+  // 匹配（与 D11 的落点 Y7「先剥注释再匹配」同手法）。
+  // 剥法：去 markdown 的 `**…**` 与 `"…"` / `“…”` 两种引号内容 —— 那些是"提及"而非"表态"。
+  const operative = sec
+    .replace(/\*\*[^*]*\*\*/g, ' ')   // 加粗片段（引用式否定都写在这种位置）
+    .replace(/[""][^""]*[""]/g, ' ') // 中文引号
+    .replace(/"[^"]*"/g, ' ')        // 直角引号
+  const HEDGES = [
+    { re: /不必真的|不用真的|无需真的/, why: '"不必真的 …" —— 把禁令降级成提示' },
+    { re: /理论上(不该|不应|不应)/, why: '"理论上不该 …" —— 暗示实践上可以' },
+    { re: /最好(不要|别|避免)|尽量(不要|别|避免)|建议(不要|别)/, why: '"最好/尽量/建议（别）…" —— 建议 ≠ 禁令' },
+    { re: /如果(方便|可以)的话/, why: '"如果方便的话" —— 可选项化' },
+  ]
+  const hit = HEDGES.filter(h => h.re.test(operative))
+  if (sec !== '' && hit.length === 0) {
+    ok('R3b. 禁令未被对冲成建议（生效面无"不必真的/理论上不该/最好别"一类降级语）')
+  } else if (sec === '') {
+    bad('R3b. 无法判（节缺席，R1 已报）', '')
+  } else {
+    bad('R3b. 禁令被对冲成建议（词面在场但硬约束已降级 —— D13/D11 形态）',
+      hit.map(h => `${h.re.source}（${h.why}）`).join(' | '))
+  }
+
+  // ── R3c：R3b 的**双向自检**（D11 落点 Y7c 的同手法：防"禁写变成禁说"）──────────
+  // 只测一个方向是不够的：剥引用若剥得过多，真实的对冲语也会被剥掉 → R3b 退化成恒真。
+  // 故两个方向一起钉：① 引用式否定（"这不是『尽量别用』"）**不误伤**；
+  // ② 真正的生效面对冲语**仍被抓**。
+  {
+    const negatedMention = '**这不是"尽量别用"**：禁止 git 写命令。'
+    const realHedge = '尽量不要用 git 写命令。'
+    const strip = (s) => s.replace(/\*\*[^*]*\*\*/g, ' ').replace(/[""][^""]*[""]/g, ' ').replace(/"[^"]*"/g, ' ')
+    const hedgeRe = HEDGES[2].re
+    const noFalsePositive = !hedgeRe.test(strip(negatedMention))
+    const stillCatches = hedgeRe.test(strip(realHedge))
+    if (noFalsePositive && stillCatches) {
+      ok('R3c. 双向自检：引用式否定不误伤 + 真对冲仍被抓（防 R3b 剥过头变恒真）')
+    } else {
+      bad('R3c. R3b 双向自检失败', `引用式否定不误伤=${noFalsePositive} | 真对冲仍被抓=${stillCatches}`)
+    }
   }
 }
 
@@ -169,6 +279,29 @@ if (!MIRRORED) {
         label: '抽掉单条禁令（`git clean`）',
         mutate: t => t.replace(/`git clean`/g, '某些清理命令'),
       },
+      {
+        // 第 ④ 类 = 实施期自检实证抓到的形态（见 R3b 的注释）：**词面全在**，但整段被
+        // 对冲成建议。这一条暴露"关键词在场 ≠ 禁令生效"这条边界。
+        id: 'hedged-advice',
+        label: '全部禁令保留词面、但整段对冲成建议',
+        mutate: t => rewriteSection(t,
+          '### 复核者的写权限 = 无\n\n'
+          + '不必真的去 `git checkout` 或 `git restore`，也别 `git stash`、`git clean`；'
+          + '`.scratch/` 的东西理论上不该删。临时文件放 `os.tmpdir()`，扰动最好在副本上做。\n'),
+      },
+      {
+        // 第 ⑤ 类 = **Standards 轴复核实测的 Attack B**（本用例最强的一击，也是补 R2b 的原因）：
+        // 九个 BAN 词**全部在场**、R3/R3b/R3c 全绿，但整节只剩**历史叙事** —— 读的人只会
+        // "了解一段经过"，不知道**自己不许**做什么。补 R2b 后本类必红。
+        id: 'narrative-only',
+        label: '全部禁令词保留、但整节降格成历史叙事（Attack B）',
+        mutate: t => rewriteSection(t,
+          '### 复核者的写权限 = 无\n\n'
+          + '历史背景：在 #113 里，一个复核子代理用了 `git checkout`、`git restore`、`git stash`、'
+          + '`git clean`，顺手把 `.scratch/` 下的副本也清掉了；当时临时件放 `os.tmpdir()`，'
+          + '扰动在副本上做。那次基线冻结没做好（当时也说了「先提交再复核」是首选），'
+          + '结果就成了移动靶。所以后来的复核者会了解这段经过。\n'),
+      },
     ]
 
     for (const p of perturbations) {
@@ -194,11 +327,43 @@ if (!MIRRORED) {
 }
 
 // ── R5：真树逐字节未变（本票的主题是"别糟蹋工作树"，取证方式自己更不能犯）────
-// 只在真树上判：镜像跑改的就是副本，拿它当"真树未变"的证据是同义反复。
+// **Standards 轴 2026-10-18 指出第 1 版是同义反复**（`now === briefText` 只证明"同一文件读了
+// 两次、值相同"，既不覆盖 `.scratch/`、也不覆盖仓库其它文件）——判断项，但确实是弱形态。
+// 加强为**两条独立判据**（R5 + R5b），且 R5b 是本票主题真正对症的那条。
+// 注：**不**断言"git 工作树干净"——实现期间工作树本来就该是脏的（正在改代码），
+// 拿它当判据会误伤，且它与"本用例有没有糟蹋树"无关。
+//
+// `if (!MIRRORED)`：R5/R5b 判的是**真树**。在镜像跑里它们读的是副本根、
+// 会把"副本内容 ≠ 真树内容"误报成红（第 1 版实测：五类扰动全部多出一条 R5 噪声红）。
+// 镜像上只该判 R1–R3c（"这份被扰动的文本是否触发断言"），真树卫生由真树那一跑负责。
 if (!MIRRORED) {
-  const now = readFileSync(join(REPO, BRIEF_REL), 'utf8')
+  const now = readFileSync(BRIEF, 'utf8')
   if (now === briefText) ok('R5. 真树未被扰动污染（brief 逐字节与读入时一致）')
   else bad('R5. 真树被扰动污染', `${BRIEF_REL} 与读取时不一致`)
+}
+
+// ── R5b：扰动残骸不得留在仓内（`.scratch/` 或任何仓内目录）────────────────────
+if (!MIRRORED) {
+  const tracked = execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' })
+    .split('\n').map(s => s.trim()).filter(Boolean)
+  // 本用例的临时目录前缀（`os.tmpdir()` 下建的那些）。
+  const RESIDUE_PREFIX = 'dsh-reviewbrief-'
+  const residualTracked = tracked.filter(f => f.includes(RESIDUE_PREFIX))
+  // 仓内（含未跟踪面）也扫一遍：`.scratch/` 是 gitignore 的，**恰是**当次事故被清的地方，
+  // 所以"残骸"必须同时扫跟踪面与未跟踪面。
+  let residualUntracked = []
+  try {
+    const scratch = join(REPO, '.scratch')
+    if (existsSync(scratch)) {
+      residualUntracked = readdirSync(scratch).filter(f => f.includes(RESIDUE_PREFIX)).map(f => `.scratch/${f}`)
+    }
+  } catch { /* .scratch 不存在 → 无残骸 */ }
+  const residue = [...residualTracked, ...residualUntracked]
+  if (residue.length === 0) {
+    ok('R5b. 仓内无扰动残骸（临时件只落 os.tmpdir()）', `扫描面：${tracked.length} 个跟踪文件 + .scratch/`)
+  } else {
+    bad('R5b. 仓内留有扰动残骸（§3.1 测试卫生 / D7）', residue.join(', '))
+  }
 }
 
 // ── R6：与 §7 收敛纪律**不混**（防 D6「判定点重复」）────────────────────────
