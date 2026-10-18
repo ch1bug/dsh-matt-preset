@@ -157,6 +157,28 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
     （见 §3.1 那张缺件表 —— 其中「dsh 在、pnpm 不在」是独立的一格，硬红）。
   - 两者的桥是 `lib/runtime-probe.mjs`：它把 pnpm 的**四种来源**（`--pnpm` → `DSH_PNPM` → PATH →
     桌面惯例）解析成一条路径，并把「要前置的目录」算出来（脚本形态生成转发 shim）。
+- **同一份用例在 agent shell 与 pre-commit 钩子里不是同一个环境**（#107 实测，两处都跑才算绿）：
+  夹具类用例（建目录 / source shell 脚本 / 起子进程读环境）最容易**只在一处红**。已实测的四项差异
+  —— 别猜，按表对照：
+
+  | 面 | agent shell | pre-commit 钩子（`.githooks/pre-commit` → `node scripts/verify-all.mjs`） |
+  | --- | --- | --- |
+  | `os.tmpdir()` | `C:\Users\<用户>\AppData\Local\Temp` | 随继承来的 `TEMP` 而变，可能是 **POSIX 形态**（`/c/...`）→ Node 把它按**相对当前盘**拼，得到一个与 bash 的 `/tmp` 不同的位置 |
+  | 可用的 `bash` | PATH 上的那个（本机是 **WSL bash**：丢弃继承 env、看不见 `D:\`） | 钩子由 msys 的 `sh` 起，子进程看到的是 **msys** 语义（`/c/...`、`/tmp`≠`C:\tmp`） |
+  | `cygpath` / coreutils（`mktemp`/`mkdir`） | **不在**继承 PATH 上（`command not found`） | 在（msys 的 `/usr/bin` 可达）→ 同一段脚本走**另一条分支** |
+  | `ProgramFiles` 一族 | msys bash 只暴露 **`PROGRAMFILES`**（`ProgramFiles` 拼写**从不成立**） | 同左 |
+
+  **判据**：夹具**由被测环境自己的那个 bash** 建出并报出路径（`mktemp -d` + `pwd`），
+  期望值与输入**同源**——这样"夹具在哪"与"脚本看到哪"按构造是同一事实，翻译几层都不进判据。
+  ⚠ `path.join` 在 Windows 上按 Win32 语义给 **`\`**，而 POSIX 形夹具根（`/tmp/...`）拼出
+  `\tmp\...` 会被 bash 判为不存在；Node 把 POSIX 形路径写文件时会落到**当前盘**的 `\tmp` 下，
+  与 bash 的 `/tmp` **不是一处**——写夹具文件也走 bash（`cat >`）。
+- **探针先自检，再判被测对象**（#107）：一次诊断白烧一整轮，多半是**探针自己坏了**。
+  跑之前三样各验一次，任一失败就停（**探针坏了 ≠ 被测对象坏了**）：
+  ① `needle` 命中数 **> 0**（0 命中是假证据）；② 扰动后文件**真的变了**；
+  ③ 读数是**非空**的（`spawnSync` 的 `status === null` 是"根本没跑起来"，不是"跑了且失败"）。
+  本会话实测的三种打偏：`split(':')` 把 `C:\...` 切成两段、`os.tmpdir()` 在钩子里是 POSIX 形、
+  夹具目录在脚本的 bash 眼里不可达——**每一种都先表现为"被测对象红"，实际是探针红**。
 - **带正则或多行的 `node -e` 内联脚本别硬塞进 pwsh 参数**：PowerShell 的转义符是反引号，
   `\$` 不是转义（正则被原样传下去、静默不匹配），而 `@'…'@` here-string 里的 `$` 仍会被
   展开。写临时 `.mjs` 跑、自检通过后删掉——本会话为此白烧过一轮往返。
