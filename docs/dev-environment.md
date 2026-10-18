@@ -130,6 +130,18 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   `node scripts/verify-all.mjs`（唯一入口，不需要 pnpm）；确实要 pnpm / python / node 的
   绝对路径时，用 DSH harness 的 `load_workspace_dependencies`（返回随包分发的路径），
   别假设 PATH 里已有。
+- **「本仓验证不需要 pnpm」与「installer 挂载半边需要 pnpm」是两件事，别互相外推**（#86，2026-10-18）：
+  - **`node scripts/verify-all.mjs` 默认套件确实不需要 pnpm** —— 这是 #86 AC④ 的不变量，
+    常规套件**不得**开始依赖它。`verify-installer.mjs` 里真正需要 pnpm 的只有**挂载产物**那几条
+    （profile link / 桌面形态 / e2e），它们在 pnpm 缺席时 `SKIP (loud)` 并计入 `PASS*`；
+    `#86 stub` 那组用**假件**（记录 argv 的假 dsh/假 pnpm）离线验参数透传，**任何**机器上都能跑。
+  - **`bin/install.mjs` 的挂载那半边需要 pnpm** —— `dsh plugin --profile <p> add <store>` 会让
+    plugin-manager 按**字面 `pnpm`** 起子进程（`packages/boot/plugin-manager/lib/index.js` 的
+    `runProfilePnpm`：`execa(options.command ?? "pnpm")`，默认 `pnpmCommand: "pnpm"`）。
+    所以"套件不需要 pnpm"**不能**读成"装 preset 也不需要"：缺 pnpm 时挂载会**响亮失败**
+    （见 §3.1 那张缺件表 —— 其中「dsh 在、pnpm 不在」是独立的一格，硬红）。
+  - 两者的桥是 `lib/runtime-probe.mjs`：它把 pnpm 的**四种来源**（`--pnpm` → `DSH_PNPM` → PATH →
+    桌面惯例）解析成一条路径，并把「要前置的目录」算出来（脚本形态生成转发 shim）。
 - **带正则或多行的 `node -e` 内联脚本别硬塞进 pwsh 参数**：PowerShell 的转义符是反引号，
   `\$` 不是转义（正则被原样传下去、静默不匹配），而 `@'…'@` here-string 里的 `$` 仍会被
   展开。写临时 `.mjs` 跑、自检通过后删掉——本会话为此白烧过一轮往返。
@@ -296,19 +308,79 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 | 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
 | 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.1-rc.2` |
 
-**PATH 型工具**（`bin/install.mjs`、测试里的 `dsh --version` 探针）shell out 到字面 `dsh`，需要一个
-包装（临时放 `%TEMP%`，跑完可弃；`<src>\node_modules\.bin` 提供 `dsh plugin` 需要的 pnpm，见 §4.5）：
-
-```bat
-@echo off
-node "<src>\apps\cli\lib\bin.js" %*
-exit /b %ERRORLEVEL%
-```
+**PATH 型工具**（`bin/install.mjs`、测试里的 dsh 探针）现在走**运行时探测**（`lib/runtime-probe.mjs`，
+#47/#86），不再硬依赖字面 `dsh`：
 
 ```powershell
-$env:PATH = "<shim 目录>;<src>\node_modules\.bin;$env:PATH"
-dsh --version                                                  # → 0.2.1-rc.2
-$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 11/11、exit 0、零 loud skip
+$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 15/15、exit 0
+```
+
+**探测顺序（dsh 与 pnpm 同构，`lib/runtime-probe.mjs` 的纯函数、可注入测试）**：
+
+| 顺序 | dsh | pnpm | 说明 |
+| --- | --- | --- | --- |
+| 1 | `--dsh <path>` | `--pnpm <path>` | 显式参数说了算；给了就不回落其它来源 |
+| 2 | `DSH_MATT_DSH` | `DSH_PNPM` | 脚本 / CI 的稳定出口 |
+| 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） | 平台候选名按 PATHEXT 惯例 |
+| 4 | `DSH_DESKTOP_ROOT` → `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` | 桌面安装版惯例；**`DSH_DESKTOP_ROOT` = 桌面应用根目录**（含 `resources` 的那一层）。设成 `<app>/resources` 也认 —— 该档对每个候选都试「先 `<root>/resources/…`、再 `<root>/…` 回落」两种读法，实测两种读法收敛到**同一条真实路径**（2026-10-18）；档位顺序不变，回落只在**本档内**发生 |
+| 5 | `DSH_MATT_DSH_SRC` → `<src>/apps/cli/lib/bin.js`（**经 `node` 跑**） | — | 源码检出惯例 |
+
+**pnpm 的那半边与 dsh 不同，三点必须分清**：
+
+1. **形态可能是 `.cjs` 而不是可执行**：harness 把 pnpm 作为依赖分发
+   （`<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`，与 `pnpm.mjs` 同目录），
+   直接 exec 会失败。故 `pnpmPathInjection()` 对脚本形态**在临时目录生成转发 shim**
+   （`pnpm.cmd` + `pnpm`，内容转发到 `node <path>`），把 shim 目录前置进 `dsh` 子进程的 `PATH`；
+   对本来就是可执行（`.cmd`/`.exe`/无后缀）的形态，直接前置它**所在目录**。
+   两者对外统一成「一个目录 + 该目录里有名为 `pnpm` 的可执行」。
+2. **只要求「真要挂载」那一步**：`--version` / `--root`（纯 store）**不**需要 pnpm（#86 AC④）；
+   `dsh plugin add|rm` 才需要（plugin-manager 按字面 `pnpm` 起子进程）。
+3. **注入的是子进程 `PATH`，不是环境变量**：`DSH_PNPM` 只是**探测来源**。经 `dsh plugin add` 往下走的
+   pnpm 子进程 env 由 plugin-manager 组装（`packages/boot/plugin-manager/lib/index.js` 的
+   `runProfilePnpm`：`execution:'cli'`（CLI 安装）用 `{...process.env, ...options.env}`；
+   `execution:'service'`（GUI / 服务侧的 `install_bundle`）用 `scrubbedParentEnv()`），
+   而 `scrubbedParentEnv()`（`@deepseek-ai/dsh-subprocess`）会**过滤掉所有 `DSH_*` 前缀的键** ——
+   所以「把路径塞进 `DSH_PNPM` 就能一层层传下去」在**服务路径上不成立**；
+   **`--pnpm` 与 `PATH` 前缀注入是两条路径都活的**做法。（`DSH_PNPM` 对**我们这一层**仍然有效：
+   它是 installer 自己解析 pnpm 用的来源之一。）
+
+**缺件时的表现（D47：防线缺席必须响亮，且不与「preset 坏了」混淆）**：
+
+| 缺谁 | installer 的行为 | 退出码 |
+| --- | --- | --- |
+| dsh 未命中 | 保留前缀 `dsh not found on PATH — skipped profile mount` + 一行 `missing dsh — 给一条即可: --dsh … \| DSH_MATT_DSH …`；store 照落、profile 不动 | **0**（响亮降级，不是失败） |
+| dsh 命中、pnpm 未命中 | 一次可执行的失败：`missing pnpm — …（不是 preset 坏了）` + `--pnpm` / `DSH_PNPM` 指路 | **1** |
+
+**「dsh 在、pnpm 不在」是一个独立的格子，别与上面第一行混**（2026-10-18 Lead 拍板 B）：
+
+- 它是**真实存在的机器形态** —— 实测 `dsh --version` / `dsh plugin --list` 都**不需要**同级 pnpm，
+  只有 `dsh plugin add` 内部起 pnpm 才需要（`packages/boot/plugin-manager/lib/index.js` 的
+  `runProfilePnpm`，`execa(options.command ?? "pnpm")`）。
+- installer 在这里**硬红（exit 1 + 一行指路）** 是**有意为之**：此时 dsh 已经在手、差的就是那一件，
+  静默落 store 会让用户以为装上了。**store 侧仍然落盘**（失败点只在挂载那半边）。
+- 对应地，`tests/verify-installer.mjs` 的**挂载断言**在这个格子上**响亮跳过**（`SKIP (loud)`，
+  理由串独立写 `needs pnpm for the mount step (#86)` —— 与缺 dsh 的理由串分开，成因不同、混用会让
+  读数骗人）。套件**不**替 installer 兜底判红：installer 自己的行为已经被
+  `#86 stub perturbation: with no pnpm reachable at all the installer dies with a runnable hint` 钉住。
+
+**三档读数（2026-10-18 实测，`DSH_MATT_INSTALLER=1 node tests/verify-installer.mjs`）**：
+
+| 档 | 机器形态 | 读数 |
+| --- | --- | --- |
+| 1 | 无 dsh、无 pnpm（默认） | **16/16 通过、exit 0、无 FAIL**；loud skip 逐条打印（profile-link / 桌面形态 / e2e / live 桌面端） |
+| 2 | pnpm 在场（`DSH_PNPM`）、无 dsh | 同上；`· pnpm probe on THIS machine: found=true (env)` |
+| 3 | dsh（PATH shim）+ pnpm 都在场 | **17/17 通过、exit 0、零 loud skip** —— 挂载断言**真的全跑了**（这是"门禁没有过度跳过"的证明） |
+| 4 | `DSH_DESKTOP_ROOT` 指桌面安装版（dsh+pnpm 都由它提供） | **18/18 通过、exit 0、零 loud skip**，含 live 桌面端用例（真 `dsh.cmd` + 真 `pnpm.cjs` 走转发 shim 挂载成功） |
+
+档 3/4 的"零 loud skip"是关键：若门禁写错（例如恒假），档 1 的读数看起来一样 —— 所以
+`#86 gate counter-case` 用例把 `mountable` 逐格对齐两个探测结果，并断言"pnpm 在场 ⇒ 挂载步骤真的走到"。旧口径的 shim 写法仍然可用（PATH 上加一个临时目录放 `dsh.cmd`，`<src>\node_modules\.bin` 提供 pnpm）；
+新口径下更省事的是直接给显式参数：
+
+```powershell
+$env:PATH = "<shim 目录>;$env:PATH"                     # 或用 --dsh / DSH_MATT_DSH 代替
+dsh --version                                           # → 0.2.1-rc.2
+$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs
+$env:DSH_DESKTOP_ROOT='<app>'                          # 桌面应用根（含 resources 的那一层）→ 开 live 桌面端用例；设成 <app>\resources 也认
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）
 ```
 
@@ -319,6 +391,14 @@ $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-
 路径偏差 → 安装环 A1/A2/A3 红；去掉 profile link → A3/B1/C1 红；去掉载体的 workflow-core loader row →
 B1/D1 红；把实例改到保留口 → B5 红。
 **有 dsh 那半边在本机可验证——别再默认"跳过了事"。**
+（#47/#86 之后用例数与门禁口径变了：见下面这条的当前读数。）
+
+**#86 起 pnpm 半边也能离线验**（2026-10-18）：`verify-installer.mjs` 用**记录 argv 的假 dsh / 假 pnpm**
+（`dsh.cmd` → `node dsh-stub.cjs %*`，两者都落在系统临时目录里 —— 注意 Windows 上 `.cmd` shim **不能**
+放在含空格的路径下）断言参数透传与 PATH 注入，不需要本机有任何运行时；另有**非空洞对照**
+（探测不到 pnpm → 必须 die 且给可执行指路；相对 `--dsh` → 证明"绝对路径"判据可红；注入目录里没有
+`pnpm` 这个名字 → 假 dsh 的 `spawn('pnpm')` 必须失败；**门禁对照** → `mountable` 逐格对齐两个探测结果）。
+当前读数见上文「三档读数」表（无 dsh 基线 16/16；dsh+pnpm 都在场 17/17；桌面根 18/18，后两档**零 loud skip**）。
 
 **profile 的"面"由初始化模板决定**（2026-10-16 实测，#75）：起 **web 面**的 profile 必须由 shipped
 web 模板初始化（`--profile <p> --from-default-profile web …`）。`dsh plugin --profile <p> add <store>`

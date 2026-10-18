@@ -38,6 +38,37 @@ node bin/install.mjs uninstall
 node bin/install.mjs --version
 ```
 
+### 运行时从哪来（#47/#86：`--dsh` / `--pnpm`）
+
+安装分**两段**：第一段把文件拷进 store（不需要任何外部工具），第二段经
+`dsh plugin --profile <p> add <store>` 把 store 链进 profile —— 这一段要**两个工具**。
+两者都按同一张顺序表解析（细节见 [dev-environment.md](dev-environment.md) §3.1）：
+
+| 顺序 | dsh | pnpm |
+| --- | --- | --- |
+| 1 | `--dsh <path>` | `--pnpm <path>` |
+| 2 | `DSH_MATT_DSH` | `DSH_PNPM` |
+| 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） |
+| 4 | `DSH_DESKTOP_ROOT` 下的 `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` |
+| 5 | `DSH_MATT_DSH_SRC` 下的 `<src>/apps/cli/lib/bin.js`（经 `node` 跑） | — |
+
+```bash
+# 显式覆盖（推荐给脚本 / 非默认布局）
+node bin/install.mjs install --dsh "<dsh 可执行路径>" --pnpm "<pnpm 可执行或 pnpm.cjs>"
+# 桌面安装版：一条命令覆盖桌面端。DSH_DESKTOP_ROOT = **应用根**（含 resources 的那一层）
+node bin/install.mjs install --profile desktop --dsh "<app>/resources/runtime/cli/bin/dsh.cmd" \
+  --pnpm "<app>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs"
+```
+
+- **pnpm 只在真要挂载时要求**：`--version`、`--root`（纯存储）不需要它（#86 AC④）。
+- **两个工具都缺席时的表现不同，别混说**：dsh 未命中 → **响亮降级**（store 照落、profile 不动，
+  打印 `dsh not found on PATH — skipped profile mount` + 一行指路，**exit 0**）；pnpm 未命中 →
+  一次**可执行的失败**（`missing pnpm …` + 一行指路），因为此时 dsh 已经在手、差的就是那一件（#86 AC①）。
+- harness 分发的 `pnpm` 是 `*.cjs`（不是可执行）：installer 会在临时目录生成转发 shim
+  （`pnpm.cmd` + `pnpm`）再把它前置进 `dsh` 子进程的 `PATH` —— 所以 `--pnpm` 直接指 `.cjs` 就行。
+- 第 4 档的 `DSH_DESKTOP_ROOT` 按**桌面应用根目录**（含 `resources` 的那一层）写；设成
+  `<app>/resources` 也能识别（该档对本档候选做了回落），但契约口径是前者。
+
 - **fresh install**：一条命令把 payload（preset.yml / agent.cordis.yml / 插件 *.mjs /
   skills/ / lang-packs/ / sandcastle/）+ 运行时依赖（node_modules/yaml，插件
   `import 'yaml'` 的解析锚点是插件文件自身）拷入 `<root>/matt/`，写 VERSION.json +
@@ -89,16 +120,19 @@ DSH_HOME=~/dsh-matt-home node <src>/apps/cli/lib/bin.js --profile matt-dev --dum
 工作树，切提交会打断正在写它的会话 —— 回滚要么在无会话写它时做，要么改用 payload 面
 （上一节的 `install --force --from <旧版本>.tgz`）。
 
-**桌面端（`desktop`）不能这样装**：profile 由 Electron 应用独占管理，CLI 直接拒绝 ——
+**桌面端（`desktop`）的 `--dump-config` 用不了，但 `plugin add` 能用**：profile 由 Electron 应用
+独占管理，CLI 的**只读 dump** 被直接拒绝 ——
 
 ```text
 $ dsh --profile desktop --dump-config
 error: profile "desktop" is managed exclusively by the Electron application
 ```
 
-要在日常 GUI 里用 matt，须走**应用侧**（Plugins 页 / `plugin_manager` 工具的
-`install_bundle` / `set_bundle`），形态与桌面既有的 `link:` 依赖一致；装完用应用自述确认活行
-（Host Inspect 的 `Config.listConfigs`, `name: "dsh-matt-preset"`，`total: 0` = 没装上）。
+但**写入路径（`dsh plugin --profile desktop add|rm`）不被独占**，`bin/install.mjs` 走的正是这条
+（见下节「桌面端（`desktop` profile）：迁移与回滚」——**一条命令**即可覆盖桌面端）。
+日常 GUI 里还有另一条路（Plugins 页 / `plugin_manager` 工具的 `install_bundle` / `set_bundle`），
+形态与桌面既有的 `link:` 依赖一致；装完用应用自述确认活行（Host Inspect 的
+`Config.listConfigs`, `patchId: "preset-dsh-matt-preset"`，`total: 0` = 没装上）。
 那条路是**外部动作**（改的是日常 profile），且 bundle 形态若按 #76 拍板改变，需要重装一次。
 
 **只让绿树成为 live**：link 面没有"安装"这道闸，权威树的任何状态都会直达该面。故约定
@@ -124,9 +158,13 @@ error: profile "desktop" is managed exclusively by the Electron application
 ```bash
 node bin/install.mjs install --profile desktop            # fresh
 node bin/install.mjs upgrade --profile desktop            # 已有安装，原地替换
+node bin/install.mjs install --profile desktop --dsh "<dsh 路径>" --pnpm "<pnpm 路径>"   # 运行时不在 PATH 上时
 ```
 
 装完**重启应用**（或新开会话）生效，在 hero-chip 选择模式。
+
+> 运行时（dsh / pnpm）不在 PATH 上时**不要**手工拼 `dsh plugin` 命令：`--dsh`/`--pnpm` 就是为这件事
+> 准备的，缺件时 installer 会给一行可执行的指路（#86）。探测顺序见本节上文「运行时从哪来」。
 
 > **#99 起 hero-chip 有 4 个 matt 模式**（`Matt 工作流` / `· PTC` / `· 精简` / `· Cordis`）——
 > 一个插件（`dsh-matt-preset`）、四份 preset patch（`presets/*.patch.yml`），
@@ -134,37 +172,63 @@ node bin/install.mjs upgrade --profile desktop            # 已有安装，原�
 > 重装一次**：`dsh.bundle.patch` 由单文件变数组属**载体形态变化**，旧的 profile 层缓存
 > 不会自己重新解析。
 
-### 旧 store 分叉的迁移（#47 现场遗留）
+### 旧 store 分叉的迁移（#47 AC④，2026-10-18）
 
-#47 的现场症状是 **store 路径分叉**：桌面 profile 的 link 指向
-`<DSH_HOME>/.agent-presets/dsh-matt-preset`，而 installer 写的是
-`<DSH_HOME>/.agent-presets/matt` —— 两边不是同一个目录，于是
-**installer 怎么升级都更新不到桌面端**。
+**症状**：桌面 profile 的 link 指向 `<DSH_HOME>/.agent-presets/dsh-matt-preset`，而 installer 写的是
+`<DSH_HOME>/.agent-presets/matt` —— 两边不是同一个目录，于是 **installer 怎么升级都更新不到桌面端**
+（`upgrade` 报成功，桌面端却一直是旧的那份）。
 
-**形态自 2026-10-17 起已统一**（两边都是 `.agent-presets/matt`），但**旧机器上那个分叉
-store 目录不会自己消失**，且桌面 link 若仍指着它，`upgrade` 依旧写不进去。迁移动作：
+**形态自 2026-10-17 起已统一**（两边都是 `.agent-presets/matt`），但旧机器上那个分叉 store 目录
+**不会自己消失**；桌面 link 若仍指着它，`upgrade` 依旧写不进去。故迁移分三步，**先读后改再删**。
 
-```bash
-# 1) 看桌面 link 到底指向哪边（分叉的判据）
-node -e "const p=require(process.env.HOME+'/.dsh/profiles/desktop/package.json'); console.log(p.dependencies['dsh-matt-preset'])"
-#    → 期望 link:<DSH_HOME>/.agent-presets/matt
-#    → 若仍指向 .../.agent-presets/dsh-matt-preset，就是分叉现场
+#### 第 1 步：判定是否分叉（只读）
 
-# 2) 重装（installer 会写正确路径并重挂 profile link）
-node bin/install.mjs install --profile desktop --force
-
-# 3) 确认 link 已改指，再删掉遗留目录（确认前不要删）。旧分叉目录不是 store 本体，
-#    installer 的 uninstall 不覆盖它，只能手工删——所以这里用**自守卫的 dry-run 脚本**：
-#    DSH_HOME 未设置就报错退出；默认只打印解析后的绝对路径，加 CONFIRM=1 才真删。
-#    2026-10-18 事故的教训：手工 `rm -rf <DSH_HOME>/…` 模板一旦把占位符展开错
-#    （例如展开成用户 profile 根），删掉的就是真实数据。
-node bin/install.mjs --version
-node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node:path');const h=process.env.DSH_HOME;if(!h)throw new Error('DSH_HOME not set — stop');const p=join(h,'.agent-presets','dsh-matt-preset');console.log('legacy store:',p);if(process.env.CONFIRM!=='1'){console.log('dry-run — 人眼确认路径后加 CONFIRM=1 重跑');process.exit(0)}if(existsSync(p))rmSync(p,{recursive:true,force:true})"
-# 确认输出路径无误后：CONFIRM=1 node -e "…（同上）"
+```powershell
+$env:DSH_HOME = "$env:USERPROFILE\.dsh"        # 桌面端 home（显式写出，不要靠继承）
+node -e "const p=require(process.env.DSH_HOME+'/profiles/desktop/package.json');console.log(p.dependencies['dsh-matt-preset'])"
 ```
 
-**判据**：第 1 步的输出变成 `link:<DSH_HOME>/.agent-presets/matt`，且重启后 hero-chip 出现
-4 个 matt 模式。遗留目录的删除是**外部动作**（`rm -rf`），须人工确认后再执行。
+- 输出 `link:<DSH_HOME>/.agent-presets/matt` → **未分叉**，跳到第 3 步收尾。
+- 输出 `link:<DSH_HOME>/.agent-presets/dsh-matt-preset` → **分叉现场**，继续第 2 步。
+
+#### 第 2 步：重装，让 link 改指正确 store
+
+```powershell
+# 一条命令覆盖桌面端（运行时按 §「运行时从哪来」那张表解析；也可显式 --dsh/--pnpm）
+node bin/install.mjs install --profile desktop --force
+```
+
+`--force` 是必须的：store 目录已存在时 installer 会拒绝覆盖（`already installed`）。
+
+#### 第 3 步：复验 + 清理遗留目录
+
+```powershell
+# 3a) 复验 link 已改指（期望 …\.agent-presets\matt）
+node -e "const p=require(process.env.DSH_HOME+'/profiles/desktop/package.json');console.log(p.dependencies['dsh-matt-preset'])"
+# 3b) 确认 store 的版本戳与 package.json 一致
+node -e "console.log(require(process.env.DSH_HOME+'/.agent-presets/matt/VERSION.json').version)"
+node -e "console.log(require('./package.json').version)"
+```
+
+**判据**：3a 的输出是 `link:<DSH_HOME>/.agent-presets/matt`，3b 两个版本号相同，重启应用后
+hero-chip 出现 4 个 matt 模式。
+
+遗留目录的删除是**外部动作**（`rm -rf`），**必须人工确认路径后再执行** —— installer 的
+`uninstall` 只清自己的 store，不管这个旧目录。下方脚本是**自守卫的 dry-run**：`DSH_HOME` 未设置
+就报错退出；默认只打印解析后的绝对路径，加 `CONFIRM=1` 才真删。2026-10-18 事故的教训是：
+手工 `rm -rf <DSH_HOME>/…` 模板一旦把占位符展开错（例如展开成用户 profile 根），删掉的就是真实数据。
+
+```powershell
+node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node:path');const h=process.env.DSH_HOME;if(!h)throw new Error('DSH_HOME not set — stop');const p=join(h,'.agent-presets','dsh-matt-preset');console.log('legacy store:',p);if(process.env.CONFIRM!=='1'){console.log('dry-run — 人眼确认路径后加 CONFIRM=1 重跑');process.exit(0)}if(existsSync(p))rmSync(p,{recursive:true,force:true});console.log('removed')"
+# 确认打印的路径无误后：$env:CONFIRM='1'; 再跑同一条命令
+```
+
+**机械断言**：`tests/verify-installer.mjs` 的
+`install/upgrade --profile desktop: link points at THIS store, stamp agrees` 用例把本条第 1 步与
+第 3a 步的判据钉死 —— 它把 profile 依赖值**解析成绝对路径**，与 installer 实际写入的 store 比对
+（光看"有没有 link"抓不到分叉，两条路都有 link，只是指向不同目录），install 与 upgrade 各验一遍。
+该用例与其他 profile-link 断言共用 `#67`/`#86` 的口径：**PATH 上没有 `dsh` 时响亮跳过**
+（`SKIP (loud)`，verify-all 记为 `PASS*`），不硬崩、也不静默当通过。
 
 ### 回滚
 
@@ -182,10 +246,22 @@ node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node
 
 ### 桌面形态的机械断言
 
-`tests/verify-installer.mjs` 有对应用例（`--profile desktop` 跑 install，断言 profile 的
-`dependencies` 与 `dsh.profile.bundles` 都含 `dsh-matt-preset`）。该用例与其他 profile-link
-断言共用 `#67` 的口径：**PATH 上没有 `dsh` 时响亮跳过**（`SKIP (loud)`，verify-all 记为 `PASS*`），
-不硬崩、也不静默当通过。
+`tests/verify-installer.mjs` 有对应用例：
+
+- `install/upgrade --profile desktop: link points at THIS store, stamp agrees`（#47 AC③）——
+  `--profile desktop` 跑 install **与** upgrade，断言 profile 的
+  `dependencies` 与 `dsh.profile.bundles` 都含 `dsh-matt-preset`，且 **link 解析出的目录 ==
+  `<DSH_HOME>/.agent-presets/matt`**（分叉判据）+ store 版本戳与 `package.json` 版本一致。
+- `#86 stub: dsh plugin add receives the resolved dsh path + injected pnpm dir on PATH`（#86 AC②）——
+  用**记录 argv 的假 dsh / 假 pnpm**（离线，不需要本机有任何运行时）断言
+  `plugin --profile web add <store>` 逐项透传、用的 dsh 是 `--dsh` 给的那个、以及
+  `pnpmPathInjection()` 的目录真被前置进子进程 PATH；假 dsh 还会模拟 plugin-manager
+  按字面 `pnpm` 起子进程，断言那一步真的命中假 pnpm。
+- `#86 live: real dsh + real pnpm.cjs (a *.cjs through the forwarding shim) mounts the store`——
+  真运行时端到端；门禁 `DSH_MATT_DESKTOP_ROOT=<app>/resources`，未设则 `SKIP (loud)`。
+
+这些用例与其他 profile-link 断言共用 `#67` 的口径：**PATH 上没有 `dsh` 时响亮跳过**
+（`SKIP (loud)`，verify-all 记为 `PASS*`），不硬崩、也不静默当通过。
 
 ## 版本条目（Changelog）模板（ADR-0007）
 

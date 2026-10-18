@@ -17,9 +17,18 @@
  *   dsh-preset-install upgrade  [--profile <name>] [--from <tarball|dir>]
  *   dsh-preset-install uninstall [--profile <name>]
  *   dsh-preset-install --version
+ *   # 运行时覆盖（#47 方向 C / #86）：显式指出用哪个 dsh / pnpm
+ *   dsh-preset-install install --dsh <path/to/dsh> --pnpm <path/to/pnpm>
  *
  * #21 的 --root（存储根覆盖）仍受支持，用于测试/非默认布局；profile 挂载
  * 一律走 DSH_HOME/profiles/<name>。
+ *
+ * 运行时探测（#47 + #86，契约见 lib/runtime-probe.mjs）：挂载前先解析 dsh 与 pnpm，
+ * 顺序 = `--dsh`/`--pnpm` → `DSH_MATT_DSH`/`DSH_PNPM` → PATH → `DSH_DESKTOP_ROOT` 惯例
+ * → `DSH_MATT_DSH_SRC` 惯例。**用解析到的 dsh** 调 `dsh plugin`（不是字面 `dsh`——桌面端
+ * 的 dsh 可能不在 PATH 上，字面调用会落到另一个实例或根本没有）；pnpm 按字面找（rc.2
+ * plugin-manager 就是字面 `pnpm`），命中的目录前置进子进程 PATH。
+ * 两者**只在真要挂载**时才要求：`--version` / `--root` 纯 store 操作不受影响（#86 AC④）。
  *
  * 路径安全（2026-10-18 事故硬化，docs/dev-environment.md §1）：`DSH_HOME`、store 根、以及
  * 每一次 `rm` 的目标都先过 lib/safe-target.mjs 的**纯路径判定**——等于用户 profile、
@@ -28,13 +37,14 @@
  */
 import { spawnSync } from 'node:child_process'
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { payloadOf } from '../lib/payload.mjs'
+import { dshRunner, probeDsh, probeFailureHint, probePnpm, pnpmPathInjection } from '../lib/runtime-probe.mjs'
 import { homeRootProblem, targetProblem } from '../lib/safe-target.mjs'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
@@ -66,6 +76,8 @@ function parseArgs(argv) {
     else if (a === '--root') args.root = requireValue(argv, ++i, a)
     else if (a === '--from') args.from = requireValue(argv, ++i, a)
     else if (a === '--profile') args.profile = requireValue(argv, ++i, a)
+    else if (a === '--dsh') args.dsh = requireValue(argv, ++i, a)
+    else if (a === '--pnpm') args.pnpm = requireValue(argv, ++i, a)
     else if (a.startsWith('--')) die(`unknown option: ${a}`)
     else args._.push(a)
   }
@@ -89,53 +101,125 @@ function defaultStoreRoot() {
   return join(dshHome(), '.agent-presets')
 }
 
-/** Run dsh (or node) and die with its stderr on failure. */
-function runOrDie(cmd, cmdArgs, what) {
-  const r = spawnSync(cmd, cmdArgs, {
+/** 走 shell 时的引号处理：含空格/制表符才加双引号（已是引号包裹的原样保留）。
+ *  只处理路径类参数——它们不含 `"`，故不需要完整 cmd.exe 转义。#47 实测需要。 */
+function quoteIfNeeded(value) {
+  const s = String(value)
+  if (s === '' || /^".*"$/.test(s)) return s
+  return /[\s]/.test(s) ? `"${s}"` : s
+}
+
+/** Run dsh (or node) and die with its stderr on failure.
+ *  `env` 可选：挂载/卸载要把 pnpm 目录前置进子进程 PATH（#86）——只有这两条
+ *  `dsh plugin` 调用需要注入，其余调用原样继承父进程环境。
+ *
+ *  **带空格的路径必须显式加引号**（#47 实测）：Windows 上用 `shell:true` 起 `.cmd` 时
+ *  Node 只把命令与参数**拼接**成一条命令行，不做转义；桌面端运行时常在
+ *  `…\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd` 这类**含空格**的路径下，
+ *  未加引号会被 cmd.exe 从空格处截断（实测报 `'<安装根>\DeepSeek' is not recognized…`，
+ *  即命令行在第一个空格处被切断）。这里只在走 shell 时对命令与每个参数按需加引号。 */
+function runOrDie(cmd, cmdArgs, what, env = null) {
+  const useShell = process.platform === 'win32' && cmd !== process.execPath
+  const spawnCmd = useShell ? quoteIfNeeded(cmd) : cmd
+  const spawnArgs = useShell ? cmdArgs.map(quoteIfNeeded) : cmdArgs
+  const r = spawnSync(spawnCmd, spawnArgs, {
     encoding: 'utf8',
-    shell: process.platform === 'win32' && cmd !== process.execPath,
+    shell: useShell,
+    ...(env === null ? {} : { env }),
   })
   if (r.status !== 0) die(`${what} failed (exit ${r.status}):\n${r.stderr || r.stdout}`)
   return r
 }
 
-/** Is the dsh CLI available? (装载挂载需要它；纯存储操作不需要。) */
-function dshAvailable() {
-  return spawnSync('dsh', ['--version'], {
-    encoding: 'utf8', shell: process.platform === 'win32',
-  }).status === 0
+/** 把目录前置进 PATH（生成子进程 env；不改本进程环境）。
+ *  Windows 的键名惯用 `Path`，两个都写，避免子进程只读到一个。 */
+function withPathPrefix(dir) {
+  const env = { ...process.env }
+  const sep = process.platform === 'win32' ? ';' : ':'
+  const existing = env.PATH ?? env.Path ?? ''
+  const merged = existing === '' ? dir : `${dir}${sep}${existing}`
+  env.PATH = merged
+  env.Path = merged
+  return env
+}
+
+/**
+ * 解析运行时（#47 方向 C + #86）：把「用哪个 dsh / 哪个 pnpm」算成一份结果，
+ * 只算一次、挂载与卸载共用。返回 `{ dsh, pnpm, pnpmDir }`。
+ *
+ * `pnpm` 的命中判定推迟到**真要挂载**时（mountOrWarn）——`--version` / `--root` 纯 store
+ * 操作不要求 pnpm（#86 AC④）。dsh 未命中时**不 die**：调用方要降级成一行响亮告警。
+ */
+function resolveRuntime({ dsh: explicitDsh, pnpm: explicitPnpm }) {
+  const dsh = probeDsh({ explicit: explicitDsh ?? null })
+  const pnpm = probePnpm({ explicit: explicitPnpm ?? null })
+  return { dsh, pnpm, pnpmDir: null }
+}
+
+/** PNPM 在场时取出要前置的目录；脚本形态（harness 分发的 `pnpm.cjs`）在这里生成转发 shim。 */
+function pnpmDirFor(pnpm) {
+  const injected = pnpmPathInjection(pnpm, {
+    mkdtemp: (prefix) => mkdtempSync(join(tmpdir(), prefix)),
+    writeFile: (p, content) => writeFileSync(p, content),
+  })
+  return injected.dir
 }
 
 /** Link the store into the profile: the bundle-patch mount step (#28).
  *  `dsh plugin --profile <p> add` creates the profile layer when absent
- *  (shipped names like `web` included), so no template bootstrap is needed. */
-function mount(profile, store) {
-  runOrDie('dsh', ['plugin', '--profile', profile, 'add', store],
-    `dsh plugin --profile ${profile} add`)
+ *  (shipped names like `web` included), so no template bootstrap is needed.
+ *  命令用**解析到的** dsh（`--dsh`/`DSH_MATT_DSH`/PATH/桌面/源码检出），不是字面 `dsh`（#47）。 */
+function mount(profile, store, runtime) {
+  const { cmd, prefix } = dshRunner(runtime.dsh)
+  runOrDie(cmd, [...prefix, 'plugin', '--profile', profile, 'add', store],
+    `dsh plugin --profile ${profile} add`, runtime.pnpmDir === null ? null : withPathPrefix(runtime.pnpmDir))
 }
 
 /** Remove the profile link. Pre-checks the profile's dependency table so a
  *  fresh profile without the link doesn't turn `dsh plugin rm` into an error;
  *  if the profile layout ever shifts, we warn and let `dsh plugin rm` decide. */
-function unmount(profile) {
+function unmount(profile, runtime) {
   let deps = {}
   try {
     deps = JSON.parse(readFileSync(join(dshHome(), 'profiles', profile, 'package.json'), 'utf8')).dependencies ?? {}
   } catch { /* profile layer absent/unreadable — nothing linked, fall through */ }
   if (!(PKG_NAME in deps)) return
-  runOrDie('dsh', ['plugin', '--profile', profile, 'rm', PKG_NAME],
-    `dsh plugin --profile ${profile} rm`)
+  const { cmd, prefix } = dshRunner(runtime.dsh)
+  runOrDie(cmd, [...prefix, 'plugin', '--profile', profile, 'rm', PKG_NAME],
+    `dsh plugin --profile ${profile} rm`, runtime.pnpmDir === null ? null : withPathPrefix(runtime.pnpmDir))
 }
 
-/** Run the mount/unmount step, or degrade loudly when dsh is unavailable:
+/** Run the mount/unmount step, or degrade loudly when no dsh is reachable:
  *  the store copy still lands, but the profile keeps its previous state
- *  (stale link on uninstall) and the operator gets the manual command. */
-function mountOrWarn(profile, step, what) {
-  if (dshAvailable()) { step(); return }
-  const manual = what === 'unmount'
-    ? `dsh plugin --profile ${profile} rm ${PKG_NAME}`
-    : `dsh plugin --profile ${profile} add ${join(defaultStoreRoot(), 'matt')}`
-  console.error(`dsh not found on PATH — skipped profile ${what} (装载需手动: ${manual})`)
+ *  (stale link on uninstall) and the operator gets the manual command.
+ *
+ *  **返回值 = 这一步到底做了没有**（`true`/`false`）。收尾文案必须按它分岔：
+ *  跳过时还打印 `mounted into profile '<p>'` 就是**谎报成功**（D47：防线缺席必须响亮，
+ *  不得静默/误导——Lead 复跑实测踩到：无 dsh 时 store 落盘、profile 里根本没有 link，
+ *  收尾行却写 `mounted into profile 'web'`）。
+ *
+ *  **dsh 未命中** → 保留既有前缀 `dsh not found on PATH — skipped profile `
+ *  （tests/verify-clean-env-e2e.mjs:253 的正则依赖它）+ 一行可执行指路（D47）。
+ *  **但 `--dsh` 给错路径是操作者错误**（非环境缺席）→ **die**，且文案点明显式路径本身
+ *  （Lead 2026-10-18 拍板：若只说 `missing dsh`，读者会把方向引到 PATH——而他明明给了参数）。
+ *  **pnpm 未命中** → 只在**真要挂载**时 die（#86 AC①：一行指路，不是「preset 坏了」），
+ *  文案同样按 `probeFailureHint` 区分「显式给错」与「环境缺席」。 */
+function mountOrWarn(profile, step, what, runtime) {
+  if (!runtime.dsh.found) {
+    // 显式 --dsh 指了个不存在的路径 → 操作者错误，不许降级成「跳过」（那会让人以为
+    // 「环境里没有 dsh」，实际是他把路径写错了）。
+    if (runtime.dsh.explicitProblem) die(probeFailureHint('dsh', runtime.dsh))
+    const manual = what === 'unmount'
+      ? `dsh plugin --profile ${profile} rm ${PKG_NAME}`
+      : `dsh plugin --profile ${profile} add ${join(defaultStoreRoot(), 'matt')}`
+    console.error(`dsh not found on PATH — skipped profile ${what} (装载需手动: ${manual})`)
+    console.error(`  !! ${probeFailureHint('dsh', runtime.dsh)}`)
+    return false
+  }
+  if (!runtime.pnpm.found) die(probeFailureHint('pnpm', runtime.pnpm))
+  runtime.pnpmDir = pnpmDirFor(runtime.pnpm)
+  step()
+  return true
 }
 
 /**
@@ -313,6 +397,14 @@ async function main() {
   const previousVersionOf = async () => existsSync(join(target, 'VERSION.json'))
     ? JSON.parse(await readFile(join(target, 'VERSION.json'), 'utf8')).version
     : null
+  // 运行时解析（#47/#86）：只算一次，挂载与卸载共用；缺 pnpm 的判定推迟到真要挂载时。
+  const runtime = resolveRuntime(args)
+  // 命中的来源与路径先回声（取证纪律：破坏/外部调用前让读者看到用的是哪一个运行时）。
+  if (!storeOnly) {
+    console.error(runtime.dsh.found
+      ? `dsh: ${runtime.dsh.path} (${runtime.dsh.source})`
+      : 'dsh: 未命中（将响亮降级，见下）')
+  }
 
   if (cmd === 'uninstall') {
     if (!existsSync(target)) die(`not installed: ${target} (未安装)`)
@@ -321,10 +413,18 @@ async function main() {
       die(`refusing to delete ${target}: it does not look like a dsh-matt-preset store ` +
         '(no VERSION.json / manifest.json / package.json). 手工核对后再处理。')
     }
-    if (!storeOnly) mountOrWarn(profile, () => unmount(profile), 'unmount')
+    // `--root` = 纯 store 模式，本就不碰 profile：收尾**不得**提 profile（那会是谎报）。
+    const unmounted = storeOnly ? null : mountOrWarn(profile, () => unmount(profile, runtime), 'unmount', runtime)
     console.error(`store: ${target}`)
     await rm(target, { recursive: true, force: true })
-    console.log(`uninstalled: ${target} (profile '${profile}' unmounted)`)
+    console.log(`uninstalled: ${target}` +
+      (unmounted === null
+        ? ' (store-only mode: profile untouched)'
+        : unmounted
+          ? ` (profile '${profile}' unmounted)`
+          // unmount 中途返回（profile 里本就没 link）不等于「摘掉了」——
+          // 旧文案无条件写 unmounted，同样是谎报。如实分岔。
+          : ` (profile '${profile}' NOT unmounted — dsh 未命中或本就未挂载，见上)`))
     return
   }
 
@@ -335,9 +435,14 @@ async function main() {
     const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
     // link 指向的是存储目录本身，文件已原地替换；重挂一次刷新 pnpm 元数据
-    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
+    const remounted = storeOnly ? null : mountOrWarn(profile, () => mount(profile, target, runtime), 'mount', runtime)
     console.log(`upgraded ${prev} -> ${res.version} (${res.files} entries) at ${target}`)
-    console.log(`重启 dsh --profile ${profile}（或新开会话）生效；回滚：重新 install 旧版本包。`)
+    if (remounted === false) {
+      // 响亮跳过 → 不得说「重启生效」（profile 里没有 link，重启也不会生效）。
+      console.error(`profile '${profile}' NOT remounted (dsh 未命中，见上) — 存储已更新，但 profile 未刷新。`)
+    } else {
+      console.log(`重启 dsh --profile ${profile}（或新开会话）生效；回滚：重新 install 旧版本包。`)
+    }
     return
   }
 
@@ -349,9 +454,21 @@ async function main() {
     const src = await resolveSource(args.from)
     const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
-    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
-    console.log(`installed ${res.version} (${res.files} entries) at ${target}${storeOnly ? '' : `, mounted into profile '${profile}'`}`)
-    console.log(`重启 dsh --profile ${profile}（或新开会话），在 hero-chip 选择 "Matt 工作流"。`)
+    const mounted = storeOnly ? null : mountOrWarn(profile, () => mount(profile, target, runtime), 'mount', runtime)
+    // 收尾文案按**实际结果**分岔（D47：不得谎报成功）——旧版无条件写 `mounted into profile '<p>'`，
+    // 响亮跳过时 profile 里根本没有 link，读者会以为装好了并去重启一个不会生效的实例。
+    console.log(`installed ${res.version} (${res.files} entries) at ${target}` +
+      (mounted === null
+        ? ''
+        : mounted
+          ? `, mounted into profile '${profile}'`
+          : `, profile '${profile}' NOT mounted (dsh 未命中，见上)`))
+    if (mounted === false) {
+      // 未挂载 → 「重启生效 / 在 hero-chip 选择」都是空头支票，改成指路。
+      console.error(`装载未完成（store 已落盘）—— 用 --dsh/DSH_MATT_DSH 指出 dsh 后重跑，或按上面那行手动挂载。`)
+    } else {
+      console.log(`重启 dsh --profile ${profile}（或新开会话），在 hero-chip 选择 "Matt 工作流"。`)
+    }
     return
   }
 
