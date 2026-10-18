@@ -12,7 +12,7 @@
  *   - .rs 工具调用后 "⚠ lang:rust" 触发注入恰 1 次；
  *   - LANG rust 基线全程仅 1 次（session 级）。
  */
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -24,6 +24,16 @@ import { bootHarness, emitSessionEvent, ensurePresetMountable, parsePlugins, res
 const PRESET_DIR = fileURLToPath(new URL('..', import.meta.url))
 
 const root = await mkdtemp(join(tmpdir(), 'lang-asm-'))
+let tmpSettled = false
+
+/**
+ * #77 AC② 的进程级兜底：收尾块挂在**线性流末端**，未捕获 throw 会绕过它 ——
+ * 那种情况下进程非 0 退出却**不打 `tmp kept`**，正是 AC② 明文要禁的静默留场。
+ * 正常收尾跑过（`tmpSettled`）或正常退出（code 0）时本钩子什么都不做。
+ */
+process.on('exit', (code) => {
+  if (!tmpSettled && code !== 0) console.log(`tmp kept: ${root}`)
+})
 const rustDir = join(root, 'rust-proj')
 await mkdir(rustDir, { recursive: true })
 await writeFile(join(rustDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
@@ -72,4 +82,9 @@ check('LANG rust 基线不重复（session 级一次，触发轮只带触发注�
 
 await handle.dispose()
 console.log(`\n=== LANG-ASM VERIFY ${failures.length === 0 ? 'PASS' : 'FAIL'} ===`)
+// #77 临时根收尾：失败保留现场并响亮打印绝对路径（与上面的 FAIL 判定同源），
+// 成功则清除；dispose 已先行，这里只处理磁盘。`tmpSettled` 让上面的进程级兜底不重复打印。
+tmpSettled = true
+if (failures.length > 0) console.log(`tmp kept: ${root}`)
+else await rm(root, { recursive: true, force: true })
 process.exit(failures.length === 0 ? 0 : 1)

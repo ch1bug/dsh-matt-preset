@@ -84,6 +84,25 @@ const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
+/**
+ * #77：临时根**创建即登记** —— 收尾块与进程级兜底都读这一份，不再手抄清单。
+ * 病根正是"末尾清单会漏项"：#77 修的就是 9 处 `mkdtemp` 中漏在 8 项清单之外的
+ * `batchRoot`；登记制让"漏一项"不可能发生。
+ */
+const tmpRoots = []
+const tmpRoot = (dir) => { tmpRoots.push(dir); return dir }
+let tmpSettled = false
+
+/**
+ * #77 AC② 的进程级兜底：收尾块挂在**线性流末端**，未捕获 throw（`bootHarness` 等）
+ * 会绕过它 —— 那种情况下进程非 0 退出却**不打 `tmp kept`**，正是 AC② 明文要禁的
+ * 静默留场。正常收尾跑过（`tmpSettled`）或正常退出（code 0）时本钩子什么都不做。
+ */
+process.on('exit', (code) => {
+  if (tmpSettled || code === 0) return
+  for (const root of tmpRoots) console.log(`tmp kept: ${root}`)
+})
+
 // V1: smoke preset with only the persona + workflow-enforcer rows.
 const ctx = await bootHarness([
   { id: 'enforcersmoke', plugins: smokePlugins('probe persona running the ask-matt workflow') },
@@ -292,7 +311,7 @@ if (!v14a.includes('AUTO-HANDOFF')) ok('V14a. close-out without batch-state.md �
 else bad('V14a. no-batch nudge leaked', v14a.slice(-200))
 
 // (b) with a batch-state.md naming a successor → nudge (one-shot).
-const batchRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-batch-'))
+const batchRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-batch-')))
 await mkdir(join(batchRoot, '.scratch'), { recursive: true })
 await writeFile(join(batchRoot, '.scratch', 'batch-state.md'), [
   '# Batch State',
@@ -831,7 +850,7 @@ else bad('V26. 落盘 contract incomplete',
 // ── V27: batch-end push (cwd HAS batch-state.md WITH the `retro:` marker) →
 // the AGGREGATION reminder: read every same-batch file, dedupe (merge + count),
 // sort by severity, present ONCE, and name each candidate's source.
-const batchEndRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-retroend-'))
+const batchEndRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-retroend-')))
 await mkdir(join(batchEndRoot, '.scratch', 'retro'), { recursive: true })
 await writeFile(join(batchEndRoot, '.scratch', 'batch-state.md'), [
   '# Batch state — 71',
@@ -886,7 +905,7 @@ if (v28decl) ok('V28pre. RETRO_TRIGGER.batchDeclare.words declared (text-face de
 else bad('V28pre. batchDeclare declaration missing')
 
 // (a) cwd WITHOUT batch-state.md → still reminds (initialization).
-const declRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl-'))
+const declRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl-')))
 const handleDecl = await ctx.agents.create({
   sessionId: SessionId('enforcer-decl'),
   meta: { cwd: declRoot },
@@ -912,7 +931,7 @@ const v28b = await renderDecl()
 if (!declareText(v28b)) ok('V28b. declaration reminder is one-shot (consumed, no repeat)')
 else bad('V28b. declaration reminder repeated', v28b.slice(-200))
 // (b) cwd WITH batch-state.md → same reminder (the file existing is not a gate).
-const declRoot2 = await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl2-'))
+const declRoot2 = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl2-')))
 await mkdir(join(declRoot2, '.scratch'), { recursive: true })
 await writeFile(join(declRoot2, '.scratch', 'batch-state.md'), '# Batch state\n\n| 1 | #71 | ok |\n')
 const handleDecl2 = await ctx.agents.create({
@@ -1010,7 +1029,7 @@ if (retained.length === 0 && v27.includes('.aggregated') && /suppresses a SECOND
 else bad('V29f. aggregation text still credits the retracted suppressor, or lost the correct one',
   `retained=${retained.join(' | ') || '—'} | has .aggregated=${v27.includes('.aggregated')}`)
 // the inverse: batch-state.md WITHOUT `retro:` → 落盘, not 聚合.
-const noMarkRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-nomark-'))
+const noMarkRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-nomark-')))
 await mkdir(join(noMarkRoot, '.scratch'), { recursive: true })
 await writeFile(join(noMarkRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n| 1 | #71 | 进行中 |\n')
 const handleNM = await ctx.agents.create({
@@ -1029,7 +1048,7 @@ else bad('V29b. marker discrimination lost', v29b.slice(-240))
 // A batch that reached `retro:` but never aggregated (no `.aggregated`) still
 // aggregates for EVERY session that runs — the marker, not the session count, is
 // what gates it. (Guards against "only the first session ever" being hard-coded.)
-const freshAggRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-freshagg-'))
+const freshAggRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-freshagg-')))
 await mkdir(join(freshAggRoot, '.scratch'), { recursive: true })
 await writeFile(join(freshAggRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n- retro: done @ abc123\n')
 let freshAggMisses = []
@@ -1220,7 +1239,7 @@ if (RETRO_TRIGGER.aggregatedMarker === '.scratch/retro/.aggregated')
 else bad('V31pre. aggregatedMarker declaration', String(RETRO_TRIGGER.aggregatedMarker))
 
 const ERR_MARK = 'Batch-state probe FAILED'
-const errRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeerr-'))
+const errRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeerr-')))
 await mkdir(join(errRoot, '.scratch'), { recursive: true })
 // A DIRECTORY masquerading as the file → EISDIR. Portable (chmod 000 is a no-op
 // on Windows, which is why this is the fixture A-line measured as stable).
@@ -1249,7 +1268,7 @@ else bad('V31. fail-loud probe reporting incomplete',
 // The DISCRIMINATION the AC turns on: absent (ENOENT) must NOT report a failure.
 // A missing file is a normal non-batch session, not a broken one — flattening the
 // two together would either cry wolf on every ordinary push or hide a real fault.
-const absentRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeabsent-'))
+const absentRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-probeabsent-')))
 await mkdir(join(absentRoot, '.scratch'), { recursive: true })
 const handleAbsent = await ctx.agents.create({
   sessionId: SessionId('enforcer-probeabsent'),
@@ -1270,7 +1289,7 @@ else bad('V31b. absent/error discrimination lost',
 // A `.aggregated` probe that itself FAILS (here: a directory in its place) must
 // NOT suppress — failing open to the aggregation face is the safe direction, the
 // opposite of the batch-state probe (which must not fail open to "no batch").
-const aggErrRoot = await mkdtemp(join(tmpdir(), 'dsh-enforcer-aggerr-'))
+const aggErrRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-aggerr-')))
 await mkdir(join(aggErrRoot, '.scratch', 'retro', '.aggregated'), { recursive: true })
 await writeFile(join(aggErrRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n- retro: done @ abc123\n')
 const handleAggErr = await ctx.agents.create({
@@ -1300,14 +1319,16 @@ await handleBE2.dispose()
 await handleDecl2.dispose()
 await handleDecl.dispose()
 await handleBE.dispose()
-await rm(declRoot, { recursive: true, force: true })
-await rm(declRoot2, { recursive: true, force: true })
-await rm(noMarkRoot, { recursive: true, force: true })
-await rm(freshAggRoot, { recursive: true, force: true })
-await rm(errRoot, { recursive: true, force: true })
-await rm(absentRoot, { recursive: true, force: true })
-await rm(aggErrRoot, { recursive: true, force: true })
-await rm(batchEndRoot, { recursive: true, force: true })
+// #77: 临时根统一收尾 —— 失败全部保留现场并逐个响亮打印绝对路径，成功才全部清除。
+// 清单来自**创建即登记**的 `tmpRoots`（不再手抄；先前正是手抄漏了 batchRoot 那一项）。
+// 判据与文件末尾的 process.exit 同源（同一个 results 扫描），保证「非 0 退出」与
+// 「目录还在」永远一致；`tmpSettled` 让前面那个进程级兜底不再重复打印。
+tmpSettled = true
+if (results.some(r => r.startsWith('  ✗'))) {
+  for (const root of tmpRoots) console.log(`tmp kept: ${root}`)
+} else {
+  for (const root of tmpRoots) await rm(root, { recursive: true, force: true })
+}
 
 await handle.dispose()
 console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V31) ===')

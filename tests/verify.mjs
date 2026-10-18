@@ -13,7 +13,7 @@
  *     subagents…), so a failure is expected — but it must never name the
  *     rows this work added.
  */
-import { mkdtemp, mkdir, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -51,6 +51,35 @@ const agentOn = async (ctx, id, presetId, cwd) => {
 const toolNames = (ctx, agent) => ctx.tools.schemas(agent).map(s => s.name).sort()
 const commandNames = (ctx, agent) => ctx.commands.list(agent).map(c => c.name).sort()
 
+/**
+ * #77：handoff_tool 按契约把文档写到 `<TEMP>/handoff-<preset>-<stamp>.md`（它的返回文本里
+ * 带着这个绝对路径）。真交接要留档，但**用例里写下的那几份只是垃圾** —— 收尾时一并清理。
+ * 路径按工具契约复原（工具与本用例同进程、同一份 `tmpdir()`）：文件名就是从返回文本里
+ * 抓到的那个 `handoff-*.md`，不另抄一份命名规则。
+ */
+const handoffDocs = []
+function trackHandoffDoc(out) {
+  const value = out?.value
+  const text = typeof value === 'string' ? value : (value?.text ?? '')
+  const m = /handoff-[\w-]+\.md/.exec(text)
+  if (m !== null) handoffDocs.push(join(tmpdir(), m[0]))
+}
+
+// #77：Track D 的临时根声明在 try 外，成功与失败两条路径才能共用 try 之后的
+// 统一收尾（try 内声明的话，抛错时收尾拿不到这个变量）。
+let rootD
+let tmpSettled = false
+
+/**
+ * #77 AC② 的进程级兜底：收尾块挂在**线性流末端**，未捕获 throw（`bootHarness` 等）
+ * 会绕过它 —— 那种情况下进程非 0 退出却**不打 `tmp kept`**，正是 AC② 明文要禁的
+ * 静默留场。正常收尾跑过（`tmpSettled`）或正常退出（code 0）时本钩子什么都不做。
+ * 路径在**退出时**现算：`rootD` 要到 Track D 才赋值，提前取值只会拿到 undefined。
+ */
+process.on('exit', (code) => {
+  if (tmpSettled || code === 0) return
+  for (const p of [rootD, ...handoffDocs].filter((v) => v !== undefined)) console.log(`tmp kept: ${p}`)
+})
 try {
   // ── Track A: smoke preset = the handoff row ──────────────────────────────
   const smokePlugins = [{ id: 'handoff-tool', name: pathToFileURL(join(MATT_DIR, 'handoff-tool.mjs')).href }]
@@ -113,6 +142,7 @@ try {
     out = undefined
   }
   const afterH = ctxA.sessions.list().length
+  trackHandoffDoc(out)
   if (out && out.isError === false && afterH === beforeH + 1) {
     const value = out.value
     const text = typeof value === 'string' ? value : (value && value.text) ?? JSON.stringify(value)
@@ -175,6 +205,7 @@ try {
       agent: agentA,
       signal: new AbortController().signal,
     })
+    trackHandoffDoc(defOut)
     if (defOut && defOut.isError === false && ctxA.sessions.list().length === beforeDef + 1) {
       const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => id !== String(agentA.session.id))
       const child = ctxA.agents.get(childId)
@@ -207,6 +238,7 @@ try {
       signal: new AbortController().signal,
     })
     const newIdP = ctxA.sessions.list().map(s => String(s.id)).find(id => !idsBeforeP.has(id))
+    trackHandoffDoc(pOut)
     if (pOut && pOut.isError === false && newIdP !== undefined) {
       const childP = ctxA.agents.get(newIdP)
       await new Promise(r => setTimeout(r, 500))
@@ -264,7 +296,7 @@ try {
   // agents.create() factory does not, so the preset plugin must attach
   // itself. Boot the production storage/workspace stack over a temp root
   // and assert the workspace's sessionIds account gains the child.
-  const rootD = await mkdtemp(join(tmpdir(), 'dsh-matt-ws-'))
+  rootD = await mkdtemp(join(tmpdir(), 'dsh-matt-ws-'))
   const wsDir = join(rootD, 'workdir')
   await mkdir(wsDir)
   const ctxD = await harness([{ id: 'preset', plugins: [{ id: 'handoff-tool', name: pathToFileURL(join(MATT_DIR, 'handoff-tool.mjs')).href }] }], join(rootD, 'data'))
@@ -285,6 +317,7 @@ try {
     signal: new AbortController().signal,
   })
   const afterHD = ctxD.workspaceRegistry.list()[0].sessionIds.length
+  trackHandoffDoc(handoffOut)
   const accounted = ctxD.workspaceRegistry.list()[0].sessionIds.map(String)
   const newIdD = ctxD.sessions.list().map(s => String(s.id)).find(id => id !== String(agentD.session.id))
   if (handoffOut.isError === false && afterHD === beforeHD + 1 && accounted.includes(newIdD)) {
@@ -324,4 +357,19 @@ try {
 
 console.log('\n=== VERIFY RESULTS ===')
 console.log(results.join('\n'))
-process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
+// ── #77 临时条目收尾：成功清除，失败保留现场并响亮打印绝对路径 ─────────────
+// 判据与下面的退出码同源（同一个 results 扫描），保证「非 0 退出」与「现场还在」永远一致。
+// 条目 = Track D 的临时根 + 本用例触发的 handoff_tool 写下的那几份 `handoff-*.md`
+// （工具的契约是把文档写进 OS 临时目录 —— 真交接要留档，测试触发的那几份只是垃圾）。
+// 必须放在 Track D 的 dispose 之后：handoff 子会话的 jsonl 持久化是延迟写（实测 dispose
+// 后约 190ms 落地），在它落地前 rm 会被那次写入把 rootD 重新建出来（只剩 data/）。
+// `tmpSettled` 让上面那个进程级兜底不再重复打印。
+tmpSettled = true
+const verdictFail = results.some(r => r.startsWith('  ✗'))
+const tmpPaths = [rootD, ...handoffDocs].filter((p) => p !== undefined)
+if (verdictFail) {
+  for (const p of tmpPaths) console.log(`tmp kept: ${p}`)
+} else {
+  for (const p of tmpPaths) await rm(p, { recursive: true, force: true })
+}
+process.exit(verdictFail ? 1 : 0)

@@ -37,7 +37,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -156,10 +156,55 @@ function resolveRuntime({ dsh: explicitDsh, pnpm: explicitPnpm }) {
   return { dsh, pnpm, pnpmDir: null }
 }
 
+/**
+ * 本进程建过的 pnpm shim 目录（#77）。脚本形态下 `pnpmPathInjection` 只能给出一个
+ * **随机名临时目录**，而它的契约是「调用方拥有 mkdtemp 出来的那个目录」（模块自己不
+ * 隐式写盘）——清理责任因此落在调用方，不做就是**每次挂载漏一个** `dsh-matt-pnpm-*`
+ * （2026-10-18 实测：79 个 / 一轮 installer 套件）。
+ *
+ * 两步保证不留垃圾：
+ *   ① 步骤跑完就地删（`dropPnpmShim`，正常路径）；
+ *   ② `process.on('exit')` 兜底 —— `die()` 走 `process.exit(1)`，**不会**展开 finally，
+ *      而 shim 已经建出来了（例：`dsh plugin add` 失败）。
+ * 清理失败一律吞掉：删垃圾失败不得把一次成功的安装改成失败。
+ */
+const pnpmShims = new Set()
+let pnpmShimHookInstalled = false
+
+function trackPnpmShim(dir) {
+  pnpmShims.add(dir)
+  if (!pnpmShimHookInstalled) {
+    pnpmShimHookInstalled = true
+    process.on('exit', () => {
+      for (const d of pnpmShims) {
+        try { rmSync(d, { recursive: true, force: true, maxRetries: 3 }) } catch { /* best-effort */ }
+      }
+    })
+  }
+  return dir
+}
+
+/**
+ * 用完即清：删掉 shim 目录并摘除跟踪（幂等；`pnpmDir` 归 null）。
+ *
+ * **删成功才摘跟踪**（两轴复核 J1）：先摘再删的话，一旦 `rmSync` 失败（子进程仍占着该目录
+ * 为 cwd 等），这个目录就**永久脱离跟踪集** —— `process.on('exit')` 的第二道防线被自己
+ * 毁掉，且失败被 catch 吞成静默。留在跟踪集里则最多是多试一次（幂等、无害）。
+ */
+function dropPnpmShim(runtime) {
+  const dir = runtime.pnpmDir
+  runtime.pnpmDir = null
+  if (dir === null || !pnpmShims.has(dir)) return
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3 })
+    pnpmShims.delete(dir)
+  } catch { /* best-effort：本次失败 → 留在跟踪集，交给 exit 钩子再试一次 */ }
+}
+
 /** PNPM 在场时取出要前置的目录；脚本形态（harness 分发的 `pnpm.cjs`）在这里生成转发 shim。 */
 function pnpmDirFor(pnpm) {
   const injected = pnpmPathInjection(pnpm, {
-    mkdtemp: (prefix) => mkdtempSync(join(tmpdir(), prefix)),
+    mkdtemp: (prefix) => trackPnpmShim(mkdtempSync(join(tmpdir(), prefix))),
     writeFile: (p, content) => writeFileSync(p, content),
   })
   return injected.dir
@@ -218,7 +263,13 @@ function mountOrWarn(profile, step, what, runtime) {
   }
   if (!runtime.pnpm.found) die(probeFailureHint('pnpm', runtime.pnpm))
   runtime.pnpmDir = pnpmDirFor(runtime.pnpm)
-  step()
+  try {
+    step()
+  } finally {
+    // 挂载/卸载这一调用结束，shim 目录就没人再用了（#77：不留随机名垃圾）。
+    // `die()` 走 process.exit 的路径不展开 finally —— 那条由 exit 钩子兜底。
+    dropPnpmShim(runtime)
+  }
   return true
 }
 

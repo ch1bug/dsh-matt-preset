@@ -8,7 +8,7 @@
  *   - "LANG rust"（lang 基线）：应全程只 1 次（session 一次）；
  *   - "⚠ lang:rust"（lang 触发）：应只在工具调用后的那一轮 1 次。
  */
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -21,6 +21,16 @@ import { bootHarness, emitSessionEvent, ensurePresetMountable, parsePlugins, res
 const PRESET_DIR = fileURLToPath(new URL('..', import.meta.url))
 
 const root = await mkdtemp(join(tmpdir(), 'lang-count-'))
+let tmpSettled = false
+
+/**
+ * #77 AC② 的进程级兜底：本用例无失败判据、收尾只做成功清理，所以**抛错路径**此前
+ * 既不清也不报 —— 目录静默留下（栈只说明"哪里炸了"，不说明"现场留在哪"）。
+ * 正常收尾跑过（`tmpSettled`）或正常退出（code 0）时本钩子什么都不做。
+ */
+process.on('exit', (code) => {
+  if (!tmpSettled && code !== 0) console.log(`tmp kept: ${root}`)
+})
 const rustDir = join(root, 'rust-proj')
 await mkdir(rustDir, { recursive: true })
 await writeFile(join(rustDir, 'Cargo.toml'), '[package]\nname = "demo"\n')
@@ -65,3 +75,7 @@ stat('轮3(.rs调用后) ', await render())
 stat('轮4(无新调用)  ', await render())
 
 await handle.dispose()
+// #77：本用例无失败判据（只统计输出、末尾不 process.exit），故只做成功清理；
+// 失败/抛错路径由收尾上方的进程级兜底响亮报出 `tmp kept: <path>`（不再静默留场）。
+tmpSettled = true
+await rm(root, { recursive: true, force: true })
