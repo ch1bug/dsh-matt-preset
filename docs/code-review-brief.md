@@ -41,6 +41,12 @@
    （`git stash push` 会重置 index 并按 autocrlf 改行尾），回退后**编辑前重新 `read`**
    （FS 版本守卫报 `file changed since it was read`，本次白读两次）；③ 探针里拼 `\n` 会撞 CRLF
    工作树（`-Raw` 读进的是 `\r\n`）——按 `\r?\n` 切分或用显式 `$nl`，否则替换静默不生效。
+   **④ 还原一律用副本回写，禁用 `git checkout --` / `git restore` 作为还原手段**（**#108**）：
+   对 **tracked 且改动未 staged** 的文件，`git checkout --` 会把它**静默**打回 **HEAD**，
+   而那份未提交的改写版**没有 git 级副本 → 永久丢失**（本仓真实事故：436 行改写版打回 HEAD 旧版）；
+   **哈希不能替代副本**（SHA256 只证"变了"、不承载"变回什么"）。扰动前 `cp` 一份副本，
+   还原时回写它。口径全文、三态语义边界（staged / untracked 两支**并不丢**）与机械守卫见
+   `tests/verify-perturbation-recipe.mjs` 头注 + `tests/verify-restore-discipline.mjs`（R0–R7）。
    **实验标记（2026-10-17 起，机械拦）**：调试/扰动探针一律带唯一前缀 —— `[DEBUG-<唯一串>]` /
    `[MUTATION-<唯一串>]`，提交前必须清掉。理由：**标记死了才叫实验**，留下的标记意味着"被跑过的
    那棵树"与提交物不是同一份（而 verify-all 照样绿）。`.githooks/pre-commit` 已机械拦 staged 的
