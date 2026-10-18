@@ -137,7 +137,7 @@ mock 说 Anthropic SSE：`message_start` → `content_block_start`（`text` 或
 - 上面那条 `jobs` 报错正是 `inertService()` 太浅导致的；但因为**它在 pre-#99 就存在**，
   修它是挂具的事，不是某张票的事。
 
-实例：[tests/verify-workflow-profiles-2.mjs](tests/verify-workflow-profiles-2.mjs) 的 ptc 形状。
+实例：[tests/verify-workflow-profiles-2.mjs](../tests/verify-workflow-profiles-2.mjs) 的 ptc 形状。
 
 ## 工具坑（实测，费过一整轮的那种）
 
