@@ -19,8 +19,23 @@
  *   P4 排除表**防腐烂**：每条排除项必须**仍命中当前树**（陈旧排除项即红）——与 verify-enforcer
  *      V17 双向断言同精神：一张只会放宽的排除表，最后会宽到把真断链也放过去
  *   P4b 声明例外（`ALLOW`，正值允许清单）防腐烂：每条**仍被文档引用**且**理由非空**
- *   P5 扫描面自检：链接数与 token 数达阈值 —— 防"匹配式静默失效"把红变成假绿
+ *   P5 扫描面自检：**链接数**达阈值 —— 防链接匹配式静默失效
+ *   P5b 扫描面自检：**存活 token 数**达阈值 —— 独立判据，防 token 面整片塌掉时被链接数兜住
+ *   P5c/P5d 占比面自检：每份文档链接数、存活 token 占比不得**骤降**（抓"半失效"——
+ *      绝对值仍过阈值但相对基线已塌；复核 Spec 轴 2026-10-18 指出纯绝对阈值的余量问题）
  *   P6 扫描面自检：文档数达阈值
+ *
+ * 本仓的排除表只有**一种**：`EXCLUSIONS`（9 类，各带理由）。**判定顺序**（主循环）：先
+ * `ALLOW`（声明例外，理由最具体）→ 再 `EXCLUSIONS` 首命中。实测三条 ALLOW 当前**均**会被
+ * EXCLUSIONS 命中，故 ALLOW 在现树上是**顺序遮蔽**（删掉它判定结果不变）——但它判的是**不同命题**
+ * （"是仓内形状、但语义上不是指针"），且逼出逐条理由并单独防腐烂（P4b），故保留；
+ * 复核 2026-10-18 已实测确认这不是漂移点。
+ *
+ * **非空洞的边界（显式声明，别当成它守住了）**：P3 与 P4b 的"理由非空"两半是**对硬编码字面量**
+ * 的断言 —— 没有任何**树变化**能让它们红，只有人手工清空 `why` 才红。它们是**代码评审期的
+ * 提醒装置**，不是守卫；真正的守卫是 P1/P2（存在性）、P4/P4b 的**引用面**（仍命中 / 仍被引用）、
+ * P5/P5b/P6（扫描面非空）。这条边界由复核 Standards 轴 2026-10-18 指出，按本仓 §3.1「守卫空转」
+ * 口径**写明覆盖边界**而非假装守住。
  *
  * 排除的两种形态（本票刻意区分）：**字形排除**（`EXCLUSIONS`，如"含空格 = 命令"）与**声明例外**
  * （`ALLOW`，形状像仓内路径、但文档明确说它不是指针）。后者**不能**退化成字形规则——初版把
@@ -112,7 +127,7 @@ const EXCLUSIONS = [
   {
     id: 'runtime-dir',
     test: t => /^\.(scratch|sandcastle|agent-presets|github)\//.test(t),
-    why: '运行时/家目录/上游侧路径—— `.scratch/`（gitignore）、`.sandcastle/`、`.agent-presets/`（落 `<DSH_HOME>`）、`.github/workflows/`（ADR-0013 明文本仓**不用** CI，该目录不存在）；本就不入仓',
+    why: '不入仓 / 本仓不存在的运行时侧目录—— `.scratch/`（gitignore，本机状态）、`.sandcastle/`（沙箱批跑的运行时面，同 gitignore）、`.agent-presets/`（落 `<DSH_HOME>`，家目录侧）、`.github/`（**本仓不存在此目录**：ADR-0013 明文本仓不用 CI，该目录从未建立——旧理由串误写成"不入仓"，2026-10-18 复核实测 `Test-Path .github` = False 后更正）',
   },
   {
     id: 'upstream',
@@ -121,8 +136,10 @@ const EXCLUSIONS = [
   },
   {
     id: 'bare-name',
-    test: t => !t.includes('/') || /(^|\/)[\w.-]+$/.test(t),
-    why: '裸文件名 / 测试名 / 不以 `/` 结尾的散文片段—— 文档常用 basename 指测试（`verify-live-tool-call.mjs`），末段无 `/` 说明它指"名字"而非"路径"',
+    // 只有第二半支可能为真：进入本表的 token 已由主循环 `if (!t.includes('/')) continue` 筛过，
+    // 故首半支 `!t.includes('/')` 恒假 —— 那是 D12「永假分支」（复核 2026-10-18 实测指出），已删。
+    test: t => /(^|\/)[\w.-]+$/.test(t),
+    why: '末段不以 `/` 结尾 —— 指"名字"而非"路径"：文档常用 basename 指测试（`verify-live-tool-call.mjs`），或以目录形态（`docs/adr/`）指路；两者都不该被当作"文件必须存在"的断言对象',
   },
   {
     id: 'regex-prose',
@@ -137,9 +154,13 @@ const MD_LINK = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 const INLINE_CODE = /`([^`\n]+)`/g
 const EXTERNAL = /^[a-z][a-z0-9+.-]*:/i
 
-/** 逐行收集：定位信息（文件:行）+ 目标 + 解析结果。双向定位是票面 AC 明文。 */
+/** 逐行收集：定位信息（文件:行）+ 目标 + 解析结果。双向定位是票面 AC 明文。
+ *  `allTokens` 是**同一趟**收集的、含被排除项的**全量** token —— P4/P4b 的防腐烂判据读它。
+ *  刻意**不**在 P4 里重扫一遍：重扫等于把 token 口径写两份（改一处漏一处），
+ *  正是本仓 D6「判定点重复」的形状（复核 Standards 轴实测指出）。 */
 const linkHits = []
 const tokenHits = []
+const allTokens = []
 const docsSeen = []
 
 for (const doc of SCAN) {
@@ -159,6 +180,8 @@ for (const doc of SCAN) {
     for (const m of line.matchAll(INLINE_CODE)) {
       const t = m[1].trim()
       if (!t.includes('/')) continue
+      // 全量留档**在排除判定之前**：P4/P4b 判的是"排除项还命中不命中当前树"，必须看被排除的那些。
+      allTokens.push(t)
       // 声明例外优先于字形排除：两者都"不看存在性"，但 ALLOW 的理由更具体，且 P4b 单独防腐烂。
       if (ALLOW.has(t)) continue
       const hit = EXCLUSIONS.find(e => e.test(t))
@@ -197,15 +220,8 @@ if (reasonless.length === 0) {
 // ── P4：排除表防腐烂 —— 每条排除项必须仍命中当前树的某个 token ───────────────
 // 这正是 V17 的双向断言精神：排除表只会变宽，宽到最后连真断链也放过去。要求"每条都还在
 // 干活"（在当前树里至少命中一个真实 token），陈旧的排除项当场变红，逼人删掉它。
+// 读的是主循环同一趟收集的 `allTokens`（**不重扫**：重扫即 token 口径两份，D6）。
 {
-  const allTokens = []
-  for (const doc of SCAN) {
-    const text = readFileSync(join(REPO, doc), 'utf8')
-    for (const m of text.matchAll(INLINE_CODE)) {
-      const t = m[1].trim()
-      if (t.includes('/')) allTokens.push(t)
-    }
-  }
   const stale = EXCLUSIONS.filter(e => !allTokens.some(t => e.test(t)))
   if (stale.length === 0) {
     ok('P4. 排除表无腐烂项（每条仍命中当前树）',
@@ -228,11 +244,45 @@ if (reasonless.length === 0) {
 }
 
 // ── P5 / P6：扫描面自检（匹配式静默失效时亮红，而不是假绿）──────────────────
-const totalRefs = linkHits.length + tokenHits.length
-// 阈值按 2026-10-18 实测取整下调：69 条链接 + 22 个存活 token = 91，阈值 60 留足余量，
-// 但足以在"匹配式整片失效"（骤降到 0 附近）时亮红。
-if (totalRefs >= 60) ok('P5. 扫描面自检：引用数达阈值（≥60）', String(totalRefs))
-else bad('P5. 引用数低于阈值 —— 匹配式可能静默失效', `${totalRefs}（链接 ${linkHits.length} + token ${tokenHits.length}）`)
+// **三条面各自一个阈值**，刻意**不**用一个合计阈值：实测 69 条链接**单独就已超过**任何
+// 合计阈值，于是"token 面整片归零"会被链接数兜住、照样全绿 —— 那正是本仓 §3.1「守卫空转」
+// 的形态（复核 Standards 轴 2026-10-18 实测指出，初版合计阈值 60 即此病）。
+// 阈值口径：**绝对值下限**（防整片归零）+ **相对占比下限**（防"退化到只剩零头"）。
+// 复核 Spec 轴 2026-10-18 指出"84→50 不响"的余量问题：绝对值面确实拦不住**半失效**，
+// 故补一条**占比面**——链接 / 文档数、存活 token / 全量 token 各须 ≥ 基线占比。
+// 占比面自动随文档增长放宽（数值不必手改），只在**骤降**时红。
+const LINK_MIN = 50
+const TOKEN_MIN = 8
+const LINK_PER_DOC_MIN = 1.5   // 实测 69/30 = 2.30；阈值取 ~65%（"半塌"时红，见 P5c 实测）
+const TOKEN_RATIO_MIN = 0.025  // 实测 15/498 = 0.030 —— 须**贴近实测**才有覆盖面：
+                               // 取 0.015 时，"匹配式只找到 2/3 存活 token"仍会绿（实测 2.4% > 1.5%），
+                               // 那条 P5d 就只是 P5b 的同义反复；取 0.025 才能在绝对面仍过时抓住半失效。
+
+const linkPerDoc = docsSeen.length === 0 ? 0 : linkHits.length / docsSeen.length
+// 全量 token 含被排除项（`allTokens`），故它随文档稳定增长；存活 token 只占其中很小一撮。
+const tokenRatio = allTokens.length === 0 ? 0 : tokenHits.length / allTokens.length
+
+if (linkHits.length >= LINK_MIN) ok('P5. 扫描面自检：链接数达阈值', `${linkHits.length}（≥${LINK_MIN}）`)
+else bad('P5. 链接数低于阈值 —— 链接匹配式可能静默失效', `${linkHits.length}（阈值 ${LINK_MIN}）`)
+
+// 独立阈值：token 面自己塌掉时必须自己红（链接仍在也兜不住它）。
+if (tokenHits.length >= TOKEN_MIN) ok('P5b. 扫描面自检：存活 token 数达阈值', `${tokenHits.length}（≥${TOKEN_MIN}）`)
+else bad('P5b. 存活 token 数低于阈值 —— token 匹配式或排除表可能整片失效（链接数兜不住它）',
+  `${tokenHits.length}（阈值 ${TOKEN_MIN}；链接 ${linkHits.length} 仍在，故这是独立判据）`)
+
+// 占比面：抓"半失效"（绝对值仍过、但相对基线已骤降 —— Spec 轴 c3 指出的余量问题）。
+if (linkPerDoc >= LINK_PER_DOC_MIN) {
+  ok('P5c. 占比面：每份文档链接数未骤降', `${linkPerDoc.toFixed(2)}（≥${LINK_PER_DOC_MIN}）`)
+} else {
+  bad('P5c. 每份文档链接数骤降（绝对值可能仍过阈值）', `${linkPerDoc.toFixed(2)}（阈值 ${LINK_PER_DOC_MIN}）`)
+}
+if (tokenRatio >= TOKEN_RATIO_MIN) {
+  ok('P5d. 占比面：存活 token 占比未骤降',
+    `${(tokenRatio * 100).toFixed(1)}%（≥${(TOKEN_RATIO_MIN * 100).toFixed(1)}%）`)
+} else {
+  bad('P5d. 存活 token 占比骤降（绝对值可能仍过阈值）',
+    `${(tokenRatio * 100).toFixed(1)}%（阈值 ${(TOKEN_RATIO_MIN * 100).toFixed(1)}%，全量 ${allTokens.length}）`)
+}
 
 if (docsSeen.length >= 20) ok('P6. 扫描面自检：文档数达阈值（≥20）', String(docsSeen.length))
 else bad('P6. 扫描到的文档数低于阈值', String(docsSeen.length))
