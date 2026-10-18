@@ -1,5 +1,5 @@
 /**
- * verify-batch-state.mjs —— #71 的**仓内载体面**守卫（C1–C6）。
+ * verify-batch-state.mjs —— batch-state 的守卫：**仓内载体面**（C1–C8）+ **活文件对账面**（C9）。
  *
  * 为什么存在：#71 把「批末 retro」从一个靠人记性的动作变成**机制**，而机制散在三个
  * 仓内载体上——`.scratch/batch-state.md` 的**形状**（`docs/batch-state.md` 是单一事实源）、
@@ -21,6 +21,15 @@
  *      （同一字段两边不同名 → 红）
  *   C6 节结构守卫：`@@ batch-mode` 节仍在骨架里、节 id 唯一（改动不得吃掉这一节）
  *
+ * #115 新增（**活文件对账面** —— C1–C8 守的全是仓内载体，活文件从未被对账）：
+ *   C9-live  读 `.scratch/batch-state.md` **最后一条**「未推送清单」的自称 N，与
+ *            `git rev-list --count origin/<branch>..HEAD` 对账 → 不一致**响亮报两个数字**
+ *            （声称 X / 实测 Y），**只报不阻断**；≥5 笔另喊一行护栏提示；活文件缺席 loud SKIP；
+ *            分支不可知 / 取数不可用 / 判据取不到 → ✗（防线缺席必须响亮，不静默绿）
+ *   C9b      Impure 夹具仓（真 git，落 os.tmpdir()）演示**计数命令的差异** —— 结构性防线，
+ *            替代"再加一条正则守文案"（D15：追开放集是无收敛军备竞赛）
+ *   C9c      取数命令契约在场**且判据只认节内命中**（`headingSection` 切出契约节再匹配）
+ *
  * 零运行时依赖（可独立 `node tests/verify-batch-state.mjs`）：`workflow-enforcer.mjs` 本身只
  * 依赖 `node:*` / `yaml`（**不**依赖 `@deepseek-ai/*`），所以本用例直接 import 它的**稳定导出**
  * 做声明式断言（`RETRO_TRIGGER` / `BATCH_STATE_TEMPLATE` / `INJECTIONS`），照 V23c 的形状——
@@ -32,7 +41,11 @@
  *   ③ 正文删掉「字词不触发」口径句 → C4 红；
  *   ④ `RETRO_TRIGGER.retroMarker` 改名 → C2c 红；
  *   ⑤ persona-carried 基线换回旧 body → C8（及 L1/R4）红。
- * 五条均已实测（见回报）。
+ * 五条均已实测（见回报）。#115 追加的 C9 面另有两组镜像扰动：
+ *   `.scratch/p115-nonempty.mjs`（P0–P9：不一致报两数且 exit 0 / ≥5 护栏 / 缺席 loud SKIP /
+ *   判据哑掉转 ✗ / 取数不可用转 ✗ / 契约整节被删转 ✗ / 白名单换错命令转 ✗）；
+ *   `.scratch/p115-c9c-regression.mjs`（B0–B4：C9c 收窄到节内后，节内命令规则被松动、
+ *   危险侧措辞被删、整节被删 —— 三者都真红）。读数见 `.scratch/p115-nonempty.log`。
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -199,6 +212,22 @@ function sectionText(text, id) {
   return lines.slice(start + 1, end).join('\n')
 }
 
+/** 取 `## <id>…` 标题到下一个**同级或更高级**标题之间的正文（不含标题行本身）。
+ *  标题按**前缀**匹配（允许标题带括注，如 `## 取数命令契约（…只许一条命令）`）——
+ *  要求逐字相等会把"标题被补充说明"误判成"整节消失"，那是假红。
+ *  与 `sectionText` 分开写而不是合一：前者钉骨架的 `@@ ` 标记、后者钉文档的 `## ` 标题，
+ *  两者的"节边界"约定不同（合并会悄悄改掉 C3 的判据面 —— 有意变更必须显式，不顺手捎带）。 */
+function headingSection(text, id) {
+  const lines = text.split('\n')
+  const start = lines.findIndex(l => /^##\s/.test(l) && l.slice(3).startsWith(id))
+  if (start < 0) return null
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^#{1,2}\s/.test(lines[i])) { end = i; break }
+  }
+  return lines.slice(start + 1, end).join('\n')
+}
+
 const batchSection = sectionText(BODY, 'batch-mode')
 if (batchSection === null) {
   bad('C3. @@ batch-mode 节', '骨架里找不到该节')
@@ -335,9 +364,21 @@ const COUNT_LABEL = 'git rev-list --count origin/<branch>..HEAD'
  *  变量名带 `DSH_MATT_BATCHSTATE_` 前缀，不与任何真实环境变量撞；不设 = 零影响。
  *  为什么需要缝：扰动要在**镜像副本**上造"声称 ≠ 实测 / ≥5 笔 / 取数不可用"，而改调用方
  *  仓库的 origin/main 是破坏性的（本仓禁止）；"PATH 前置假 git"在 Windows 下也不通 ——
- *  实测 `spawnSync('git', …)` 不经 shell 解析 PATH 里的 `.cmd` 一律失败（129 / EINVAL）。 */
-const COUNT_OVERRIDE = process.env.DSH_MATT_BATCHSTATE_COUNT
-const BRANCH_OVERRIDE = process.env.DSH_MATT_BATCHSTATE_BRANCH
+ *  实测 `spawnSync('git', …)` 不经 shell 解析 PATH 里的 `.cmd` 一律失败（129 / EINVAL）。
+ *
+ *  ⚠ 第 1 轮复核（Standards 轴 D-2）实测：缝替换的是**判据的输入事实本身**，于是任何残留的
+ *  该变量（父 shell 泄漏 / CI 误设 / 调试后忘清）都会让 C9 报 `✓ 一致` 而**真 git 根本没跑**，
+ *  且读数里没有一个字提示"实测值来自伪造"——这正是 D47 点名的第 ② 类（依赖环境门禁变量）
+ *  的**静默通过**。⇒ 缝保留（扰动非空洞要靠它），但代价全都要**响亮**：
+ *    ① 双变量门：`DSH_MATT_BATCHSTATE_COUNT` **单独设不生效**，必须同时设 `_SEAM_ACK=1`；
+ *    ② 走了缝就在**每一条** C9-live 读数里标注，并在汇总区再喊一行。 */
+const SEAM_ACK = process.env.DSH_MATT_BATCHSTATE_SEAM_ACK === '1'
+const COUNT_OVERRIDE = SEAM_ACK ? process.env.DSH_MATT_BATCHSTATE_COUNT : undefined
+const BRANCH_OVERRIDE = SEAM_ACK ? process.env.DSH_MATT_BATCHSTATE_BRANCH : undefined
+/** 缝是否真的生效过（`git()` 里置位；收尾据此喊一行"本次读数有伪造成分"）。 */
+let seamUsed = false
+/** 设了 COUNT 却没给 ACK —— 响亮告知"缝被忽略"，不静默丢弃（否则扰动会以为自己在测）。 */
+const seamIgnored = !SEAM_ACK && process.env.DSH_MATT_BATCHSTATE_COUNT !== undefined
 const BRANCH = BRANCH_OVERRIDE !== undefined
   ? { status: 0, stdout: BRANCH_OVERRIDE }
   : spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO, encoding: 'utf8' })
@@ -348,6 +389,7 @@ const branch = BRANCH.status === 0 ? (BRANCH.stdout ?? '').trim() : ''
 function git(args) {
   const isCount = args[0] === COUNT_CMD[0] && args[1] === COUNT_CMD[1]
   if (isCount && COUNT_OVERRIDE !== undefined) {
+    seamUsed = true
     const [code, out = ''] = COUNT_OVERRIDE.split('|')
     return { status: Number(code), out }
   }
@@ -394,12 +436,15 @@ if (LIVE === null) {
       'origin ref 可能未取回（git fetch 后重跑）')
   } else {
     const ACTUAL = Number(rev.out)
+    // 缝生效过就在**每一条** C9-live 读数里标注：读者看到的"实测 Y"不是真 git 读数。
+    const seam = seamUsed ? '【⚠ SEAM：实测值来自 DSH_MATT_BATCHSTATE_COUNT，真 git 未跑】' : ''
     if (CLAIMED === ACTUAL) {
-      ok('C9-live. 活文件最后一条「未推送清单」与 git 事实一致', `声称 ${CLAIMED} == 实测 ${ACTUAL}（${COUNT_LABEL}）`)
+      ok('C9-live. 活文件最后一条「未推送清单」与 git 事实一致',
+        `声称 ${CLAIMED} == 实测 ${ACTUAL}（${COUNT_LABEL}）${seam}`)
     } else {
       // ② 只报不阻断 —— 两个数字都要出现（票面 AC 明文："含声称 X / 实测 Y"）。
       warn('C9-live. 未推送清单与 git 事实**不一致**',
-        `声称 ${CLAIMED} / 实测 ${ACTUAL} —— 把状态文件最后一条的「（<N> 票）」改成 ${ACTUAL}；` +
+        `声称 ${CLAIMED} / 实测 ${ACTUAL} ${seam}—— 把状态文件最后一条的「（<N> 票）」改成 ${ACTUAL}；` +
         '（工作树领先状态文件是提交时点的正常态，故只报不阻断）')
     }
     if (ACTUAL >= 5) {
@@ -461,41 +506,62 @@ try {
     // ── 真正要钉的那条事实：**度量面依赖宿主 shell**，而错法朝向危险侧 ──────────────
     // 两条命令与 handoff 配方**同形**（`git log origin/main..HEAD --oneline | Measure-Object…`），
     // 只把工具面换成夹具的 git —— cwd 与"调用方仓库"都与我无关，读数是**结构**而不是本机 git 状态。
+    //
+    // ⚠ 探针**不得**再写 `$env:GIT_DIR=''`（Standards 轴 D-4 实测）：pwsh 会把**空串**真的导出给
+    // 子进程 → 夹具 git 收到 `GIT_DIR=''` → `fatal: not a git repository`（exit 128），于是
+    // "宿主跑得动"的判定被探针自己打挂、pwsh 被静默剔除（而它可能正是能复现场景的那个宿主）。
+    // 守卫本就用 `git -C <dir>` 指定仓，**不需要**清 GIT_DIR（spawnSync 也不继承调用方的该变量）。
     const EXES = [['PowerShell 7', 'pwsh'], ['Windows PowerShell', 'powershell']]
-    const PWSH_A = `$env:GIT_DIR=''; (git -C '${q}' log origin/main..HEAD --oneline | Measure-Object).Count`
-    const PWSH_L = `$env:GIT_DIR=''; (git -C '${q}' log origin/main..HEAD --oneline | Measure-Object -Line).Lines`
+    const PWSH_A = `(git -C '${q}' log origin/main..HEAD --oneline | Measure-Object).Count`
+    const PWSH_L = `(git -C '${q}' log origin/main..HEAD --oneline | Measure-Object -Line).Lines`
+    // `-InputObject` 形态：把同一份输出作为**单个参数**交给 Measure-Object（不是逐行送管道）。
+    // 复核独立实测（Spec 轴）：它**恒报 1**（3 笔报 1、8 笔仍报 1）—— 比默认形态更顽固，
+    // 且与默认形态**同向**（朝向"把 ≥5 读成 1"的危险侧）。这是契约要钉的那个机制里
+    // **可稳定复现**的那一支（默认形态随宿主是否折叠而变化，这一支不随）。
+    const PWSH_I = `(Measure-Object -InputObject (git -C '${q}' log origin/main..HEAD --oneline)).Count`
     const probe = (exe) => {
       const a = spawnSync(exe, ['-NoProfile', '-Command', PWSH_A], { encoding: 'utf8' })
       const l = spawnSync(exe, ['-NoProfile', '-Command', PWSH_L], { encoding: 'utf8' })
-      return { a: (a.stdout ?? '').trim(), l: (l.stdout ?? '').trim(), aNum: Number((a.stdout ?? '').trim()), lNum: Number((l.stdout ?? '').trim()), err: (a.stderr ?? '').trim() + (l.stderr ?? '').trim() }
+      const io = spawnSync(exe, ['-NoProfile', '-Command', PWSH_I], { encoding: 'utf8' })
+      return {
+        a: (a.stdout ?? '').trim(), l: (l.stdout ?? '').trim(), io: (io.stdout ?? '').trim(),
+        aNum: Number((a.stdout ?? '').trim()), lNum: Number((l.stdout ?? '').trim()), ioNum: Number((io.stdout ?? '').trim()),
+        err: (a.stderr ?? '').trim() + (l.stderr ?? '').trim(),
+      }
     }
     /** 两条读数都是**数字**才算宿主跑得动（0/'' 是命令根本没跑成的形态，不是机制读数）。 */
     const ran = (r) => /^\d+$/.test(r.a) && /^\d+$/.test(r.l) && r.a !== '0' && r.l !== '0'
     const probes = EXES.map(([name, exe]) => ({ name, ...probe(exe) }))
-    const live = probes.filter(p => !ran(p) && /not recognized|不是内部|CommandNotFound/i.test(p.err))
     const usable = probes.filter(p => ran(p))
     if (usable.length === 0) {
-      console.log('  ⚠ C9b SKIP (loud). 两个 PowerShell 宿主都跑不动这段命令 —— 计数面演示未验证：' +
+      console.log('  ⚠ C9b SKIP (loud). 没有可用的 PowerShell 宿主 —— 计数面演示未验证：' +
         `本机读数 ${probes.map(p => `${p.name}: Count=${JSON.stringify(p.a)}`).join(' / ')}；不猜、不报假绿`)
-      if (live.length > 0) bad('C9b SKIP 判据', `${live.map(p => p.name).join('/')} 不存在（CommandNotFound）—— 这属于"环境"，不该走进 SKIP`)
+      // 宿主缺席是**环境侧**的事（Linux/CI 上两个名字本就不存在）—— 归 loud SKIP，**不报红**。
+      // （初版在这里对 CommandNotFound 报 bad，实测会在 Linux 上**必然假红** —— Standards 轴 D-4。）
     } else {
-      const shots = usable.map(p => `${p.name}: 默认 Count=${p.aNum} / -Line=${p.lNum}`).join(' ｜ ')
+      const shots = usable.map(p => `${p.name}: 默认 Count=${p.aNum} / -Line=${p.lNum} / -InputObject=${p.ioNum}`).join(' ｜ ')
+      // **可稳定复现的那一支**：`-InputObject` 恒报 1，而真值（`rev-list`）是 3。
+      // 这一条**必须绿**——它不依赖"宿主是否把多行折叠"（那个随宿主变，见下），
+      // 且它正是契约要防的那个方向（1 < 3，把 ≥5 读成 1、绕过护栏）。
+      const ioWrong = usable.find(p => p.ioNum === 1 && fixtureActualNum > 1)
       const differ = usable.find(p => p.aNum === 1 && p.lNum === fixtureActualNum)
       const agree = usable.filter(p => p.aNum === fixtureActualNum && p.lNum === fixtureActualNum)
-      if (differ !== undefined) {
-        ok(`C9b-2. 计数机制演示（结构性防线）：同一份 git 输出 —— ${differ.name} 下 ` +
-          `\`Measure-Object\` 默认报 1（逐**对象**计数）/ \`-Line\` 报 ${fixtureActualNum} / \`rev-list --count\` 报 ${fixtureActualNum}`,
-          `逐宿主读数：${shots} —— 默认形态给出的是**便于绕过护栏**的那个方向（把 ≥5 读成 1），故契约只钉 \`rev-list --count\``)
-      } else if (agree.length === usable.length) {
-        // 本宿主复现不出现场（默认 `Measure-Object` 也与逐行同数）。**不算通过**：契约要钉的
-        // 机制在本机复现不了，就不能用一个绿点盖过去（实测优先于断言）；但**也不变红**——
-        // 那是宿主差异，不是本仓的缺陷。故 ⚠ 且把两个读数都留在读数区。
-        warn('C9b-2. 计数机制演示：本宿主**复现不出现场**（默认 `Measure-Object` 也报同数）',
-          `逐宿主读数：${shots} / rev-list=${fixtureActualNum} —— 命令行形态差异（原生命令多行输出是否折叠成单对象）` +
-          '随宿主变，故契约**只钉命令白名单**（`rev-list --count`），不把机制写成普适断言')
+      if (ioWrong !== undefined) {
+        ok('C9b-2. 计数机制演示（结构性防线）：同一份 git 输出 —— ' +
+          `\`Measure-Object -InputObject\` 恒报 **1**，而 \`rev-list --count\` 报 **${fixtureActualNum}**`,
+          `逐宿主读数：${shots} —— 1 < ${fixtureActualNum} 正是"把 ≥5 读成 1、绕过护栏"的方向；` +
+          '（默认形态是否同错随宿主变，故不予断言）')
       } else {
-        bad('C9b-2. 计数机制演示读数异常',
-          `逐宿主读数：${shots} / rev-list=${fixtureActualNum}（期望"默认 1 或 与逐行同数"两种形态之一）—— 夹具或命令串坏了`)
+        bad('C9b-2. 计数机制演示失灵（`-InputObject` 未报出 1）',
+          `逐宿主读数：${shots} / rev-list=${fixtureActualNum} —— 期望至少一个宿主给出 -InputObject=1；夹具或命令串坏了`)
+      }
+      if (differ !== undefined) {
+        console.log(`  ✓ C9b-3.（附注）默认 \`Measure-Object\` 在 ${differ.name} 下也报 ${differ.aNum}` +
+          ' —— 与 `-InputObject` 同向，但随宿主变，故只作观测不作断言')
+      } else if (agree.length === usable.length) {
+        warn('C9b-3. 默认 `Measure-Object` 本宿主**复现不出现场**（也报同数）—— 观测项，不作断言',
+          `逐宿主读数：${shots} / rev-list=${fixtureActualNum} —— 默认形态是否折叠随宿主变，` +
+          '契约钉的是**命令白名单**（`rev-list --count`），可稳定复现的错法由 C9b-2 用 `-InputObject` 钉')
       }
     }
   }
@@ -505,21 +571,43 @@ try {
   rmSync(TMPFIX, { recursive: true, force: true, maxRetries: 3 })
 }
 
-// ── C9c: **取数命令契约**必须真的在文档里（#115 AC「钉死取数命令 + 写明为何」）────────
+// ── C9c: **取数命令契约**必须真的在**契约节内**（#115 AC「钉死取数命令 + 写明为何」）─────
 // 为什么单列一条：C9 只对账**数字**、C9b 只演示**机制**，两者都不会因为"契约整节被删掉"
-// 而变红（扰动实测 P7：删掉 915 字符后 exit 仍是 0）。于是"契约存在"必须有自己的断言——
-// 缺了它，本票的契约面就是**没被守着的**，下一个会话把整节删掉都不会有人知道。
-// 判据三条同现才算契约在场：① 只许 `rev-list --count` 的**命令原文**；
-// ② **为何**（误报机制：逐对象计数）；③ 该错法**朝向危险侧**（绕过护栏，不是随便一个 bug）。
-const CONTRACT_POINTS = [
-  ['命令原文：`git rev-list --count`（唯一许可）', /git rev-list --count/],
-  ['理由：`Measure-Object` 一族**逐对象**计数（不是逐行）', /逐\s*\*\*对象\*\*计数|逐对象计数/],
-  ['为何贵：错法朝向"把 ≥5 读成 1"、绕过护栏', /绕过护栏[\s\S]{0,60}不报警|恰好绕过护栏/],
-  ['命令白名单被测例钉住（C9 的判据指向它）', /只许.*rev-list --count|一律用.*rev-list --count/],
-]
-const missingContract = CONTRACT_POINTS.filter(([, re]) => !re.test(DOC)).map(([n]) => n)
-if (missingContract.length === 0)
-  ok('C9c. 取数命令契约在场（命令 + 为何 + 危险侧同现）', CONTRACT_POINTS.length + ' 条判据')
-else bad('C9c. 取数命令契约缺失/被削弱', `docs/batch-state.md 缺: ${missingContract.join(' / ')}`)
+// 而变红。于是"契约存在"必须有自己的断言——缺了它，本票的契约面就是**没被守着的**。
+//
+// ⚠ 第 1 轮复核实测（Standards 轴 D-3）：本断言最初在**整篇文档**上匹配，实测 4 条判据
+// 收成 1 条 —— 删掉整个契约节只有「理由」一条红，另三条被**节外**的模板行 / 字段表行满足；
+// 更糟的是把节内命令规则松成「`Measure-Object` 也行」，**C9c 全绿**（锁是空的）。
+// ⇒ 修法不是"把正则写紧"，而是**收窄匹配域**：先切出契约节，再在节内匹配（D15：换防线形态）。
+// `headingSection` 的约定（`## ` 起、下一个同级/更高级标题止）这里兑现到文档面。
+const CONTRACT_SECTION = headingSection(DOC, '取数命令契约')
+if (CONTRACT_SECTION === null) {
+  bad('C9c. 文档里有 `## 取数命令契约` 一节', '找不到该节 —— 契约的**载体**不在了（判据无从谈起）')
+} else {
+  const CONTRACT_POINTS = [
+    ['命令原文：`git rev-list --count`（唯一许可）', /git rev-list --count/],
+    ['理由：`Measure-Object` 一族**逐对象**计数（不是逐行）', /逐\s*\*\*对象\*\*计数|逐对象计数/],
+    ['为何贵：错法朝向"把 ≥5 读成 1"、绕过护栏**且不报警**', /绕过护栏[\s\S]{0,40}不报警|不报警[\s\S]{0,40}绕过护栏/],
+    ['命令白名单被测例钉住（只许 / 一律用）', /只许|一律用/],
+  ]
+  const missingContract = CONTRACT_POINTS.filter(([, re]) => !re.test(CONTRACT_SECTION)).map(([n]) => n)
+  if (missingContract.length === 0)
+    ok('C9c. 取数命令契约在场且**在契约节内**（命令 + 为何 + 危险侧同现）',
+      `${CONTRACT_POINTS.length} 条判据 / 节内 ${CONTRACT_SECTION.split('\n').length} 行`)
+  else bad('C9c. 取数命令契约缺失/被削弱（判据只认**节内**命中）',
+    `节内缺: ${missingContract.join(' / ')}`)
+}
+
+// 缝生效过就**在汇总区**再喊一行：C9 的这一轮读数含伪造成分，别当成"验过了"（D47 响亮口径）。
+if (seamUsed) {
+  console.log('  ⚠ C9-SEAM (loud). DSH_MATT_BATCHSTATE_COUNT 生效过 —— 本轮 C9-live 的"实测"值' +
+    '**不是真 git 读数**；生产 / 批末对账请在不设该变量的环境下重跑')
+}
+// 设了 COUNT 却没给 ACK → 缝被忽略（双变量门）。**响亮**告知，不静默丢弃。
+if (seamIgnored) {
+  console.log('  ⚠ C9-SEAM (loud). 检测到 DSH_MATT_BATCHSTATE_COUNT，但未设 ' +
+    'DSH_MATT_BATCHSTATE_SEAM_ACK=1 —— 缝**未生效**，C9-live 走的是真 git（这是有意设的门，' +
+    '防残留变量造成假绿）；要开缝请把两个变量一起设')
+}
 
 report('BATCH-STATE VERIFY (C1–C9)')

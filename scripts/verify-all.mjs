@@ -31,6 +31,14 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  *  首选，本行只是兜底：漏写最多写进垃圾箱。用完即删（成功失败都删）。 */
 const ISOLATED_HOME = mkdtempSync(join(tmpdir(), 'dsh-matt-verify-all-'))
 const childEnv = { ...process.env, DSH_HOME: ISOLATED_HOME }
+// #115 复核（Standards 轴 D-2）：`verify-batch-state.mjs` 的 C9 有一条**测试缝**
+// （`DSH_MATT_BATCHSTATE_COUNT` / `_BRANCH`，扰动用例专用）。它会替换"取数命令的读数"这个
+// **判据输入事实本身**，所以残留（父 shell 泄漏 / CI 误设 / 调试后忘清）会让 C9 报绿而真 git
+// 没跑 —— D47「防线缺席必须响亮」点名的静默通过形态。汇总层在这里**主动清掉**，
+// 汇总跑的就是真读数；扰动用例自己设（且必须带 `_SEAM_ACK=1` 双变量门）。
+for (const k of ['DSH_MATT_BATCHSTATE_COUNT', 'DSH_MATT_BATCHSTATE_BRANCH', 'DSH_MATT_BATCHSTATE_SEAM_ACK']) {
+  delete childEnv[k]
+}
 
 /** 非用例文件（共享挂具）与需要外部环境、默认跳过的用例。
  *  `why` 口径（retro 2026-10-16）：写清这门禁**挡住哪条链 / 哪半边**——缺环境时读者才知道
