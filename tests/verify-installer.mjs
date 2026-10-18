@@ -9,33 +9,32 @@
  * `dsh --dump-config` 出现 preset-matt 行 + 安装副本插件可 import。
  *
  * #67：store 侧（payload / 版本戳 / 清单 / 重复拒绝 / --version）不需要 dsh，照常实跑；
- * 依赖 profile link 的断言（装载的产物）与 e2e 共用同一 `dshAvail` 守卫——拿不到运行时
- * 时响亮跳过（`SKIP (loud)`，verify-all 记为 PASS*），不硬崩 ENOENT、也不静默当 pass。
+ * 依赖 profile link 的断言（装载的产物）与 e2e 共用同一可达性守卫——dsh 与 pnpm 有一件不在时
+ * 响亮跳过（`SKIP (loud)`，verify-all 记为 PASS*），不硬崩 ENOENT、也不静默当 pass。
  *
- * #47 AC③（2026-10-18 重做）：**装载挂载需要 dsh，而 PATH 上没有 dsh ≠ 运行时缺席**。
- * 本仓的常态正是「PATH 无 dsh、但桌面运行时在盘上」——旧版只认 PATH（`spawnSync('dsh')`），
- * 于是桌面形态断言在本机**从未真跑过**（永远 loud skip，靠 skip 兜底出绿）。现在改为：
- *
- *   1. 运行时解析走 installer 自己的输入契约（`--dsh <path>` / `--pnpm <path>`），
- *      本套件经 **`DSH_MATT_DSH` 环境变量**把桌面 dsh 路径传给被测进程（同一优先级链，
- *      见 lib/runtime-probe.mjs 头注）。测试进程自己**不**复制探测逻辑——那是被测面，
- *      套件只负责「给路径」，给了就真跑、拿不到才 skip。
- *   2. 8 条非 store-only 用例（install / --force / upgrade / uninstall / --from）**必须**
- *      带运行时才能真跑：baseline `b36191f` 靠「dsh 缺席 → warning + 跳过挂载 + **仍 exit 0**」
- *      给它们兜底，那正是 #80 的谎报。现在全探测落空 → 响亮失败 exit≠0，所以这些用例
- *      要么给路径（真跑），要么在拿不到路径时**响亮跳过**（不是静默 pass）。
- *   3. 桌面形态证据**不**走 `--dump-config`：desktop 由 Electron 独占管理，
- *      `dsh --profile desktop --dump-config` 会报 managed exclusively 而失败；
- *      证据只从 profile 层 `package.json` 读回。
+ * #47（桌面形态）/ #86（pnpm 半边）新增三组断言（2026-10-18）：
+ *   A. **stub 参数透传**（#86 AC②）：假 `dsh` + 假 `pnpm` 全程离线，证明
+ *      `dsh plugin --profile <p> add <store>` 的参数与**解析到的 dsh 路径**真被透传，
+ *      且 `pnpmPathInjection()` 的目录真被前置进子进程 PATH（plugin-manager 按字面
+ *      `pnpm` 找到它）。带**非空洞对照**：显式传相对路径 / 不注入 PATH / 缺 `--pnpm`
+ *      三种扰动各自让对应断言变红（dev-environment §0.2「证明每条新断言非空洞」）。
+ *   B. **桌面形态**（#47 AC③）：`--profile desktop` 的 install/upgrade 把 store link 到
+ *      `<DSH_HOME>/.agent-presets/matt`，且 **store 的版本戳与 profile 依赖的落点一致**
+ *      （分叉现场正是「两边不是同一个目录」）。需要真的 dsh → 无则 `SKIP (loud)`。
+ *   C. **真链路 live**（#86 端到端，非 stub）：门禁 `DSH_MATT_DESKTOP_ROOT`（桌面安装根，
+ *      形如 `<app>/resources`，内含 `runtime/cli/bin/dsh.cmd` 与
+ *      `runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`）；未设 → `SKIP (loud)`。
+ *      当场 PATH 上没有 pnpm 也能装上（这正是 #86 要证的）。
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { payloadOf } from '../lib/payload.mjs'
+import { probeDsh, probePnpm } from '../lib/runtime-probe.mjs'
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
 const BIN = join(REPO, 'bin', 'install.mjs')
@@ -46,7 +45,13 @@ let totalSkips = 0
 /** 当前用例内的 loud skip 计数：让 per-case 读数也如实（绿色 ≠ 该用例全验过）。
  *  e2e 那条在 test() 之外调用，只计入 totalSkips（stdout/stderr 分流时行序不定，故标记不带方向）。 */
 let skipsInCase = 0
-/** 环境侧断言缺席的统一出口：`SKIP (loud)` 是 scripts/verify-all.mjs 识别 PASS* 的约定字符串。 */
+/** 「防线缺席必须响亮」的两个出口（D47）：
+ *  - `loudSkip`：**环境侧证据确实不在本机**（没有 dsh / 没有 pnpm / 没有桌面运行时）。
+ *    打印成因、计入汇总、不置非零退出 —— 但绝**不**静默当 pass（verify-all 记 `PASS*`）。
+ *  - 另一类"防线缺席"是**断言本身失效**（判据恒真、抓错目标）：那**不许**降级成 skip，
+ *    必须响亮失败。本文件的写法是把可控条件搬进子进程（env / PATH / 显式参数都由 `run()`
+ *    控制），于是"断言失效"会直接表现为 FAIL，而不是靠一句 `loudFail(...)` 去猜。
+ */
 function loudSkip(what) {
   skipsInCase++; totalSkips++
   console.warn(`  !! SKIP (loud) - ${what} — evidence absent on this machine`)
@@ -60,140 +65,256 @@ const test = async (name, fn) => {
 const pkg = JSON.parse(await readFile(join(REPO, 'package.json'), 'utf8'))
 const pkgVersion = pkg.version
 
-/** dsh on PATH? 旧版唯一的判据（#67）。保留它只为**报错信息里区分两种缺席**：
- *  「PATH 上没有」与「完全没有」在诊断上是两回事（前者可以靠 --dsh 救，后者要去查运行时）。 */
-const dshOnPath = spawnSync('dsh', ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' }).status === 0
+/**
+ * dsh 可达性：**消费 installer 自己的解析结果**（`lib/runtime-probe.mjs`），不再自己
+ * spawn 一次字面 `dsh --version`。
+ *
+ * 为什么必须这样（#78 的教训在本文件的翻版）：测试自带一个探针时，它与 installer 的判定
+ * **可能分叉** —— 探针说"在场"而 installer 说"未命中"（PATH 里只有 POSIX shim、或只有
+ * `--dsh`/`DSH_MATT_DSH`/`DSH_DESKTOP_ROOT` 能找到），于是断言跑去读一个 installer 没建的
+ * profile 层，把"环境缺件"读成"产品红"；反过来探针说"不在场"而 installer 命中了，测试会
+ * 把**已经验过的**那半边静默算成 skip。两边共用同一个纯函数就不会分叉。
+ *
+ * **默认限定 PATH 来源**：本用例的 profile-link 断言是为了证明"本机 PATH 上的 dsh 能把
+ * preset 装进 profile"。若把 `DSH_MATT_DSH_SRC`（源码检出）也算进来，源检出形态要以
+ * `node <src>/apps/cli/lib/bin.js` 起，而本文件住在一棵树里、可能被**另一个 checkout** 的
+ * 检出跑 —— 那等于让本仓的断言消费一个**跨检出**的运行时（#67 的旧教训）。要验真链路请用
+ * 下面的 **live 桌面端用例**（门禁 `DSH_MATT_DESKTOP_ROOT`）。
+ */
+/**
+ * 桌面运行时门禁（#47）：`DSH_DESKTOP_ROOT` **契约口径 = 桌面应用根目录**（含 `resources`
+ * 的那一层，即 `<app>`），候选路径是
+ *   `<root>/resources/runtime/cli/bin/dsh.cmd`
+ *   `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`
+ *
+ * **为什么下面是"两种读法都试"**：`lib/runtime-probe.mjs` 的 desktop 档对同一档位放了
+ * 两条候选形态（先 `<root>/resources/…`，再 `<root>/…` 回落），于是把 `DSH_DESKTOP_ROOT`
+ * 误设成 `<app>/resources` 时也**收敛到同一条真实路径**（2026-10-18 实测：两种读法下
+ * `probeDsh`/`probePnpm` 都 `found=true source=desktop`，指向同一个 `dsh.cmd`）。
+ * 本门禁必须与那套行为**同口径** —— 否则会出现"installer 能命中、测试却判环境缺席"的
+ * **假 skip**，那正是要消灭的静默（D47）。判据与 probe 一致：先 `resources/…`、再回落。
+ */
+const desktopRoot = process.env.DSH_MATT_DESKTOP_ROOT ?? process.env.DSH_DESKTOP_ROOT ?? ''
+const underRoot = (...parts) => join(desktopRoot, ...parts)
+const desktopDsh = desktopRoot === '' ? '' : [
+  underRoot('resources', 'runtime', 'cli', 'bin', 'dsh.cmd'),
+  underRoot('runtime', 'cli', 'bin', 'dsh.cmd'),
+].find((p) => existsSync(p)) ?? ''
+const desktopPnpm = desktopRoot === '' ? '' : [
+  underRoot('resources', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs'),
+  underRoot('runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs'),
+].find((p) => existsSync(p)) ?? ''
+const haveDesktop = desktopDsh !== '' && desktopPnpm !== ''
 
 /**
- * 运行时解析（#47 AC③）：被测进程经 `DSH_MATT_DSH` 拿 dsh 路径。
+ * dsh / pnpm 的**总可达性**：installer 自己会走完整张探测表，所以这里也必须走完整张表，
+ * 否则测试与 installer 的判定又会分叉（见文件头注释）。
  *
- * 为什么本套件用 **env** 而不是每次拼 `--dsh` flag：优先级链是 flag > env > 探测，
- * 两者等价；但 `run()` 是所有用例的公共入口，注入一次 env 就让**全部**用例
- * （含 4 条 assertLink、desktop、e2e）统一走真跑，不必逐个改命令行——
- * 漏改一条就会退回 skip 兜底，而那种漏改在绿灯下看不出来。
- *
- * 路径从哪来：**外部显式给**（`DSH_MATT_DSH`，与 installer 的契约同名，见
- * lib/runtime-probe.mjs 头注 §1）。套件**不**自己实现探测链——那是被测面。
- * 本机运行时在桌面安装目录，测试进程的 `execPath` 是 node（不是 Electron），
- * 探测链里的 `desktop-runtime` 候选按 `execPath` 推导，**必然落空**：实测
- * `dshCandidates({})` → `[{path:'dsh.cmd',source:'path'},
- * {path:'<nodeDir>/resources/runtime/cli/bin/dsh.cmd',source:'desktop-runtime'}]`，两条都不可用。
- * 所以这里只认显式输入，拿不到就响亮跳过——绝不假装探测。
+ * **PATH 之外的来源只在"另有指针"时才计入**——这条限制是给"测试消费跨检出运行时"上的保险：
+ * 本文件住在一棵树里、可能被**另一个 checkout** 的检出跑（`DSH_MATT_DSH_SRC` 指到别人的源树），
+ * 那等于让本仓的断言消费一个跨检出的契约（#67 的旧教训）。判据：
+ *   - PATH 上有 → 算（本机原生形态，最典型）；
+ *   - 显式给了 `DSH_DESKTOP_ROOT` 且里面确实有桌面运行时 → 算（**这正是 #47 要验的形态**）；
+ *   - 其余（`DSH_MATT_DSH_SRC` 等）→ 猜不准是"谁的树"，不计入全局门禁；
+ *     要验那条请走下面的 live 桌面端用例，或在命令行显式给 `--dsh`（stub 组已覆盖）。
  */
-const dshPath = process.env.DSH_MATT_DSH ?? null
-const pnpmPath = process.env.DSH_MATT_PNPM ?? null
+const dsh = probeDsh({ env: { ...process.env, DSH_MATT_DSH_SRC: '' } })
+const dshOnPath = dsh.found
+/**
+ * **桌面根也算 dsh 可达**（#47 的核心形态）：这正是「PATH 上没有 `dsh`、但桌面端有」这一类
+ * 机器 —— #47 的票面现场就是它。
+ *
+ * 前提是 `bin/install.mjs` 真的会用桌面惯例（它按冻结契约调 `probeDsh({ explicit })`，内部读
+ * `DSH_DESKTOP_ROOT`）。**契约若变，这里必须跟着变**：下面有一道*守卫*断言
+ * （`desktop-root reachability guard`）实测 installer 是否真的用它，不成立就响亮失败 ——
+ * 免得测试把"installer 没走桌面惯例"读成"环境缺件"而静默跳过。
+ */
+const dshReachable = dshOnPath || haveDesktop
 
-/** 能真跑装载的证据是否存在：显式给了 dsh 路径，或 PATH 上就有 dsh。 */
-const dshAvail = dshPath !== null || dshOnPath
-/** 拿不到 dsh 时，诊断里说清是哪种缺席（见 dshOnPath 注释）。 */
-const dshMissingWhy = dshAvail
-  ? null
-  : 'PATH 上没有 dsh，也没有 DSH_MATT_DSH 显式指路（#47：PATH 无 dsh ≠ 运行时缺席）'
+/**
+ * pnpm 探针（#86）。**为什么挂载断言要看它**：`bin/install.mjs` 在「dsh 命中但 pnpm 未命中」
+ * 时 `die(missingToolHint('pnpm'))`（Lead 拍板 B，2026-10-18）—— 这类机器上**挂载那一半
+ * 根本不会发生**，profile link 断言去读依赖表只会读到"没装上"。那不是产品红，是环境缺件，
+ * 所以与 dsh 同款：**响亮跳过**；但**理由串必须独立**（`needs pnpm for the mount step (#86)`）
+ * —— 两个成因不同，混用会让读数骗人（把"缺 pnpm"读成"缺 dsh"）。
+ *
+ * 这条门禁**不能**顺带把「pnpm 在场」那一档也跳过：`mountable` 为真时 `assertLink` 必须
+ * 真跑，`#86 stub` 组里的 E6 门禁对照钉住这一半（实测：dsh+pnpm 都在场时读数 17/17、
+ * **零** loud skip）。
+ */
+const pnpm = probePnpm({ env: { ...process.env, DSH_MATT_DSH_SRC: '' } })
+const pnpmReachable = pnpm.found || haveDesktop
+/** 挂载产物的总门禁：dsh **且** pnpm 都可解析（两者成因不同、理由串分开报）。 */
+const mountable = dshReachable && pnpmReachable
 
 /** Run the installer CLI with args; each test gets its own DSH_HOME.
- *  非 store-only 的用例要真跑装载，所以把运行时路径一并注入子进程环境：
- *  `DSH_MATT_DSH`/`DSH_MATT_PNPM` 是 installer 自己的输入契约（lib/runtime-probe.mjs）。 */
-function run(args, dshHome) {
+ *  `extraEnv` 可覆盖/删除变量（值为 `undefined` 表示**删掉**，用来堵住某个探测来源）。 */
+function run(args, dshHome, extraEnv = {}) {
   const env = { ...process.env, DSH_HOME: dshHome }
-  if (dshPath !== null) env.DSH_MATT_DSH = dshPath
-  if (pnpmPath !== null) env.DSH_MATT_PNPM = pnpmPath
+  for (const [k, v] of Object.entries(extraEnv)) {
+    if (v === undefined) delete env[k]
+    else env[k] = v
+  }
   return spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env })
 }
 
 const storeOf = (dshHome) => join(dshHome, '.agent-presets', 'matt')
 const readStamp = async (dshHome) => JSON.parse(await readFile(join(storeOf(dshHome), 'VERSION.json'), 'utf8'))
-const profilePkg = async (dshHome, profile = 'web') =>
-  JSON.parse(await readFile(join(dshHome, 'profiles', profile, 'package.json'), 'utf8'))
-const profileDeps = async (dshHome, profile = 'web') => (await profilePkg(dshHome, profile)).dependencies ?? {}
-
-/**
- * `cmdFor(path)` / `argvFor(path, args)` —— 起 dsh 用的 argv 头（本套件自己 spawn dsh 时用，
- * 见 e2e 的 --dump-config）。
- *
- * 为什么不能直接 `spawnSync(dsh, args, {shell:true})`：桌面 dsh 是 `.cmd` 且绝对路径**含空格**，
- * `shell:true` 把命令与参数拼成一整行交给 cmd，空格会把路径切成两截。实测三态（Windows）：
- *   shell:false → status=null, error=EINVAL（`.cmd` 不是可执行体）
- *   shell:true  → status=1  "'C:\<install-dir>\DeepSeek' is not recognized…"（路径首个空格处被切断）
- *   cmd.exe /c  → status=0  ✅
- * 与 lib/runtime-probe.mjs 的 `spawnCandidate` 同口径（那是 installer 侧的同一规则）；
- * 本套件不 import 它——e2e 要走**独立**的起进程路径，否则 installer 的 bug 会同时
- * 污染被测面和取证面。
- */
-function cmdFor(path) {
-  return process.platform === 'win32' && /\.(cmd|bat)$/iu.test(path) ? 'cmd.exe' : path
-}
-/** 配 `cmdFor` 用的 argv 前置（`.cmd` 需 `cmd.exe /c <path> …`）。 */
-function argvFor(path, args) {
-  return cmdFor(path) === 'cmd.exe' ? ['/c', path, ...args] : args
-}
-
-/**
- * 把 profile 层记的依赖值归一成**可比较的 store 路径**。
- *
- * 为什么不直接 `assert.equal(dep, join(home, '.agent-presets', 'matt'))`（会假红）：
- * pnpm 写进 `package.json` 的是 `link:` 前缀 + **正斜杠**的路径（实测：
- * `"link:C:/…/.agent-presets/matt"`），而 `join()` 在 Windows 产出**反斜杠**
- * （`C:\…\.agent-presets\matt`）。严格比较于是永远不等 —— 那是假红，不是真缺陷。
- * 归一口径：剥 `link:` / `file:` 前缀 → `\` 与 `/` 统一成正斜杠 → 去掉尾部 `/`。
- * 归一后**仍要逐个比字符串**（不做 realpath 解析：link 的目标可以尚不存在，
- * 而「指向哪」正是本断言要钉的东西）。
- */
-function normalizeLinkTarget(value) {
-  return String(value ?? '')
-    .replace(/^(link|file):/iu, '')
-    .replaceAll('\\', '/')
-    .replace(/\/+$/u, '')
-}
-
-/**
- * 该依赖值是不是**旧分叉**形态（`<store 根>/dsh-matt-preset`）。
- *
- * #47 的原始症状：装载指向旧的分叉目录名而不是稳定 store `…/.agent-presets/matt`。
- * 旧断言只查 `includes('.')`（`linked()`），这个判据对**任何**含点的路径都成立，
- * 包括旧分叉 —— 属同义反复，钉不住 #47。所以单独一条断言把它排除。
- */
-function isOldForkTarget(value) {
-  return /\/\.agent-presets\/dsh-matt-preset$/u.test(normalizeLinkTarget(value))
-}
-
-/**
- * 非 store-only 用例的前置：**装载挂载需要运行时**（#47/#80）。
- *
- * 为什么这些用例不能无视运行时：它们不带 `--root`，所以走挂载分支。baseline `b36191f`
- * 在 dsh 缺席时「warning + 跳过挂载 + **仍 exit 0**」——用例因此绿得毫无根据（#80 的谎报
- * 在给套件兜底）。人类已拍板：全探测落空必须**响亮失败 exit≠0**。于是这些用例现在只有
- * 两种诚实出路：给路径（真跑），或拿不到路径时**响亮跳过**。
- *
- * 断言对象是**被跳过用例的 store 语义**，不是运行时本身——运行时缺席已由 installer 侧
- * 的专门用例覆盖（`--dsh` 指路、exit≠0），这里再断言一次只会在缺环境时制造噪声红。
- * @returns {boolean} true = 已响亮跳过，调用方应立刻 return。
- */
-function skipUnlessRuntime(what) {
-  if (dshAvail) return false
-  loudSkip(`${what} needs a runtime (#47/#80): ${dshMissingWhy}`)
-  return true
-}
-
-/** profile-link 断言：装载的产物，只有运行时可用时才存在（#67/#47）。
- *  拿不到运行时 → install 不建 link、profile 层根本不存在，读依赖表是 ENOENT 而非断言失败；
- *  所以这里**响亮跳过**（打印原因、不置非零退出），store 侧断言照常实跑。
- *  能真跑时走严格读取：profile 层缺失即真失败，不吞成 pass。 */
-async function assertLink(dshHome, want, what) {
-  if (!dshAvail) {
-    loudSkip(`profile-link proof needs a runtime (#67/#47): ${what} — ${dshMissingWhy}`)
-    return
-  }
-  assert.equal(await linked(dshHome), want, what)
-}
+const profileDeps = async (dshHome, profile = 'web') =>
+  JSON.parse(await readFile(join(dshHome, 'profiles', profile, 'package.json'), 'utf8')).dependencies ?? {}
 
 /** Is the store linked into the profile (pnpm link: dependency)?
- *  **严格读取**：profile 层缺失即抛 ENOENT，所以只许从 assertLink 的可用分支进来
- *  （拿不到运行时装载本就不建 link，那条路必须先走响亮跳过，而不是到这里抛）。 */
+ *  **严格读取**：profile 层缺失即抛 ENOENT，所以只许从 assertLink 的挂载分支进来
+ *  （dsh 或 pnpm 缺席时装载本就不发生，那条路必须先走响亮跳过，而不是到这里抛）。 */
 const linked = async (dshHome, profile = 'web') =>
   String((await profileDeps(dshHome, profile))['dsh-matt-preset'] ?? '').includes('.')
 
+/**
+ * store 落点 = profile 依赖里那条 `link:` 指向的目录（#47 AC③ 的**分叉判据**）。
+ *
+ * 分叉现场（#47）：桌面 profile 的 link 指着 `.agent-presets/dsh-matt-preset`，而 installer
+ * 写 `.agent-presets/matt` —— 两边不是同一个目录，于是 upgrade 永远更新不到桌面端。
+ * 「有没有 link」证明不了这个；只有把**依赖值解析成路径**、与 installer 实际写入的 store
+ * 比对，才抓得到分叉。pnpm 记的 link 值可能是 `link:C:/x/matt` 或 `link:../matt` 形态，
+ * 故对相对值再按 profile 目录规整一次。
+ */
+const linkedStoreDir = async (dshHome, profile = 'web') => {
+  const value = String((await profileDeps(dshHome, profile))['dsh-matt-preset'] ?? '')
+  const raw = value.replace(/^link:/u, '')
+  if (raw === '') return null
+  if (/^[A-Za-z]:[\\/]|^\//u.test(raw)) return raw.replaceAll('/', '\\')
+  const { resolve } = await import('node:path')
+  return resolve(join(dshHome, 'profiles', profile), raw)
+}
+/** Windows 路径等价（大小写与分隔符都不敏感）——与 link-runtime-deps.mjs 同判据。 */
+const samePath = (a, b) =>
+  String(a).replaceAll('/', '\\').replace(/\\+$/u, '').toLowerCase() ===
+  String(b).replaceAll('/', '\\').replace(/\\+$/u, '').toLowerCase()
+
+/**
+ * 挂载产物的**统一门禁出口**（#67 dsh 半边 + #86 pnpm 半边）。
+ *
+ * 两个成因分开报，理由串不混用：
+ *   - 无 dsh → installer 响亮降级（exit 0），profile 层根本不存在；
+ *   - 有 dsh 但无 pnpm → installer **失败**（exit 1，`missing pnpm`），profile 层同样不存在。
+ * 两条都 **不**是产品红，所以都响亮跳过并计入汇总；`false` 表示"本用例的环境侧断言没跑"。
+ */
+function mountGate(what) {
+  if (!dshReachable) {
+    loudSkip(`profile-link proof needs dsh (PATH / DSH_DESKTOP_ROOT / --dsh) (#67): ${what}`)
+    return false
+  }
+  if (!pnpmReachable) {
+    loudSkip(`profile-link proof needs pnpm for the mount step (#86): ${what} — \`dsh plugin add\` shells out to a literal \`pnpm\``)
+    return false
+  }
+  return true
+}
+
+/** profile-link 断言：装载（mountOrWarn）的产物，dsh 与 pnpm 都可达才存在。
+ *  缺任一件 → 上面那条 `mountGate` 响亮跳过（打印成因、不置非零退出），store 侧断言照常实跑。
+ *  都在场时走严格读取：profile 层缺失即真失败，不吞成 pass。 */
+async function assertLink(dshHome, want, what) {
+  if (!mountGate(what)) return
+  assert.equal(await linked(dshHome), want, what)
+}
+
+/**
+ * spawn 一个 `.cmd`/`.exe` 时的**引号纪律**（与 `bin/install.mjs` 的 `quoteIfNeeded` 同因）：
+ * Windows 上 `shell:true` 时 Node 只把命令与参数**拼成一条命令行、不做转义**，所以
+ * 桌面端那条 `…\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd`（**含空格**）未加引号会
+ * 被 cmd.exe 从空格处截断，报 `'C:\…\DeepSeek' is not recognized…`。
+ * installer 自己已经加引号了；测试里凡是**自己** spawn 解析到的 dsh，也必须加。
+ */
+const quoteForShell = (p) => (process.platform === 'win32' ? `"${p}"` : p)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #86 stub 面：假 dsh / 假 pnpm（离线，不需要本机有任何运行时）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Windows 上要 spawn 的 `.cmd` **不能放在含空格的路径**下：installer 走 `shell:true` 时
+ * 只把命令与参数拼接（有 `quoteIfNeeded` 兜底，但假件的 `%~dp0` 展开仍会在带空格的目录上
+ * 出错 —— 实测 `SUBST` 出来的 `X:\` 也会被 cmd.exe 解析成 UNC 而拒绝，故不绕行）。
+ * 系统临时目录通常无空格；真有空格就响亮跳过这一组，而不是拿一个跑不起来的假件去判红。
+ */
+const stubRoot = join(tmp, 'stub')
+const stubRootHasSpace = /\s/u.test(stubRoot)
+
+/**
+ * 造一对**记录型**假件。
+ *
+ *   dsh.cmd  → node dsh-stub.cjs %*   （`%*` 原样转发，命令本身不含任何需要引号的字符）
+ *   pnpm.cmd → node pnpm-stub.cjs %*
+ *
+ * 两个 stub 都是 Node 脚本：`.cmd` 里做变量展开/重定向是雷区（`if not defined X` 与
+ * `%X%` 展开时机在 cmd.exe 不同调用形态下表现不一致），而 Node 脚本能可靠落盘，也和
+ * `dsh.cmd`（Electron 侧本来就是 Node 启动器）同形。
+ *
+ * 记录文件（都在 stub 目录里，用例自己清空）：
+ *   dsh-argv.txt    每行一次 dsh 调用：`DSH ["plugin","--profile","web","add","<store>"]`
+ *   dsh-env.txt     同一行记录当时的 PATH 头部（证明注入的是**哪个目录**）
+ *   pnpm-argv.txt   每行一次 pnpm 调用（假 dsh 模拟 plugin-manager 起的）
+ */
+async function makeStubs() {
+  const dir = await mkdtemp(join(stubRoot, 's-'))
+  await writeFile(join(dir, 'dsh.cmd'),
+    '@echo off\r\nnode "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+  await writeFile(join(dir, 'dsh-stub.cjs'), `
+'use strict'
+const { appendFileSync } = require('node:fs')
+const { spawnSync } = require('node:child_process')
+const { join } = require('node:path')
+const here = __dirname
+const argv = process.argv.slice(2)
+// 记录子进程看到的 PATH（installer 用 withPathPrefix() 生成的 env 会同时写 PATH 与 Path）。
+// 取 PATH 优先、回落到 Path —— cmd.exe 的变量名大小写不敏感，Node 侧则两者可能是不同键。
+const childPath = process.env.PATH ?? process.env.Path ?? ''
+appendFileSync(join(here, 'dsh-argv.txt'), 'DSH ' + JSON.stringify(argv) + '\\n')
+appendFileSync(join(here, 'dsh-env.txt'), 'PATH ' + String(childPath).slice(0, 600) + '\\n')
+// 模拟 plugin-manager：它按**字面** pnpm 起子进程（dsh-plugin-manager 的 runProfilePnpm）。
+// 真实现里这条子进程的 PATH 来自 process.env（execution:'cli'）或 scrubbedParentEnv()
+// （execution:'service'）—— 两种形态都**继承 PATH**，这正是 installer 注入路径的着力点。
+if (argv.includes('plugin')) {
+  const r = spawnSync('pnpm', ['add', 'dsh-matt-preset'], { encoding: 'utf8', shell: process.platform === 'win32' })
+  appendFileSync(join(here, 'pnpm-spawn.txt'),
+    'SPAWN status=' + String(r.status) + ' stdout=' + JSON.stringify(String(r.stdout ?? '').trim()) +
+    ' error=' + JSON.stringify(String(r.error?.code ?? '')) + '\\n')
+}
+process.exit(0)
+`.trimStart(), 'utf8')
+  await writeFile(join(dir, 'pnpm.cmd'),
+    '@echo off\r\nnode "%~dp0pnpm-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+  await writeFile(join(dir, 'pnpm-stub.cjs'), `
+'use strict'
+const { appendFileSync } = require('node:fs')
+const { join } = require('node:path')
+appendFileSync(join(__dirname, 'pnpm-argv.txt'), 'PNPM ' + JSON.stringify(process.argv.slice(2)) + '\\n')
+process.exit(0)
+`.trimStart(), 'utf8')
+  return {
+    dshCmd: join(dir, 'dsh.cmd'),
+    pnpmCmd: join(dir, 'pnpm.cmd'),
+    dshArgv: join(dir, 'dsh-argv.txt'),
+    dshEnv: join(dir, 'dsh-env.txt'),
+    pnpmArgv: join(dir, 'pnpm-argv.txt'),
+    pnpmSpawn: join(dir, 'pnpm-spawn.txt'),
+    reset: async () => {
+      for (const f of ['dsh-argv.txt', 'dsh-env.txt', 'pnpm-argv.txt', 'pnpm-spawn.txt']) {
+        await rm(join(dir, f), { force: true })
+      }
+    },
+  }
+}
+/** 读一行记录（没有就返回 ''，让断言给出可读的失败信息而不是 ENOENT）。 */
+const readLog = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '')
+/** 从 stub 记录里解析出唯一一次调用的 argv 数组。 */
+function parseStubArgv(text, tag) {
+  const m = new RegExp(`^${tag} (\\[.*\\])$`, 'mu').exec(text)
+  return m === null ? null : JSON.parse(m[1])
+}
+
 await test('install: copies payload to the stable store, stamps version + manifest', async () => {
-  if (skipUnlessRuntime('install (store + mount)')) return
   const home = join(tmp, 'h1')
   const r = run(['install', '--profile', 'web'], home)
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
@@ -224,14 +345,12 @@ await test('install: copies payload to the stable store, stamps version + manife
 })
 
 await test('install: links the store into the profile as a bundle', async () => {
-  if (skipUnlessRuntime('install (profile link)')) return
   const home = join(tmp, 'h2')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   await assertLink(home, true, 'store linked into profile deps')
 })
 
 await test('install: refuses to overwrite an existing install', async () => {
-  if (skipUnlessRuntime('install (repeat refusal)')) return
   const home = join(tmp, 'h3')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   const r = run(['install', '--profile', 'web'], home)
@@ -240,7 +359,6 @@ await test('install: refuses to overwrite an existing install', async () => {
 })
 
 await test('install --force: overwrites in place, link survives', async () => {
-  if (skipUnlessRuntime('install --force')) return
   const home = join(tmp, 'h4')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   const r = run(['install', '--profile', 'web', '--force'], home)
@@ -249,7 +367,6 @@ await test('install --force: overwrites in place, link survives', async () => {
 })
 
 await test('upgrade: in-place replace, stamp advances, stale files removed, link kept', async () => {
-  if (skipUnlessRuntime('upgrade (in-place)')) return
   const home = join(tmp, 'h5')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   await writeFile(join(storeOf(home), 'stale-old-plugin.mjs'), '// old')
@@ -262,20 +379,7 @@ await test('upgrade: in-place replace, stamp advances, stale files removed, link
   assert.equal(manifest.previousVersion, pkgVersion)
 })
 
-/**
- * 本用例的语义取舍（Lead 采纳，2026-10-18）：**传运行时让它回到 store 语义**。
- *
- * 断言目标是 `/not installed|未安装/i`——它检的是 **store 分支**（upgrade 时
- * `<target>/VERSION.json` 缺席）。但 task-1 之后「运行时解析」**先于** store 检查执行，
- * 所以不传 `--dsh` 时先报的是 dsh 指路，断言目标被重排。
- *
- * 另一条路是「承认无运行时优先」并改断言——**不采纳**：那样这条会从「store 分支的守卫」
- * 退化成「运行时守卫的重复」，而运行时失败面已由 installer 侧的专门用例覆盖
- * （`--dsh`/`DSH_MATT_DSH` 指路 + exit≠0），**重复覆盖 = 丢掉 store 分支的覆盖**。
- * 所以：显式给运行时，让 store 语义可测。
- */
 await test('upgrade: fails cleanly when nothing is installed', async () => {
-  if (skipUnlessRuntime('upgrade (not-installed refusal)')) return
   const home = join(tmp, 'h6')
   const r = run(['upgrade', '--profile', 'web'], home)
   assert.notEqual(r.status, 0)
@@ -283,7 +387,6 @@ await test('upgrade: fails cleanly when nothing is installed', async () => {
 })
 
 await test('uninstall: removes store and the profile link', async () => {
-  if (skipUnlessRuntime('uninstall (store + unmount)')) return
   const home = join(tmp, 'h7')
   assert.equal(run(['install', '--profile', 'web'], home).status, 0)
   const r = run(['uninstall', '--profile', 'web'], home)
@@ -309,7 +412,6 @@ await test('--root: store-only mode — no profile layer created', async () => {
 })
 
 await test('--from <tarball>: installs from an npm pack artifact', async () => {
-  if (skipUnlessRuntime('install --from <tarball> (store + mount)')) return
   const src = join(tmp, 'fakepkg')
   await cp(REPO, src, {
     recursive: true,
@@ -340,7 +442,7 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
 })
 
 /**
- * #47 AC③（2026-10-18 重做）：桌面形态 —— **一条命令覆盖桌面端**。
+ * #47（断言半边，并入 #99-C）：桌面形态。
  *
  * 特殊之处**不是** --dump-config：desktop 是由 Electron 应用独占管理的 profile，
  * `dsh --profile desktop --dump-config` 会报 `profile "desktop" is managed
@@ -354,70 +456,89 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
  * 不是本 preset 的缺陷，所以这里预置一个最小 profile 层来模拟"桌面已初始化"，
  * 也正是 #67 的现实安装形态。
  *
- * 无运行时（PATH 无 dsh 且无 `DSH_MATT_DSH`）时照 #67 口径**响亮跳过**——install 不建
- * profile link，读依赖表会是 ENOENT；绝不静默当 pass。
+ * 无 dsh 时照 #67 口径响亮跳过（install 不建 profile link，读依赖表会是 ENOENT）。
  *
- * 断言面（对齐 #47 AC③ 与 batch-state 的「用户可达」口径）：
- *   D1 store 落盘（AC② 的可达性半边）
- *   D2 link **规范化后等于** `<home>/.agent-presets/matt`（**不是**只查含 `.`）
- *   D3 link **不是**旧分叉 `<store 根>/dsh-matt-preset`（#47 原始症状，单独一条）
- *   D4 `dsh.profile.bundles` 含 `dsh-matt-preset`（否则 link 成功也无 patch 可装载）
- *   D5 **一条命令同时覆盖** store 与 link（AC②「用户可达」的完整形态）
+ * **#47 AC③ 的分叉判据**（本条 2026-10-18 补）：光有 link 不够 —— 分叉现场两边**都有**
+ * link，只是指向不同目录。故本条把 profile 依赖解析成绝对路径，与 installer 实际写入的
+ * `<DSH_HOME>/.agent-presets/matt` 比对，再核对 store 的版本戳与 package.json 版本一致
+ * （"store 版本戳与 profile 依赖一致"这一半）。install 与 upgrade 两条路都要过。
  */
-await test('install --profile desktop: one command reaches store + profile link', async () => {
-  if (!dshAvail) {
-    loudSkip(`desktop-profile install proof needs a runtime (#47/#67): ${dshMissingWhy}`)
-    return
-  }
+/**
+ * 守卫（**先于**上面那条桌面用例跑）：当 dsh **只**能经 `DSH_DESKTOP_ROOT` 找到时，实测
+ * `bin/install.mjs` 是否真的用了这条惯例（契约 §「探测顺序」第 4 条）。做法：空 PATH + 假
+ * `--pnpm`（只到挂载判定，不需要真的 pnpm 起得来）跑一次 `--dsh` 指向**假件**……
+ *
+ * **做法修正**：`--dsh` 一旦给出，explicit 就压过一切来源，测不出桌面惯例。所以改成：
+ * 不给 `--dsh`，把 PATH 清空，**保留 `DSH_DESKTOP_ROOT`**，用 `--pnpm` 指一个存在的假件，
+ * 然后看 installer 是否把桌面那条 dsh 解析出来 —— 它的回声行 `dsh: <path> (desktop)` 就是证据。
+ * 若桌面 dsh 缺席（本机没装桌面端）则本条不适用，响亮跳过。
+ */
+if (haveDesktop && !dshOnPath) {
+  await test('desktop-root reachability guard: the installer really resolves dsh via DSH_DESKTOP_ROOT', async () => {
+    const home = join(tmp, 'desktop-guard')
+    const r = run(['install', '--profile', 'web', '--pnpm', join(stubRoot, 'guard-pnpm.cmd')], home, {
+      PATH: '',                       // PATH 上什么都找不到
+      DSH_PNPM: undefined,
+      DSH_MATT_DSH: undefined,
+      DSH_MATT_DSH_SRC: undefined,
+    })
+    const combined = `${r.stdout}${r.stderr}`
+    // 回声行形如 `dsh: <path> (desktop)`；解析来源标签就是"installer 走了桌面惯例"的直接证据
+    assert.match(combined, /dsh: .+\(desktop\)/u,
+      `installer did not resolve dsh via DSH_DESKTOP_ROOT — the mount gate would skip on this machine ` +
+      `for the wrong reason. output: ${combined.slice(0, 300)}`)
+  })
+}
+
+await test('install/upgrade --profile desktop: link points at THIS store, stamp agrees', async () => {
+  if (!mountGate('desktop-profile install/upgrade proof (#47 AC3)')) return
   const home = join(tmp, 'desktop')
   const profileDir = join(home, 'profiles', 'desktop')
   await mkdir(profileDir, { recursive: true })
   await writeFile(join(profileDir, 'package.json'),
     JSON.stringify({ name: 'desktop', private: true, dependencies: {} }, null, 2))
-  const r = run(['install', '--profile', 'desktop'], home)
-  assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-
-  // D1: store 落盘（AC② 的可达性半边）
-  assert.ok(existsSync(join(storeOf(home), 'VERSION.json')), `store not written: ${storeOf(home)}`)
-
-  const profile = await profilePkg(home, 'desktop')
-  const dep = String(profile.dependencies?.['dsh-matt-preset'] ?? '')
-  const want = join(home, '.agent-presets', 'matt')
-  // D2: 归一后**等于**稳定 store 路径。旧断言只 `match(/\./)`——那个判据对任何含点的
-  //     路径都成立（含旧分叉），属同义反复，钉不住 #47 的「指向哪」。
-  assert.equal(normalizeLinkTarget(dep), normalizeLinkTarget(want),
-    `desktop profile link must point at the stable store ${want}; got ${JSON.stringify(profile.dependencies)}`)
-  // D3: 显式排除旧分叉（#47 原始症状，单独一条——D2 若被后人放宽成子串匹配，这条仍守得住）
-  assert.ok(!isOldForkTarget(dep),
-    `desktop profile link points at the OLD fork (…/.agent-presets/dsh-matt-preset): ${JSON.stringify(dep)}`)
-  // D4: 装载声明——bundle 列表必须含本 preset，否则 profile link 成功也无 patch 可装载
-  assert.ok(Array.isArray(profile.dsh?.profile?.bundles) && profile.dsh.profile.bundles.includes('dsh-matt-preset'),
-    `desktop profile bundles missing dsh-matt-preset: ${JSON.stringify(profile.dsh)}`)
-  // D5: 一条命令同时覆盖（AC②）——store 与 link 都在同一次 install 后到位。
-  //     与 D1/D2 重复的部分是本意：这条把「可达性」当**联合**不变量钉住，
-  //     任何一半缺失都会红（扰动 B 走的就是这条）。
-  assert.ok(existsSync(join(storeOf(home), 'VERSION.json')) && await linked(home, 'desktop'),
-    'AC②: one `install --profile desktop` must land BOTH the store and the profile link')
+  const store = storeOf(home)
+  const check = async (phase) => {
+    const profile = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+    // 1) profile 层依赖表：store 以 link 形式登记（与既有 linked() 同判据）
+    assert.match(String(profile.dependencies?.['dsh-matt-preset'] ?? ''), /\./,
+      `${phase}: desktop profile deps missing dsh-matt-preset: ${JSON.stringify(profile.dependencies)}`)
+    // 2) **指向的就是这个 store**（分叉判据）：<DSH_HOME>/.agent-presets/matt
+    const pointed = await linkedStoreDir(home, 'desktop')
+    assert.ok(pointed !== null && samePath(pointed, store),
+      `${phase}: desktop link points elsewhere — ${pointed} !== ${store}（#47 的 store 路径分叉）`)
+    // 3) store 版本戳与 package.json 一致，且与 profile 依赖落点同一份（不是两个目录各一份）
+    const stamp = await readStamp(home)
+    assert.equal(stamp.version, pkgVersion, `${phase}: store stamp drifted`)
+    assert.ok(existsSync(join(store, 'VERSION.json')), `${phase}: stamp not in the linked store`)
+    // 4) 装载声明：bundle 列表必须含本 preset，否则 profile link 成功也无 patch 可装载
+    assert.ok(Array.isArray(profile.dsh?.profile?.bundles) && profile.dsh.profile.bundles.includes('dsh-matt-preset'),
+      `${phase}: desktop profile bundles missing dsh-matt-preset: ${JSON.stringify(profile.dsh)}`)
+  }
+  const install = run(['install', '--profile', 'desktop'], home)
+  assert.equal(install.status, 0, `install exit ${install.status}: ${install.stderr}`)
+  await check('install')
+  // upgrade 是"更新不到桌面端"这句症状的直接反面：原地替换后 link 仍指向同一个 store。
+  const upgrade = run(['upgrade', '--profile', 'desktop'], home)
+  assert.equal(upgrade.status, 0, `upgrade exit ${upgrade.status}: ${upgrade.stderr}`)
+  await check('upgrade')
 })
 
-if (dshAvail) {
+if (mountable) {
   await test('e2e: installed preset mounts on the current anchor (dump-config shows the row, plugin imports)', async () => {
     const home = join(tmp, 'e2e')
     const r = run(['install', '--profile', 'web'], home)
     assert.equal(r.status, 0, `install exit ${r.status}: ${r.stderr}`)
-    // 1) 装载载体生效：composed tree 出现本 preset 的插件行。
-    //    走**解析出的** dsh（#47 AC③）：旧版用字面 `'dsh'` + shell:true，PATH 无 dsh 时
-    //    这条永远不可能跑；而桌面 dsh 的绝对路径**含空格**，shell:true 会被 cmd 切成两截
-    //    （实测 `'C:\<install-dir>\DeepSeek' is not recognized`）。
-    //    ⇒ 经 `cmdFor`/`argvFor` 以参数数组传递（`.cmd` → `cmd.exe /c`）。
-    //    这条仍用 `web` profile：desktop 被 Electron 独占，--dump-config 会被拒。
-    const dshExe = dshPath ?? 'dsh'
-    const dump = spawnSync(cmdFor(dshExe), argvFor(dshExe, ['--profile', 'web', '--dump-config']), {
-      encoding: 'utf8', env: { ...process.env, DSH_HOME: home },
-    })
-    assert.equal(dump.status, 0, `dump-config failed: ${dump.stderr}`)
-    assert.match(dump.stdout, /id: dsh-matt-preset/, 'preset row not in composed tree')
-    assert.match(dump.stdout, /dsh-matt-preset\/workflow-enforcer\.mjs/, 'enforcer plugin not referenced')
+    // 1) 装载载体生效：composed tree 出现本 preset 的插件行
+    //    命令用**解析到的** dsh（`probeDsh` 的 `path`），不是字面 `dsh` —— 与 installer 同源，
+    //    避免"测试探针说在场、installer 说未命中"的分叉（见文件头 dshReachable 注释）。
+    const dumpDsh = spawnSync(quoteForShell(dshReachable && dshOnPath ? dsh.path : desktopDsh),
+      ['--profile', 'web', '--dump-config'], {
+        encoding: 'utf8', env: { ...process.env, DSH_HOME: home }, shell: process.platform === 'win32',
+      })
+    assert.equal(dumpDsh.status, 0, `dump-config failed: ${dumpDsh.stderr}`)
+    assert.match(dumpDsh.stdout, /id: dsh-matt-preset/, 'preset row not in composed tree')
+    assert.match(dumpDsh.stdout, /dsh-matt-preset\/workflow-enforcer\.mjs/, 'enforcer plugin not referenced')
     // 2) 安装副本自身可加载（插件文件 + yaml 依赖在 link/store 路径下解析）
     const enforcer = join(storeOf(home), 'workflow-enforcer.mjs')
     const imp = spawnSync(process.execPath, [
@@ -427,8 +548,275 @@ if (dshAvail) {
     assert.ok(imp.stdout.includes('OK'))
   })
 } else {
-  // AC1 的证明性 e2e 需要运行时；缺席时响亮降级并计入汇总，绝不静默当 pass
-  loudSkip(`e2e mount proof needs a runtime (AC1 evidence): ${dshMissingWhy}`)
+  // AC1 的证明性 e2e 需要 dsh + pnpm；缺席时响亮降级并计入汇总，绝不静默当 pass
+  mountGate('e2e mount proof needs dsh and pnpm (AC1 evidence)')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #86：`--pnpm` 参数透传（stub，非空洞）
+// ─────────────────────────────────────────────────────────────────────────────
+
+if (stubRootHasSpace) {
+  loudSkip(`stub spawn proof needs a space-free temp dir (got ${basename(tmp)}); Windows .cmd stubs cannot run from a path with spaces`)
+} else {
+  await mkdir(stubRoot, { recursive: true })
+  const stubs = await makeStubs()
+  /** 跑一次 install，让假 dsh 收到 `plugin … add`（`--dsh`/`--pnpm` 都指假件）。 */
+  const installWithStubs = async (home, extra = []) => {
+    await stubs.reset()
+    return run(['install', '--profile', 'web', '--dsh', stubs.dshCmd, '--pnpm', stubs.pnpmCmd, ...extra], home)
+  }
+
+  /**
+   * AC② 主断言：**参数透传**。
+   *
+   * 三件事一起证：
+   *   1. 收到的是 `plugin --profile web add <store>`（argv 逐项相等，不是"含 add"这种弱匹配）；
+   *   2. 用的 dsh 是**解析到的那个**（`--dsh` 给的假件），不是字面 `dsh` —— 假件的 argv 文件
+   *      存在本身就证明这条；再加一条"改名对照"（下面 E6）钉住"路径真被透传"；
+   *   3. `pnpmPathInjection()` 的目录真被前置进子进程 PATH：假 dsh 把 PATH 头部写进
+   *      `dsh-env.txt`，断其**第一段**等于 `--pnpm` 那个 `pnpm.cmd` 的所在目录。
+   *
+   * **为什么"pnpm 真被调用"这条要假 dsh 自己 spawn**：installer 只前置 PATH，
+   * 真正起 pnpm 的是 `dsh plugin add` 里的 plugin-manager（另一个进程）。假 dsh 里模拟
+   * 这一步之后，`pnpm-argv.txt` 里出现 `["add","dsh-matt-preset"]` 就是端到端链路证据；
+   * 不做这一步的话，真实链路里没有谁去碰 PUT 的假 pnpm，那条断言会是**空洞**的。
+   */
+  await test('#86 stub: dsh plugin add receives the resolved dsh path + injected pnpm dir on PATH', async () => {
+    const home = join(tmp, 'pnpm-ok')
+    const r = await installWithStubs(home)
+    assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH')
+    assert.ok(argv !== null, `stub dsh was never invoked — installer did not use --dsh (log: ${JSON.stringify(readLog(stubs.dshArgv))})`)
+    const store = storeOf(home)
+    assert.deepEqual(argv, ['plugin', '--profile', 'web', 'add', store],
+      `argv verbatim mismatch: ${JSON.stringify(argv)}`)
+    // PATH 注入：第一段就是假 pnpm 的所在目录（`pnpmPathInjection` 对 .cmd 形态返回其目录）
+    const pathHead = (readLog(stubs.dshEnv).match(/^PATH (.*)$/mu)?.[1] ?? '')
+    const first = pathHead.split(';')[0]
+    assert.ok(samePath(first, dirname(stubs.pnpmCmd)),
+      `pnpm dir not prepended to the child PATH — head=${JSON.stringify(pathHead.slice(0, 160))}, want ${dirname(stubs.pnpmCmd)}`)
+    // 端到端：假 dsh 模拟的 plugin-manager 按字面 `pnpm` 起子进程 → 命中的是这个假件
+    const spawned = readLog(stubs.pnpmSpawn)
+    assert.match(spawned, /SPAWN status=0/u, `literal \`pnpm\` did not resolve in the child (log: ${JSON.stringify(spawned)})`)
+    const pnpmArgv = parseStubArgv(readLog(stubs.pnpmArgv), 'PNPM')
+    assert.deepEqual(pnpmArgv, ['add', 'dsh-matt-preset'], `pnpm stub never ran with the plugin args: ${JSON.stringify(pnpmArgv)}`)
+  })
+
+  /**
+   * AC② 非空洞对照 A：**探测不到 pnpm** → 必须**响亮失败**并给可执行指路（#86 AC①）。
+   *
+   * 怎么构造「探测不到」而不依赖本机状态：把**所有**来源都堵死 —— 给一个**不存在**的
+   * `DSH_PNPM`（env 命中但 `existsSync` 假 → 命中失败）、PATH 清空、不给 `DSH_DESKTOP_ROOT`。
+   * 显式 `--pnpm` 那条被上面的主用例覆盖（它证明"给了就命中"），这里验的是反面。
+   *
+   * **为什么不用 `if (pnpm.found) loudFail(...)`**：本机 PATH 真有 pnpm 是完全正常的机器形态，
+   * 把它判成"断言抓错目标"会让整个套件在一整类机器上假红 —— 那是把"环境不同"错读成"断言错"。
+   * 所以判据放在**子进程内**（env + PATH 都由 `run()` 控制），外部环境怎样都不影响结论。
+   */
+  await test('#86 stub perturbation: with no pnpm reachable at all the installer dies with a runnable hint', async () => {
+    // 真实机器读数先落盘：读汇总时能看出"本机 PATH 上本来有没有 pnpm"（两种形态都合法）。
+    console.log(`  · pnpm probe on THIS machine: found=${pnpm.found}${pnpm.found ? ` (${pnpm.source})` : ' — PATH/env both empty'}`)
+    const home = join(tmp, 'pnpm-missing')
+    await stubs.reset()
+    const r = run(['install', '--profile', 'web', '--dsh', stubs.dshCmd], home, {
+      DSH_PNPM: join(stubRoot, 'pnpm-that-does-not-exist.cjs'), // env 命中失败
+      PATH: '',                                                 // PATH 查找落空
+      DSH_DESKTOP_ROOT: undefined,                              // **删掉**（留空串也可能被当成有序前缀）
+    })
+    assert.notEqual(r.status, 0, `expected non-zero, got 0 — the installer silently continued without pnpm`)
+    const combined = `${r.stdout}${r.stderr}`
+    assert.match(combined, /missing pnpm/u, `no "missing pnpm" in the failure output: ${combined.slice(-300)}`)
+    // 一行**可执行**指路：至少给出一条能照抄的命令/变量（不是"请安装 pnpm"这种散文）
+    assert.match(combined, /--pnpm|DSH_PNPM/u,
+      `the hint is not runnable (no --pnpm / DSH_PNPM in it): ${combined.slice(-300)}`)
+    // 关键：这不是"preset 坏了"——store 侧照常落盘（失败点只在挂载那半边）
+    assert.ok(existsSync(join(storeOf(home), 'VERSION.json')), 'store should still land; only the mount half needs pnpm')
+    // 反向：假 dsh **不该**被调用（还没到挂载就该 die —— pnpm 检查必须在挂载动作之前）
+    assert.equal(readLog(stubs.dshArgv), '', 'dsh was invoked even though pnpm was missing — the check is too late')
+  })
+
+  /**
+   * AC② 非空洞对照 B：**显式 `--dsh` 换成相对路径** → "绝对路径"断言必须红。
+   *
+   * `lib/runtime-probe.mjs` 的 explicit 分支只判 `existsSync`，所以相对路径（锚在 installer
+   * 自己的 cwd = 仓根）也能命中、也能起来。于是这一跑给出两个读数：假 dsh 确实被跑到了
+   * （argv 记到），而首参是**相对形态**。主断言里的"绝对路径"判据在这种情况下会红 ——
+   * 这就是"这条断言不是同义反复"的证明。若哪天 installer 改成把 `--dsh` 解析成绝对路径，
+   * 本条会红；那时是产品变好了：把它翻成 `assert.ok(isAbsolutePath(argv0))` 的正向断言，别删。
+   */
+  await test('#86 stub perturbation: a relative --dsh still reaches the stub, but is not absolute', async () => {
+    // 假件放在**仓根的子目录**里，相对路径才能锚在 installer 的 cwd（= 仓根）上解析到。
+    // 用系统临时目录会让相对路径指到 `..\..\..` 外面（那就成了"探测未命中"，是另一回事）。
+    const relDir = await mkdtemp(join(REPO, 'node_modules', '.dsh-matt-stub-'))
+    const relDsh = join(relDir, 'dsh.cmd')
+    await writeFile(relDsh, '@echo off\r\nnode "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+    await cp(join(dirname(stubs.dshCmd), 'dsh-stub.cjs'), join(relDir, 'dsh-stub.cjs'))
+    const relArg = relative(REPO, relDsh)
+    try {
+      assert.ok(!isAbsolutePath(relArg), `self-check: ${relArg} should not be absolute`)
+      assert.ok(isAbsolutePath(relDsh), `self-check: ${relDsh} should be absolute`)
+      const home = join(tmp, 'pnpm-rel')
+      const r = run(['install', '--profile', 'web', '--dsh', relArg, '--pnpm', stubs.pnpmCmd], home)
+      assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+      const argv = parseStubArgv(readLog(join(relDir, 'dsh-argv.txt')), 'DSH')
+      assert.ok(argv !== null,
+        `stub not reached via a relative --dsh — probe/exists resolution and spawn path disagree`)
+      // 反例核心：**同一个文件**被跑到了，但命令行里那串不是绝对路径 —— 主断言里
+      // "断言首参是绝对路径"的判据在这种情况下会红 ⇒ 那条断言可证伪（不是同义反复）。
+      assert.ok(!isAbsolutePath(relArg),
+        `the counter-case must keep the passed form relative (got ${relArg}); ` +
+        `if the installer now resolves --dsh to an absolute path, flip this into a positive assertion`)
+    } finally {
+      await rm(relDir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * AC② 非空洞对照 C：**PATH 注入被拿掉** → 主断言变红。
+   *
+   * 不直接改产品代码（那是 prober 的写权面），改成"同形状的病"：把假 pnpm 换到一个
+   * **不存在的目录**里、`--pnpm` 指向一个存在的可执行但**所在目录里没有 `pnpm` 这个名字**
+   * —— 注入的目录就解析不到字面 `pnpm`。用同一份断言逻辑去验这条 → 必须红。
+   */
+  await test('#86 stub perturbation: injecting a dir without a `pnpm` there makes the pnpm call fail', async () => {
+    const decoyDir = join(stubRoot, 'decoy')
+    await mkdir(decoyDir, { recursive: true })
+    // 名字不叫 pnpm 的可执行：探测命中（explicit 只判 exists），但它所在目录里没有 `pnpm`
+    const decoy = join(decoyDir, 'pnpm-not-here.cmd')
+    await writeFile(decoy, '@echo off\r\nexit /b 0\r\n', 'ascii')
+    const home = join(tmp, 'pnpm-decoy')
+    await stubs.reset()
+    const r = run(['install', '--profile', 'web', '--dsh', stubs.dshCmd, '--pnpm', decoy], home)
+    assert.equal(r.status, 0, `installer should still mount (it only injects a dir): exit ${r.status}: ${r.stderr}`)
+    const spawned = readLog(stubs.pnpmSpawn)
+    // 反例成立：字面 `pnpm` 在这个注入目录里解析不到 → 假 dsh 的 spawn 失败
+    assert.doesNotMatch(spawned, /SPAWN status=0/u,
+      `expected the literal \`pnpm\` spawn to fail when the injected dir has no pnpm (log: ${JSON.stringify(spawned)})`)
+    assert.equal(readLog(stubs.pnpmArgv), '', 'the pnpm stub should not have run through the decoy dir')
+  })
+
+  /**
+   * 门禁对照 E6：**pnpm 在场那一档不得被新门禁顺带跳过**（Lead 拍板 B 的收口要求）。
+   *
+   * 光"加了 pnpm 门禁、读数变成 PASS*"证明不了什么 —— 若门禁写错（例如恒假），
+   * 在场那一档也会一起静默跳过，读数看起来一模一样。所以本对照把三件事摆在一起：
+   *
+   *   1. **门禁定义自检**：`mountable` 必须**逐格等于** `dshReachable && pnpmReachable`
+   *      （真值表比对，防它退化成恒真/恒假）；
+   *   2. **在场档真跑**（用假件构造"pnpm 在场"）：同一份 `--pnpm` 探测在命中时会
+   *      **走到挂载那一步**（假 dsh 收到 `plugin … add` 且 PATH 头部是注入目录），
+   *      而在显式路径不存在时**根本到不了挂载** —— 后者正是"pnpm 缺席侧必须跳过"所反映的
+   *      事实，于是"跳过"不是拍脑袋加的，而是与产品行为对齐的；
+   *   3. **真实 dsh 在场时的挂载断言确实执行**（不是被门禁跳过）：用 `--dsh` 指向本机
+   *      解析到的真 dsh，断言 `linked()` 真读到 link、且指向这个 store —— 与上面桌面形态
+   *      用例用的是**同一个读取函数**。本机没有 dsh 时这一格响亮跳过（成因写清楚）。
+   */
+  await test('#86 gate counter-case: the mount gate is derived from the probes, and a present pnpm reaches the mount step', async () => {
+    // ── 1) 门禁定义逐格自检 ────────────────────────────────────────────────
+    assert.equal(mountable, dshReachable && pnpmReachable, 'mountable must be exactly dshReachable && pnpmReachable')
+    for (const [d, p, want] of [[true, true, true], [true, false, false], [false, true, false], [false, false, false]]) {
+      assert.equal(d && p, want, `truth-table self-check (${d},${p})`)
+    }
+    // 本机的实际格子不许被"写死"：mountable 必须反映真实探测结果
+    assert.equal(mountable, dshReachable && pnpmReachable)
+
+    // ── 2) 在场档走到挂载；缺席档到不了挂载 ────────────────────────────────
+    const home = join(tmp, 'gate-on')
+    await stubs.reset()
+    const ok = await installWithStubs(home)
+    assert.equal(ok.status, 0, `exit ${ok.status}: ${ok.stderr}`)
+    assert.ok(parseStubArgv(readLog(stubs.dshArgv), 'DSH') !== null,
+      'with a reachable pnpm the installer must reach the mount step (stub dsh never invoked)')
+
+    const gone = join(stubRoot, 'definitely-absent-pnpm.cmd')
+    await rm(gone, { force: true })
+    const absentHome = join(tmp, 'gate-off')
+    await stubs.reset()
+    const bad = run(['install', '--profile', 'web', '--dsh', stubs.dshCmd, '--pnpm', gone], absentHome)
+    assert.notEqual(bad.status, 0, 'an explicit --pnpm pointing nowhere must fail loudly')
+    assert.match(`${bad.stdout}${bad.stderr}`, /missing pnpm|不存在/u,
+      `expected the explicit-path failure to be readable: ${`${bad.stdout}${bad.stderr}`.slice(-260)}`)
+    assert.equal(readLog(stubs.dshArgv), '',
+      'the mount step must NOT be reached when pnpm is unreachable — this is exactly what the pnpm-side loud skip reports')
+    assert.ok(!existsSync(join(absentHome, 'profiles', 'web', 'package.json')),
+      'the profile layer must not exist when the mount step never ran')
+
+    // ── 3) 真 dsh 在场：挂载断言必须真跑（用生产读取函数，不是另写一套宽松判据）──
+    if (!dshReachable) {
+      loudSkip('gate counter-case step 3 needs a real dsh to produce a real profile layer (#67)')
+      return
+    }
+    const realHome = join(tmp, 'gate-real')
+    // 用**真 dsh**（PATH 上的或桌面根里的）+ **真 pnpm**（PNPM 真去装包，才会建 profile 层）。
+    // 这里刻意不用假 pnpm：本步要证的是"挂载真的发生了"，而假 pnpm 什么都不装，
+    // profile 层不会出现 —— 那会把"故意简化"读成"断言失败"。
+    const realPnpm = haveDesktop ? desktopPnpm : pnpm.path
+    const realDsh = dshOnPath ? dsh.path : desktopDsh
+    if (realPnpm === null || realPnpm === undefined || realPnpm === '') {
+      loudSkip('gate counter-case step 3 needs a real pnpm to actually build the profile layer')
+      return
+    }
+    const r = run(['install', '--profile', 'web', '--dsh', realDsh, '--pnpm', realPnpm], realHome)
+    assert.equal(r.status, 0, `real dsh + real pnpm: exit ${r.status}: ${r.stderr}`)
+    // 门禁为真 ⇒ 挂载断言必须**真的读到** link（复用生产的读取函数，不是另写一套宽松判据）。
+    assert.equal(await linked(realHome, 'web'), true,
+      'mountable was true, so the mount assertions must actually run and see the link')
+    assert.ok(samePath(await linkedStoreDir(realHome, 'web'), storeOf(realHome)),
+      'the link must point at THIS store (same judgement the desktop case uses)')
+  })
+}
+
+/** Windows 绝对路径判定（反例对照里用来区分"绝对形态 / 相对形态"两种 `--dsh`）。 */
+function isAbsolutePath(p) {
+  return /^[A-Za-z]:[\\/]/u.test(String(p)) || String(p).startsWith('\\\\')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #86 真链路（live，可选门禁）：真的桌面 dsh + 真的 pnpm.cjs，PATH 上没有 pnpm
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * stub 证明的是"参数怎么传"，真链路证明的是"传过去真的能装上"。门禁
+ * `DSH_MATT_DESKTOP_ROOT` = **桌面应用根目录**（含 `resources` 的那一层），其下按惯例有：
+ *   `resources/runtime/cli/bin/dsh.cmd`                                ← dsh 本体
+ *   `resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`  ← harness 分发的 pnpm
+ * 两条都要在场才跑；缺任一条则 `SKIP (loud)`（本机没有桌面安装时这是**正常**状态）。
+ * （也接受 `DSH_DESKTOP_ROOT`，与 `lib/runtime-probe.mjs` 读的是同一个变量。）
+ *
+ * 本用例不断言"本机 PATH 无 pnpm"（那是环境事实，不是本仓契约）：PATH 上有没有 pnpm
+ * 都不影响结论 —— 断言只看**产物**（profile link 指向这个 store + bundles 登记）。
+ */
+{
+  if (!haveDesktop) {
+    loudSkip(
+      'live desktop mount proof needs DSH_MATT_DESKTOP_ROOT=<app> (the dir holding resources) with ' +
+      'resources/runtime/cli/bin/dsh.cmd + resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs ' +
+      `(root=${desktopRoot === '' ? 'unset' : desktopRoot}; dsh=${desktopRoot !== '' && existsSync(desktopDsh)} pnpm=${desktopRoot !== '' && existsSync(desktopPnpm)})`,
+    )
+  } else {
+    await test('#86 live: real dsh + real pnpm.cjs (a *.cjs through the forwarding shim) mounts the store', async () => {
+      const home = join(tmp, 'live-desktop')
+      const profileDir = join(home, 'profiles', 'desktop')
+      await mkdir(profileDir, { recursive: true })
+      await writeFile(join(profileDir, 'package.json'),
+        JSON.stringify({ name: 'desktop', private: true, dependencies: {} }, null, 2))
+      const r = run(['install', '--profile', 'desktop', '--dsh', desktopDsh, '--pnpm', desktopPnpm], home)
+      assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+      const store = storeOf(home)
+      // 真 dsh 的写路径产物：profile 层的 link + bundle 声明（与 stub 面同一判据）
+      assert.ok(samePath(await linkedStoreDir(home, 'desktop'), store),
+        `desktop link does not point at ${store}`)
+      const profile = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+      assert.ok(profile.dsh?.profile?.bundles?.includes('dsh-matt-preset'),
+        `desktop bundles missing dsh-matt-preset: ${JSON.stringify(profile.dsh)}`)
+      // store 角落的版本戳仍在（link 指向的就是它，不是另一个目录）
+      assert.equal((await readStamp(home)).version, pkgVersion)
+      // 挂载元数据：pnpm 真跑过（lockfile / node_modules 由 pnpm 写，不是我们手抄的）
+      const pnpmWrote = ['pnpm-lock.yaml', 'node_modules'].some((f) => existsSync(join(profileDir, f)))
+      assert.ok(pnpmWrote, `pnpm did not write into the profile dir (${profileDir}): ${(await readdir(profileDir)).join(', ')}`)
+    })
+  }
 }
 
 console.log(`\n${process.exitCode ? 'FAILED' : `all ${passed} tests passed${totalSkips > 0 ? `（含 ${totalSkips} 条 loud skip：其环境侧断言未验证）` : ''}`}`)
