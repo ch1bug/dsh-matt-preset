@@ -126,10 +126,11 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   `node scripts/link-runtime-deps.mjs` 一条命令补齐（D43）。仓根 `node_modules` 只有 `yaml`
   （供插件自身的 `import 'yaml'`）——**据此判"套件跑不了"是误读**：#82 会话的复核轴就因此退化成只读码，
   4 条发现里 2 条本可自己跑用例钉死。
-- **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。验证走
-  `node scripts/verify-all.mjs`（唯一入口，不需要 pnpm）；确实要 pnpm / python / node 的
-  绝对路径时，用 DSH harness 的 `load_workspace_dependencies`（返回随包分发的路径），
-  别假设 PATH 里已有。
+- **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。**"跑套件不需要 pnpm" ≠
+  "本仓不需要 pnpm"**：`node scripts/verify-all.mjs`（唯一入口）确实不需要；但
+  **installer 的挂载环要**——且是**按 dsh 形态**条件必需（桌面运行时自带、源码检出才要 PATH），
+  见 §3.1。确实要 pnpm / python / node 的绝对路径时，用 DSH harness 的
+  `load_workspace_dependencies`（返回随包分发的路径），别假设 PATH 里已有。
 - **带正则或多行的 `node -e` 内联脚本别硬塞进 pwsh 参数**：PowerShell 的转义符是反引号，
   `\$` 不是转义（正则被原样传下去、静默不匹配），而 `@'…'@` here-string 里的 `$` 仍会被
   展开。写临时 `.mjs` 跑、自检通过后删掉——本会话为此白烧过一轮往返。
@@ -296,8 +297,50 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 | 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
 | 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.1-rc.2` |
 
-**PATH 型工具**（`bin/install.mjs`、测试里的 `dsh --version` 探针）shell out 到字面 `dsh`，需要一个
-包装（临时放 `%TEMP%`，跑完可弃；`<src>\node_modules\.bin` 提供 `dsh plugin` 需要的 pnpm，见 §4.5）：
+**PATH 型工具**（`bin/install.mjs`）现在**按有序候选链探测**运行时，不再只探字面 `dsh`
+（#47/#86；实现在 `lib/runtime-probe.mjs`）。shim 只是**兜底之一**，不是必经之路——
+
+| 优先级 | `dsh` | `pnpm` | 说明 |
+| --- | --- | --- | --- |
+| 1 显式参数 | `--dsh <path>` | `--pnpm <path>` | 最高优先，**显式覆盖优先于探测**；缺值立即 `die` |
+| 2 环境变量 | `DSH_MATT_DSH` | `DSH_MATT_PNPM` | 本安装器**自己**的输入契约 |
+| 3 探测链 | PATH 字面名 → 桌面运行时 → 源码检出 | 同上（+ 桌面运行时自带 pnpm） | 逐项**真跑 `--version`** 判定，不只看文件存在 |
+
+源码检出的落点无法从平台惯例推导，只认显式声明的检出根 **`DSH_MATT_SRC`**（→
+`<src>/apps/cli/lib/bin.js`）；没设就跳过该来源。
+
+**`pnpm` 是「按形态」条件必需，不是始终必需**（这是 #86 的**精确**根因，别写成"两个都要"）：
+
+- **桌面运行时形态自带**：源码级证据在 plugin-manager —— 配置模式
+  `Config = z.object({ pnpmCommand: z.string().default('pnpm') })`，取用时
+  `...this.profile.packageManager ?? { command: this.pnpmCommand }`；而
+  `profile.packageManager` **只由桌面宿主 `runDesktopCli()` 注入**（指向 `<runtime>/primary-runtime/
+  dependencies/pnpm/bin/pnpm.mjs`），CLI 只透传。⇒ **根本不看 PATH**。实测把 `PATH` 剥到
+  `C:\Windows\System32;C:\Windows` 后，`<runtime>\cli\bin\dsh.cmd plugin --profile <p> add <dir>`
+  仍打印 `Done in 434ms using pnpm v11.28.5`、**exit 0**。
+- **源码检出形态依赖 PATH**：没有宿主注入 → `packageManager` 缺席 → 回落字面名 `'pnpm'` →
+  **按 PATH 找**。这才是 #86 票面 `'pnpm' is not recognized…` 的失败形态。
+- 另注：**只读路径不需要 pnpm** —— `dsh plugin … list` 不 shell out；只有 `add` / `rm` 才需要。
+- 且**下游不认自定义变量名**（asar 里搜不到 `DSH_PNPM` / `PNPM_HOME` 的消费点）。
+  `--pnpm` / `DSH_MATT_PNPM` 是本安装器的输入契约；本仓负责让解析出的 pnpm 对 `dsh plugin`
+  可见（机制见 `bin/install.mjs`），**别指望下游读某个自定义变量**。
+
+**全落空时响亮失败**（不再"warning + 跳过挂载 + 谎报 mounted"，#80/#86）：探测在任何破坏性动作
+**之前**完成，所以 `die` 时**连 `DSH_HOME` 目录都不会被创建**（比"写了一半"更严：不是"创建了但为空"）。
+实测 `DSH_HOME=<未创建的 tmp> node bin/install.mjs install --profile web`（PATH 无 dsh、不传 `--dsh`）→
+**exit 1**、stdout 空、`Test-Path <tmp>` 仍为 `False`、stderr 单行原文：
+
+```
+dsh-preset-install: 未找到可用的 dsh CLI（PATH 上没有 `dsh.cmd`，桌面运行时 / 源码检出候选也都没跑到 --version）；用 --dsh <dsh 可执行文件路径> 显式指定，或设 DSH_MATT_DSH=<路径>；查运行时可达性：docs/dev-environment.md §3.1
+```
+
+pnpm 缺失分支（**仅源码检出形态**触发）文案：
+`dsh-preset-install: 该 dsh 形态（源码检出）需要 PATH 上可达的 pnpm，但没探到；用 --pnpm <pnpm 路径> 显式指定，或设 DSH_MATT_PNPM=<路径>；查运行时可达性：docs/dev-environment.md §3.1`
+
+`--root` 是**纯存储模式**：不探 dsh/pnpm、不碰 profile、也**不**打印 `mounted into profile`。
+
+**shim 兜底配方**（仅在既不想传 `--dsh`、探测链也全落空时才需要；临时放 `%TEMP%`，跑完可弃；
+`<src>\node_modules\.bin` 提供源码检出形态 `dsh plugin` 需要的 pnpm，见 §4.5）：
 
 ```bat
 @echo off
@@ -310,6 +353,18 @@ $env:PATH = "<shim 目录>;<src>\node_modules\.bin;$env:PATH"
 dsh --version                                                  # → 0.2.1-rc.2
 $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 11/11、exit 0、零 loud skip
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）
+```
+
+**更省事的首选：不造 shim，直接显式指路**（2026-10-18 实测，桌面运行时形态）：
+
+```powershell
+# 桌面运行时自带 dsh 与 pnpm → 只给 --dsh 就够（不必 --pnpm）
+node bin/install.mjs install --profile web --dsh "<runtime>\cli\bin\dsh.cmd"
+#   → installed 0.2.1-rc.2-r1 (22 entries) at <DSH_HOME>/.agent-presets/matt, mounted into profile 'web'
+#   → exit 0
+# 源码检出形态没有宿主注入 → 需要 PATH 上有 pnpm，或用 --pnpm 指路
+node bin/install.mjs install --profile web --dsh "<src>\apps\cli\lib\bin.js" --pnpm "<src>\node_modules\.bin\pnpm.cmd"
+# 也可以走环境变量（CI 友好）：DSH_MATT_DSH / DSH_MATT_PNPM
 ```
 
 实测结果（2026-10-16，装上包装后）：`verify-installer.mjs` **11/11、零 loud skip**（此前 4 条 link

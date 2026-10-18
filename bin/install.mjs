@@ -14,12 +14,21 @@
  *
  * 用法：
  *   dsh-preset-install install  [--profile <name>] [--from <tarball|dir>] [--force]
+ *                               [--dsh <path>] [--pnpm <path>]
  *   dsh-preset-install upgrade  [--profile <name>] [--from <tarball|dir>]
- *   dsh-preset-install uninstall [--profile <name>]
+ *                               [--dsh <path>] [--pnpm <path>]
+ *   dsh-preset-install uninstall [--profile <name>] [--dsh <path>] [--pnpm <path>]
  *   dsh-preset-install --version
  *
  * #21 的 --root（存储根覆盖）仍受支持，用于测试/非默认布局；profile 挂载
- * 一律走 DSH_HOME/profiles/<name>。
+ * 一律走 DSH_HOME/profiles/<name>。`--root` 是**纯存储**模式：不探 dsh/pnpm、
+ * 也不碰 profile。
+ *
+ * 运行时可达性（#47/#86，见 lib/runtime-probe.mjs 头注）：挂载需要 dsh CLI，而
+ * PATH 上没有 dsh ≠ 运行时缺席。解析顺序 = `--dsh`/`--pnpm` → `DSH_MATT_DSH`/
+ * `DSH_MATT_PNPM` → 探测链（PATH 字面名 → 桌面运行时 → 源码检出）。**全落空时响亮
+ * 失败**（exit≠0 + 一行可执行指路），不再「warning + 跳过挂载 + 谎报 mounted」（#80）。
+ * pnpm 是**按形态条件必需**：桌面运行时自带 primary-runtime，源码检出形态才靠 PATH。
  *
  * 路径安全（2026-10-18 事故硬化，docs/dev-environment.md §1）：`DSH_HOME`、store 根、以及
  * 每一次 `rm` 的目标都先过 lib/safe-target.mjs 的**纯路径判定**——等于用户 profile、
@@ -36,6 +45,7 @@ import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { payloadOf } from '../lib/payload.mjs'
 import { homeRootProblem, targetProblem } from '../lib/safe-target.mjs'
+import { probeRuntime, probeGuidance, pathWithPnpm, sourceNeedsPnpm, spawnCandidate } from '../lib/runtime-probe.mjs'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
 const PKG_NAME = 'dsh-matt-preset'
@@ -66,6 +76,9 @@ function parseArgs(argv) {
     else if (a === '--root') args.root = requireValue(argv, ++i, a)
     else if (a === '--from') args.from = requireValue(argv, ++i, a)
     else if (a === '--profile') args.profile = requireValue(argv, ++i, a)
+    // #47/#86：运行时可达性——显式指定 dsh / pnpm 的绝对路径（PATH 上没有它们时的唯一出路）。
+    else if (a === '--dsh') args.dsh = requireValue(argv, ++i, a)
+    else if (a === '--pnpm') args.pnpm = requireValue(argv, ++i, a)
     else if (a.startsWith('--')) die(`unknown option: ${a}`)
     else args._.push(a)
   }
@@ -89,53 +102,73 @@ function defaultStoreRoot() {
   return join(dshHome(), '.agent-presets')
 }
 
-/** Run dsh (or node) and die with its stderr on failure. */
-function runOrDie(cmd, cmdArgs, what) {
-  const r = spawnSync(cmd, cmdArgs, {
-    encoding: 'utf8',
-    shell: process.platform === 'win32' && cmd !== process.execPath,
-  })
+/** Run dsh and die with its stderr on failure.
+ *
+ *  **起进程规则与探测共用 `spawnCandidate`**（lib/runtime-probe.mjs）：`.cmd`/`.bat` 走
+ *  `cmd.exe /c <path> <args...>`（空格安全），`.js`/`.mjs` 经当前 node 跑，其余直接 spawn。
+ *  探测与真调用若各写一套，就会出现「探得到、调不起来」——实测踩过这种漂移。
+ *
+ *  **为什么不用 `shell: true`**（2026-10-18 实测，别改回去）：桌面运行时的 dsh 是
+ *  `…/resources/runtime/cli/bin/dsh.cmd`，其绝对路径**含空格**。`shell:true` 的语义是把
+ *  命令与参数拼成一整行交给 shell，于是空格把路径切成两截：
+ *      shell:true  → exit 1  "'C:\…\DeepSeek' is not recognized as an internal or external command"
+ *      shell:false → status=null, error=EINVAL（`.cmd` 不是可直接 exec 的映像）
+ *      cmd.exe /c  → exit 0  ✅
+ *  `env` 用于注入 pnpm 透传（PATH 前置，见 lib/runtime-probe.mjs 头注 §3）。 */
+function runDshOrDie(dsh, cmdArgs, what, pnpm) {
+  const env = pathWithPnpm(pnpm)
+  const r = spawnCandidate(dsh, cmdArgs, { platform: process.platform, env, exec: spawnSync })
+  // spawn 自身失败（命令起不来）时 status 是 null、stderr 是空——只报 `exit null: undefined`
+  // 等于没说。把 `error.code`/`error.message` 一并带出来（例如 ENOENT：路径写错）。
+  if (r.error !== undefined && r.error !== null) {
+    die(`${what} could not start (${r.error.code ?? 'error'}): ${r.error.message}`)
+  }
   if (r.status !== 0) die(`${what} failed (exit ${r.status}):\n${r.stderr || r.stdout}`)
   return r
 }
 
-/** Is the dsh CLI available? (装载挂载需要它；纯存储操作不需要。) */
-function dshAvailable() {
-  return spawnSync('dsh', ['--version'], {
-    encoding: 'utf8', shell: process.platform === 'win32',
-  }).status === 0
-}
-
-/** Link the store into the profile: the bundle-patch mount step (#28).
- *  `dsh plugin --profile <p> add` creates the profile layer when absent
- *  (shipped names like `web` included), so no template bootstrap is needed. */
-function mount(profile, store) {
-  runOrDie('dsh', ['plugin', '--profile', profile, 'add', store],
-    `dsh plugin --profile ${profile} add`)
+/** 装载挂载需要 dsh **与**（源码检出形态下的）pnpm；纯存储操作不需要。 */
+function mount(profile, store, dsh, pnpm) {
+  runDshOrDie(dsh, ['plugin', '--profile', profile, 'add', store],
+    `dsh plugin --profile ${profile} add`, pnpm)
 }
 
 /** Remove the profile link. Pre-checks the profile's dependency table so a
  *  fresh profile without the link doesn't turn `dsh plugin rm` into an error;
  *  if the profile layout ever shifts, we warn and let `dsh plugin rm` decide. */
-function unmount(profile) {
+function unmount(profile, dsh, pnpm) {
   let deps = {}
   try {
     deps = JSON.parse(readFileSync(join(dshHome(), 'profiles', profile, 'package.json'), 'utf8')).dependencies ?? {}
   } catch { /* profile layer absent/unreadable — nothing linked, fall through */ }
   if (!(PKG_NAME in deps)) return
-  runOrDie('dsh', ['plugin', '--profile', profile, 'rm', PKG_NAME],
-    `dsh plugin --profile ${profile} rm`)
+  runDshOrDie(dsh, ['plugin', '--profile', profile, 'rm', PKG_NAME],
+    `dsh plugin --profile ${profile} rm`, pnpm)
 }
 
-/** Run the mount/unmount step, or degrade loudly when dsh is unavailable:
- *  the store copy still lands, but the profile keeps its previous state
- *  (stale link on uninstall) and the operator gets the manual command. */
-function mountOrWarn(profile, step, what) {
-  if (dshAvailable()) { step(); return }
-  const manual = what === 'unmount'
-    ? `dsh plugin --profile ${profile} rm ${PKG_NAME}`
-    : `dsh plugin --profile ${profile} add ${join(defaultStoreRoot(), 'matt')}`
-  console.error(`dsh not found on PATH — skipped profile ${what} (装载需手动: ${manual})`)
+/** 解析运行时（#47/#86）。返回 `{ dsh, pnpm }`；全落空/缺必需项时**响亮失败**。
+ *
+ *  为什么不再「warning + 跳过挂载 + 仍报 mounted」（#80 的谎报）：
+ *  旧实现在 dsh 缺席时只 console.error 一句，install 依旧 exit 0、stdout 依旧声称
+ *  `mounted into profile 'x'`——操作者以为装好了，实际 profile 没动过。现在改为
+ *  在破坏性动作之前就 die（exit≠0）并给一行可执行指路。
+ *
+ *  pnpm 是**按形态条件必需**：桌面形态自带 primary-runtime（宿主显式注入 packageManager），
+ *  不需要 PATH 上的 pnpm；源码检出形态没有宿主注入，plugin-manager 回落到字面名 `'pnpm'`
+ *  按 PATH 找——这才是 #86 的根因。判据用 source，不按「文件存在」猜（见 lib/runtime-probe.mjs）。 */
+function resolveRuntime(args) {
+  const { dsh, pnpm } = probeRuntime({ dsh: args.dsh, pnpm: args.pnpm })
+  if (dsh === null) die(probeGuidance({ missing: ['dsh'] }))
+  // 只有需要 pnpm 的形态（源码检出）才要求它可达；桌面形态放行。
+  if (sourceNeedsPnpm(dsh.source) && pnpm === null) die(probeGuidance({ missing: ['pnpm'] }))
+  return { dsh: dsh.path, pnpm }
+}
+
+/** Run the mount/unmount step. Runtime resolution happens **before** the store
+ *  is touched, so a missing runtime aborts loudly instead of silently skipping. */
+function mountOrFail(profile, step, what, runtime, store) {
+  if (what === 'unmount') unmount(profile, runtime.dsh, runtime.pnpm)
+  else mount(profile, store, runtime.dsh, runtime.pnpm)
 }
 
 /**
@@ -306,6 +339,9 @@ async function main() {
   const storeOnly = args.root !== undefined
   const storeRoot = resolve(args.root ?? defaultStoreRoot())
   const target = join(storeRoot, 'matt')
+  // 运行时解析**先于**任何破坏性动作（含 store 拷贝）：探不到就响亮失败，绝不
+  // 「装了一半 + 谎报 mounted」（#80）。store-only（`--root`）是纯存储操作，不探。
+  const runtime = storeOnly ? null : resolveRuntime(args)
   // 破坏性目标守卫（2026-10-18 事故硬化）：store 根 / target 先过纯路径判定——
   // 等于用户 profile、是它的祖先、盘根，一律 die，绝不进入任何 rm 分支。
   const targetIssue = targetProblem(target, storeRoot)
@@ -321,7 +357,7 @@ async function main() {
       die(`refusing to delete ${target}: it does not look like a dsh-matt-preset store ` +
         '(no VERSION.json / manifest.json / package.json). 手工核对后再处理。')
     }
-    if (!storeOnly) mountOrWarn(profile, () => unmount(profile), 'unmount')
+    if (!storeOnly) mountOrFail(profile, () => unmount(profile), 'unmount', runtime, target)
     console.error(`store: ${target}`)
     await rm(target, { recursive: true, force: true })
     console.log(`uninstalled: ${target} (profile '${profile}' unmounted)`)
@@ -335,7 +371,7 @@ async function main() {
     const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
     // link 指向的是存储目录本身，文件已原地替换；重挂一次刷新 pnpm 元数据
-    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
+    if (!storeOnly) mountOrFail(profile, () => mount(profile, target), 'mount', runtime, target)
     console.log(`upgraded ${prev} -> ${res.version} (${res.files} entries) at ${target}`)
     console.log(`重启 dsh --profile ${profile}（或新开会话）生效；回滚：重新 install 旧版本包。`)
     return
@@ -349,8 +385,11 @@ async function main() {
     const src = await resolveSource(args.from)
     const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
-    if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
-    console.log(`installed ${res.version} (${res.files} entries) at ${target}${storeOnly ? '' : `, mounted into profile '${profile}'`}`)
+    if (!storeOnly) mountOrFail(profile, () => mount(profile, target), 'mount', runtime, target)
+    // #80 谎报修复：只有**真挂载成功**（上面没 die）才许声称 mounted into profile。
+    // store-only（--root）是纯存储操作，不碰 profile，也不许声称挂载。
+    const mounted = storeOnly ? '' : `, mounted into profile '${profile}'`
+    console.log(`installed ${res.version} (${res.files} entries) at ${target}${mounted}`)
     console.log(`重启 dsh --profile ${profile}（或新开会话），在 hero-chip 选择 "Matt 工作流"。`)
     return
   }

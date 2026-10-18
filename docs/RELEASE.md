@@ -164,14 +164,16 @@ node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node
 ```
 
 **判据**：第 1 步的输出变成 `link:<DSH_HOME>/.agent-presets/matt`，且重启后 hero-chip 出现
-4 个 matt 模式。遗留目录的删除是**外部动作**（`rm -rf`），须人工确认后再执行。
+4 个 matt 模式。遗留目录的删除是**外部动作**（不在 installer 覆盖面内），须走上面那个
+**自守卫 dry-run 脚本**：默认只打印解析后的绝对路径、`CONFIRM=1` 才真删、`DSH_HOME` 未设即拒；
+**不要**自己拼裸 `rm -rf <DSH_HOME>/…`。
 
 ### 回滚
 
 1. **回滚到 #99 之前的形态**：`node bin/install.mjs install --force --from dsh-matt-preset-<旧版本>.tgz --profile desktop`
    （旧 tag ↔ 旧 npm 版本一一对应，见上文"升级/回滚"节）→ 重启应用。
 2. **只回滚到上一个绿提交（payload 面）**：同上，换成该提交打的 tarball。
-3. **完全卸下桌面端**（四模式同时消失、无残留）：
+3. **完全卸下桌面端**（四模式同时消失）：
 
    ```bash
    node bin/install.mjs uninstall --profile desktop      # 摘 profile link + 清存储目录
@@ -180,12 +182,59 @@ node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node
    验收：`plugin_manager` / 插件视角**不再有** `dsh-matt-preset` 条目，roster 里**四个 matt 模式同时消失**；
    官方四个模式（`standard`/`ptc`/`minimal`/`cordis`）**仍在**（本 preset 从不改它们）。
 
+   > **判据是"视角"而不是"磁盘无残留"**：`uninstall` 会从 profile 的 `dependencies` 与
+   > `dsh.profile.bundles` 中移除本包、并删除 store；但 pnpm 在
+   > `<DSH_HOME>/profiles/<p>/node_modules/` 下留的 **`dsh-matt-preset` 符号链接不会被一并清理**，
+   > 会变成指向已删 store 的**悬挂链接**（相对目标 `..\..\..\.agent-presets\matt`）——这是
+   > **上游 `dsh plugin rm` 的行为**，不是本 preset 的缺陷（2026-10-18 实测：store 目录已不存在、
+   > profile `package.json` 的 `dependencies`/`dsh.profile.bundles` 均已不含 `dsh-matt-preset`，
+   > 而该链接仍在；同目录下还留着 pnpm 的 `.bin/`、`.pnpm/`、`.modules.yaml`、
+   > `.pnpm-workspace-state-v1.json`）。按"目录里没有痕迹"复验会误判为卸载失败。
+   > **重新 `install` 会由 pnpm 复用/覆盖该链接，无需手工清理。**
+
+### 运行时探测面（#47 AC④ + #86 文档半边，2026-10-18）
+
+上面"一条命令"能成立的前提是 installer **探得到运行时**。此前 `bin/install.mjs` 只裸探字面
+`dsh`，探不到就"warning + 跳过挂载"却仍 exit 0、仍打印 `mounted into profile 'x'`（#80 谎报）；
+现在改为**有序候选链 + 全落空响亮失败**（实现在 `lib/runtime-probe.mjs`）。
+
+**什么时候需要显式参数**：
+
+| 形态 | 一条命令够吗 | 说明 |
+| --- | --- | --- |
+| **桌面运行时**（`<runtime>\cli\bin\dsh.cmd`） | **够** | 探测链能自己找到，且**自带 pnpm**、不需要 `--pnpm` |
+| **源码检出**（`node <src>/apps/cli/lib/bin.js`） | **不一定** | 检出落点推不出来，需 `DSH_MATT_SRC=<src>`；且**需要 PATH 上有 pnpm**，没有就传 `--pnpm` |
+
+优先级：**`--dsh`/`--pnpm` → `DSH_MATT_DSH`/`DSH_MATT_PNPM` → 探测链**
+（PATH 字面名 → 桌面运行时 → 源码检出），显式覆盖优先于探测；每项**真跑 `--version`** 判定。
+
+**全落空时报错长什么样**（逐字，stderr 单行；`DSH_HOME=<tmp> node bin/install.mjs install --profile desktop` → **exit 1**）：
+
+```
+dsh-preset-install: 未找到可用的 dsh CLI（PATH 上没有 `dsh.cmd`，桌面运行时 / 源码检出候选也都没跑到 --version）；用 --dsh <dsh 可执行文件路径> 显式指定，或设 DSH_MATT_DSH=<路径>；查运行时可达性：docs/dev-environment.md §3.1
+```
+
+**怎么修**：
+
+```bash
+# 桌面运行时：只给 --dsh 即可（自带 pnpm，不必 --pnpm）
+node bin/install.mjs install --profile desktop --dsh "<runtime>\cli\bin\dsh.cmd"
+# 源码检出：检出根 + 显式 pnpm
+DSH_MATT_SRC=<src> node bin/install.mjs install --profile desktop --pnpm "<pnpm 路径>"
+# CI 友好：环境变量等价
+DSH_MATT_DSH="<runtime>\cli\bin\dsh.cmd" node bin/install.mjs install --profile desktop
+```
+
+失败是**未半装**的：探测在任何破坏性动作**之前**完成，所以 exit 1 时**连 `DSH_HOME` 目录都不会被创建**。
+
+> 只读的 `dsh plugin … list` **不需要 pnpm**；只有 `add` / `rm`（写路径）才 shell out。
+
 ### 桌面形态的机械断言
 
 `tests/verify-installer.mjs` 有对应用例（`--profile desktop` 跑 install，断言 profile 的
 `dependencies` 与 `dsh.profile.bundles` 都含 `dsh-matt-preset`）。该用例与其他 profile-link
-断言共用 `#67` 的口径：**PATH 上没有 `dsh` 时响亮跳过**（`SKIP (loud)`，verify-all 记为 `PASS*`），
-不硬崩、也不静默当通过。
+断言共用 `#67` 的口径，并**消费上面这套显式参数**：给出 `--dsh` / `--pnpm` 时**真跑**该断言；
+**拿不到运行时路径时仍响亮跳过**（`SKIP (loud)`，verify-all 记为 `PASS*`）——不硬崩、也不静默当通过。
 
 ## 版本条目（Changelog）模板（ADR-0007）
 
