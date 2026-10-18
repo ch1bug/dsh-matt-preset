@@ -34,7 +34,8 @@
 
 - <日期>：**#<票号> 实现完成** → 本地提交 `<sha>`（**未 push**）。
   Progress 行三要素（证明命令 / exit code / 证据路径）：`<证明命令>` → exit `<code>` → `<证据路径>`。
-  未推送清单：`<sha>` …（<N> 票）。
+  **未推送清单**：未推送的 `<sha>` 逐条列出，**结尾必带自称笔数** `（<N> 票）` ——
+  `N` 取自 `git rev-list --count origin/<branch>..HEAD`（**取数命令契约**见下节）。
 
 retro: done @ <commit>
 ```
@@ -63,9 +64,31 @@ enforcer 是 reminder-only，**只读标记、不写文件**。
 | **lane 标注** | 该票跑在哪条泳道（A / B / C 或沙箱车道） | 批末无法回收泳道准确率（D38） |
 | **后继票** | 本票之后是谁（批内顺序固定，宣告即指派） | 收尾会话只能停等 human 说「开下一票」——AUTO-HANDOFF 的路由断了 |
 | **`retro: done @ <commit>`** | 批末 retro 已**跑**、commit 为聚合呈现的依据点 | 无法判断批末 retro 是否跑过；重复**呈现**的真正抑制靠 `.scratch/retro/.aggregated`（见上） |
+| **未推送清单** | 进度行尾 `（<N> 票）` 里的 **N** = **最后一条**自称的未推送笔数；N **只许**由 `git rev-list --count origin/<branch>..HEAD` 产出（理由见下节） | 批末 push 的输入与「≥5 票 / 1 周」护栏都读它——取错命令会让 5 笔读成 1 笔，**恰好绕过护栏而不报警**（#115 的 C9 会对账这条） |
 
 **恢复时以本文件为唯一事实源**，不与记忆或环境「凭感觉对齐」：文件缺失、过期或与观测到的
 环境（git HEAD / worktree / 文件态）矛盾 → **停下问 human**，不猜、不自行修正记录（D39）。
+
+## 取数命令契约（「未推送清单」只许一条命令）
+
+**未推送笔数一律用 `git rev-list --count origin/<branch>..HEAD`。** 别用 `Measure-Object`
+一类**行数统计**代劳——理由不是风格偏好：
+
+- **`| Measure-Object`（默认，无 `-Line`）逐**对象**计数，不是逐行**。本机（PowerShell
+  7.6.7 + git 2.55.0.windows.5）实测：原生命令的多行输出被折叠成**一个** string 对象时，
+  4 笔未推送会报成 **`Count = 1`**（`-Line` 才逐行、报 **4**，与 `rev-list` 一致）。
+- **为什么这个错法特别贵**：它**恰好朝向危险的一侧**——把「≥5 笔」读成「1 笔」，
+  **绕过护栏且不报警**，人还以为自己数过了（#77 / #113 / #48 三次复发，跨会话 retro
+  聚合记为 4/4 会话）。
+- **所以是契约，不是建议**：`tests/verify-batch-state.mjs` 的 **C9** 机械对账（下面「机器守卫」
+  一节）会读活文件里**最后一条**未推送清单的声称，并**用 `rev-list` 那张显式白名单**去对账——
+  两个数字不一致就**响亮报数**。⚠ C9 只报**声称 ≠ 实测**，**不判断你用了哪条命令**
+  （工具面判不出来，不猜）；命令这一条靠**本节契约 + C9b 机械演示**共同钉住。
+
+<!-- 口径来源（#115 环境注记）：本机实测的反例一度被记成「`Measure-Object -Line` 会误报 1」。
+     2026-10-18 A 批第 2 票复测：`-Line` 报 4（正确），报 1 的是**默认** `Measure-Object`
+     （逐对象计数）。契约按**复测**后的机制书写，不照抄旧注记——把一条查无实据的断言写进
+     契约，正是本票要防的那种漂。 -->
 
 ## 落盘契约（retro 候选）
 
@@ -112,5 +135,7 @@ retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字
   [`docs/adr/0003-sandbox-batch-mode.md`](adr/0003-sandbox-batch-mode.md)（沙箱 Y 车道；落地见 #73）。
 - 触发面与注入文案：[`docs/workflow-enforcer.md`](workflow-enforcer.md)。
 - 正文规则：[`workflow-body.txt`](../workflow-body.txt) 的 `@@ batch-mode` 节。
-- 机器守卫：[`tests/verify-batch-state.mjs`](../tests/verify-batch-state.mjs)（模板完整性 +
-  enforcer↔docs 漂移守卫）。
+- 机器守卫：[`tests/verify-batch-state.mjs`](../tests/verify-batch-state.mjs)（**C1–C8** 模板完整性与
+  载体漂移守卫；**C9** 活文件「未推送清单」机械对账：读 `.scratch/batch-state.md` 的**最后一条**
+  声称，与 `git rev-list --count` 对账 → 不一致**响亮报数**（含"声称 X / 实测 Y"），**只报不阻断**；
+  ≥5 笔另喊一行护栏提示；活文件缺席则**响亮跳过**——**守卫只读、绝不替 agent 写文件**）。

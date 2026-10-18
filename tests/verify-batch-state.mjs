@@ -34,15 +34,20 @@
  *   ⑤ persona-carried 基线换回旧 body → C8（及 L1/R4）红。
  * 五条均已实测（见回报）。
  */
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { spawnSync } from 'node:child_process'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
+/** **只报不阻断**：C9 的发现既不是 ✓ 也不是 ✗（不碰 exit code），但必须出现在读数里。 */
+const warn = (name, detail = '') => results.push('  ⚠ ' + name + (detail ? ' — ' + detail : ''))
+/** 终判：只认 ✗（⚠ 不阻断 —— working tree 在提交时点「领先」于状态文件是**正常态**）。 */
 const report = (title) => {
   console.log(`\n=== ${title} ===`)
   console.log(results.join('\n'))
@@ -309,4 +314,212 @@ if (PERSONA_FIXTURE === null) {
     bad('C8. body 耦合基线漂移', `startsWith(prefix)=${startsRight} endsWith(body)=${endsRight} 合成相等=${structural} —— 改 body 必须同步重取该 fixture（L1/R4 会红）`)
 }
 
-report('BATCH-STATE VERIFY (C1–C8)')
+// ── C9: 活文件「未推送清单」机械对账（#115；**只报不阻断**）──────────────────
+// 为什么存在：#77 / #113 / #48 三次把「未推送清单」手抄错，而**批末 push 的输入与
+// 「≥5 票 / 1 周」护栏都读它**——取错命令会把 5 笔读成 1 笔，**恰好绕过护栏且不报警**。
+// C1–C8 守的全是**仓内载体**（模板/文案/正文），活文件 `.scratch/batch-state.md` 从未被对账。
+//
+// 口径（三条，照票面 #115 的 AC）：
+//   ① **判据窄**：只读**最后一条**「未推送清单」声称——该文件累积多轮记录是**有意的**，
+//      不要求删历史行（票面 Out of scope 明确）；拿历史行判会假红。
+//   ② **只报不阻断**：不一致 → `⚠`（不碰 exit code）。working tree **领先**于状态文件是
+//      提交时点的**正常态**——把正常态变红就是造噪声，而噪声最终会被人忽略。
+//   ③ **不猜分支**：对账分支取 `origin/<当前分支>`；当前分支不可知（detached / 非仓）→
+//      响亮跳过，**不猜 `main`**（同 C2a 的"响亮"口径，也同 D47：防线缺席必须响亮）。
+//   另：本节的任一**机械失灵**（读不到活文件、git 不可用、命令白名单不合规、夹具不红）
+//   一律是 **✗** —— 全仓既有的"用 exit 0 记下一个空断言"之弊，不在这节重犯。
+const COUNT_CMD = ['rev-list', '--count']
+const COUNT_LABEL = 'git rev-list --count origin/<branch>..HEAD'
+
+/** **测试缝**（扰动用例专用，见下方 `git()`）：覆盖 C9 的两个读数面。
+ *  变量名带 `DSH_MATT_BATCHSTATE_` 前缀，不与任何真实环境变量撞；不设 = 零影响。
+ *  为什么需要缝：扰动要在**镜像副本**上造"声称 ≠ 实测 / ≥5 笔 / 取数不可用"，而改调用方
+ *  仓库的 origin/main 是破坏性的（本仓禁止）；"PATH 前置假 git"在 Windows 下也不通 ——
+ *  实测 `spawnSync('git', …)` 不经 shell 解析 PATH 里的 `.cmd` 一律失败（129 / EINVAL）。 */
+const COUNT_OVERRIDE = process.env.DSH_MATT_BATCHSTATE_COUNT
+const BRANCH_OVERRIDE = process.env.DSH_MATT_BATCHSTATE_BRANCH
+const BRANCH = BRANCH_OVERRIDE !== undefined
+  ? { status: 0, stdout: BRANCH_OVERRIDE }
+  : spawnSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: REPO, encoding: 'utf8' })
+const branch = BRANCH.status === 0 ? (BRANCH.stdout ?? '').trim() : ''
+
+/** 跑一条 git 子命令：返回 `{ status, out }`；抛错与错误码都如实回传（不猜）。
+ *  测试缝只覆盖 `rev-list --count` 这一个读数（见 COUNT_OVERRIDE 的说明），默认零影响。 */
+function git(args) {
+  const isCount = args[0] === COUNT_CMD[0] && args[1] === COUNT_CMD[1]
+  if (isCount && COUNT_OVERRIDE !== undefined) {
+    const [code, out = ''] = COUNT_OVERRIDE.split('|')
+    return { status: Number(code), out }
+  }
+  const r = spawnSync('git', args, { cwd: REPO, encoding: 'utf8' })
+  return { status: r.status, out: (r.stdout ?? '').trim() }
+}
+
+/** 夹具子进程的 spawn 选项（`git -C <dir>` 由调用处拼 argv）：豁免本机 sysadmin 级的
+ *  "原生命令 cwd 变更"行为（实测：`startup` 脚本族会在**每次**子进程启动时把 cwd 复位到
+ *  Windows 用户目录，于是 `cwd: fixtureDir` 静默失效 → 夹具命令全打在**调用方仓库**上，
+ *  而 `-C` 是 git 自己的参数，宿主改不了它）。这条也是 #110 同族的"夹具污染调用方仓库"防线。 */
+const gitOpts = (env) => ({ encoding: 'utf8', env, windowsHide: true })
+
+/** 判据：**最后一条**「未推送清单」+ 结尾 `（<N> 票…）`。三个设计点：
+ *  ① `[\s\S]` 让一条清单可以跨多行（真实文件正是多行 + 行尾写数）；
+ *  ② `（<N> 票` 之后**允许还有话**（实测踩到：`（4 票；实测 = git rev-list --count …）`
+ *     这种写法完全合规，而要求 `票）` 紧邻会把它判成"没有声称"→ 守卫静默哑掉的**假红**）；
+ *  ③ `(?![\s\S]*未推送清单)` 把 `matchAll` 天然锁在**最后一条**上：中途再出现一次清单则
+ *     两条都不匹配 → **C9-claims 转 ✗** —— 响亮哑掉，好过静默取一条错的来对账。 */
+const CLAIM_RE = /未推送清单：[\s\S]*?（(\d+)\s*票(?![\s\S]*未推送清单)/g
+const LIVE_REL = '.scratch/batch-state.md'
+const LIVE = read(LIVE_REL)
+const claimCount = LIVE === null ? null : [...LIVE.matchAll(CLAIM_RE)].length
+const CLAIM = LIVE === null ? null : LIVE.match(new RegExp(CLAIM_RE.source, ''))
+
+if (LIVE === null) {
+  // ③ 缺席 ≠ 红：非批会话本来就没有这个文件（票据 AC「响亮跳过，不报假红」）。
+  console.log(`  ⚠ C9 SKIP (loud). ${LIVE_REL} 不存在 —— 非批会话，未推送清单无来源可对账；` +
+    `批会话则由「批宣告初始化状态文件」保证它在场`)
+} else if (branch === '') {
+  console.log('  ⚠ C9 SKIP (loud). 当前分支不可知（detached HEAD / 非 git 仓）—— 对账分支不猜，跳过')
+} else if (CLAIM === null) {
+  // 文件在、但"最后一条声称"这个**判据**取不到 —— 守卫哑了，必须响亮。
+  bad('C9-claims. 活文件里能取到「未推送清单 …（<N> 票）」的最后一条声称',
+    claimCount === 0
+      ? `读到了 ${LIVE_REL} 但没有一条符合判据（缺「未推送清单：」前缀或结尾「（<N> 票）」）—— 守卫静默哑掉的形态`
+      : `判据命中 ${claimCount} 条（>1）—— 不一致的文件形态；先修状态文件写法（见 docs/batch-state.md 模板）`)
+} else {
+  const CLAIMED = Number(CLAIM[1])
+  const rev = git([...COUNT_CMD, `origin/${branch}..HEAD`])
+  if (rev.status !== 0 || !/^\d+$/.test(rev.out)) {
+    // 「确定无法判」**不是**「锻炼出结论」：C9 的取数命令跑不动 = 防线缺席，必须响亮。
+    bad('C9-live. 取数命令可用', `${COUNT_LABEL} → exit ${rev.status}${rev.out ? ` / ${rev.out}` : ''} —— ` +
+      'origin ref 可能未取回（git fetch 后重跑）')
+  } else {
+    const ACTUAL = Number(rev.out)
+    if (CLAIMED === ACTUAL) {
+      ok('C9-live. 活文件最后一条「未推送清单」与 git 事实一致', `声称 ${CLAIMED} == 实测 ${ACTUAL}（${COUNT_LABEL}）`)
+    } else {
+      // ② 只报不阻断 —— 两个数字都要出现（票面 AC 明文："含声称 X / 实测 Y"）。
+      warn('C9-live. 未推送清单与 git 事实**不一致**',
+        `声称 ${CLAIMED} / 实测 ${ACTUAL} —— 把状态文件最后一条的「（<N> 票）」改成 ${ACTUAL}；` +
+        '（工作树领先状态文件是提交时点的正常态，故只报不阻断）')
+    }
+    if (ACTUAL >= 5) {
+      console.log(`  ⚠ C9-guardrail. 未推送达 ${ACTUAL} 笔，超 5 票护栏 —— ` +
+        '按 @@ batch-mode：**暂停并报告**，请 human 给一个 push checkpoint（或明确继续）')
+    }
+  }
+}
+
+// ── C9b: 计数机制的**机械演示夹具**（#115 的非空洞硬要求 + D15 的结构性防线）────────
+// 为什么是夹具而不是"再加一条正则守文案"：D15 —— 用更宽的正则去追下一个反例是无收敛军备竞赛。
+// 这里换**结构性**防线：把 `rev-list --count` 与 `Measure-Object` 一族放进**同一个 Impure
+// 夹具仓**，同时喂**同一份输入**（同一个 `git log` 输出），直接断言两条路给出**不同的数字**。
+// 于是「错的取数命令长什么样」变成**可跑的事实**，而不是文档里的一句话——
+// 后人若把契约改回"用 Measure-Object 也行"，这条断言照样指着那个夹具说"不行"。
+// 全程落在 os.tmpdir()：仓内临时件会进 git 状态并踩 pre-commit 的"工作树有未 staged 改动"闸门。
+// 显式脱离父 git 环境（GIT_DIR 等）：否则夹具里的 `git init` 会写进调用方仓库（#110 同族教训）。
+const TMPFIX = mkdtempSync(join(tmpdir(), 'dsh-matt-c9-count-'))
+try {
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: join(TMPFIX, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMPFIX, '.gitconfig') }
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k]
+  const G = (args) => spawnSync('git', ['-C', TMPFIX, ...args], gitOpts(env))
+  if (G(['init', '-q', '-b', 'main']).status !== 0) {
+    bad('C9b. 夹具仓可 init', JSON.stringify(G(['init', '-q', '-b', 'main']).stdout))
+  }
+  // 夹具路径直接用宿主原生形式：本节的机制演示要**再起一个 PowerShell 子进程**去跑同样的命令，
+  // 而 `git -C` **不接受 `file://` URL**（实测 `fatal: cannot change to 'file:///…': Invalid argument`
+  // —— 那会让两条读数静默变成 0，看起来像"演示失败"）。带空格/盘符的路径在单引号里安全（路径只可能含单引号才会破）。
+  const q = TMPFIX
+  // ⚠ 夹具**不能靠 `init -b main`**：unborn 分支名在首次提交时才落成引用，而"首次提交前
+  // 有一条 `git symbolic-ref` 把 HEAD 显式绑到 main"才是与宿主无关的写法（本节实测踩到过：
+  // `init -b` 的效力随宿主调用面而变，HEAD 落到 `master` 后 `origin/main..HEAD` 的两端
+  // 各成一个**无关根提交**，计数正确地给出 1 而不是 3 —— 一个看起来像"演示失败"的假红）。
+  for (const [i, file] of ['a.txt', 'b.txt', 'c.txt', 'd.txt'].entries()) {
+    writeFileSync(join(TMPFIX, file), file + '\n')
+    G(['add', file])
+    // 身份**显式给**：夹具把 GIT_CONFIG_GLOBAL 指到空文件（不读本机 ~/.gitconfig），
+    // 不显式给身份就会被 git 拒掉（`Author identity unknown` → 一次提交都没有，
+    // 后面的计数全成了"夹具坏了"的假红）。
+    G(['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', `fix: ${file}`])
+    if (i === 0) G(['symbolic-ref', 'HEAD', 'refs/heads/main'])
+  }
+  const countHead = G(['rev-list', '--count', 'HEAD'])
+  if (countHead.status !== 0 || countHead.stdout.trim() !== '4') {
+    bad('C9b. 夹具仓提交可达性', `rev-list --count HEAD → ${JSON.stringify(countHead.stdout)}（期望 "4"）`)
+  }
+  const base = G(['rev-list', '--max-parents=0', 'HEAD']).stdout.trim()
+  // 把夹具伪装成"本地领先远端 3 笔"：远端 ref 指向第 1 笔（真实批状态文件面对的同形输入）。
+  G(['update-ref', 'refs/remotes/origin/main', base])
+
+  const count = G([...COUNT_CMD, `origin/main..HEAD`])
+  const fixtureActual = count.stdout.trim()
+  const fixtureActualNum = Number(fixtureActual)
+  if (fixtureActual !== '3') {
+    bad('C9b. 夹具仓可造「本地领先远端 3 笔」', `rev-list 实测 ${JSON.stringify(fixtureActual)}（期望 "3"）—— 夹具不成立，演示无效`)
+  } else {
+    ok('C9b-1. 夹具仓自身可信（Impure 夹具：真 git，本地领先 origin/main 3 笔）', `rev-list --count → ${fixtureActual}`)
+
+    // ── 真正要钉的那条事实：**度量面依赖宿主 shell**，而错法朝向危险侧 ──────────────
+    // 两条命令与 handoff 配方**同形**（`git log origin/main..HEAD --oneline | Measure-Object…`），
+    // 只把工具面换成夹具的 git —— cwd 与"调用方仓库"都与我无关，读数是**结构**而不是本机 git 状态。
+    const EXES = [['PowerShell 7', 'pwsh'], ['Windows PowerShell', 'powershell']]
+    const PWSH_A = `$env:GIT_DIR=''; (git -C '${q}' log origin/main..HEAD --oneline | Measure-Object).Count`
+    const PWSH_L = `$env:GIT_DIR=''; (git -C '${q}' log origin/main..HEAD --oneline | Measure-Object -Line).Lines`
+    const probe = (exe) => {
+      const a = spawnSync(exe, ['-NoProfile', '-Command', PWSH_A], { encoding: 'utf8' })
+      const l = spawnSync(exe, ['-NoProfile', '-Command', PWSH_L], { encoding: 'utf8' })
+      return { a: (a.stdout ?? '').trim(), l: (l.stdout ?? '').trim(), aNum: Number((a.stdout ?? '').trim()), lNum: Number((l.stdout ?? '').trim()), err: (a.stderr ?? '').trim() + (l.stderr ?? '').trim() }
+    }
+    /** 两条读数都是**数字**才算宿主跑得动（0/'' 是命令根本没跑成的形态，不是机制读数）。 */
+    const ran = (r) => /^\d+$/.test(r.a) && /^\d+$/.test(r.l) && r.a !== '0' && r.l !== '0'
+    const probes = EXES.map(([name, exe]) => ({ name, ...probe(exe) }))
+    const live = probes.filter(p => !ran(p) && /not recognized|不是内部|CommandNotFound/i.test(p.err))
+    const usable = probes.filter(p => ran(p))
+    if (usable.length === 0) {
+      console.log('  ⚠ C9b SKIP (loud). 两个 PowerShell 宿主都跑不动这段命令 —— 计数面演示未验证：' +
+        `本机读数 ${probes.map(p => `${p.name}: Count=${JSON.stringify(p.a)}`).join(' / ')}；不猜、不报假绿`)
+      if (live.length > 0) bad('C9b SKIP 判据', `${live.map(p => p.name).join('/')} 不存在（CommandNotFound）—— 这属于"环境"，不该走进 SKIP`)
+    } else {
+      const shots = usable.map(p => `${p.name}: 默认 Count=${p.aNum} / -Line=${p.lNum}`).join(' ｜ ')
+      const differ = usable.find(p => p.aNum === 1 && p.lNum === fixtureActualNum)
+      const agree = usable.filter(p => p.aNum === fixtureActualNum && p.lNum === fixtureActualNum)
+      if (differ !== undefined) {
+        ok(`C9b-2. 计数机制演示（结构性防线）：同一份 git 输出 —— ${differ.name} 下 ` +
+          `\`Measure-Object\` 默认报 1（逐**对象**计数）/ \`-Line\` 报 ${fixtureActualNum} / \`rev-list --count\` 报 ${fixtureActualNum}`,
+          `逐宿主读数：${shots} —— 默认形态给出的是**便于绕过护栏**的那个方向（把 ≥5 读成 1），故契约只钉 \`rev-list --count\``)
+      } else if (agree.length === usable.length) {
+        // 本宿主复现不出现场（默认 `Measure-Object` 也与逐行同数）。**不算通过**：契约要钉的
+        // 机制在本机复现不了，就不能用一个绿点盖过去（实测优先于断言）；但**也不变红**——
+        // 那是宿主差异，不是本仓的缺陷。故 ⚠ 且把两个读数都留在读数区。
+        warn('C9b-2. 计数机制演示：本宿主**复现不出现场**（默认 `Measure-Object` 也报同数）',
+          `逐宿主读数：${shots} / rev-list=${fixtureActualNum} —— 命令行形态差异（原生命令多行输出是否折叠成单对象）` +
+          '随宿主变，故契约**只钉命令白名单**（`rev-list --count`），不把机制写成普适断言')
+      } else {
+        bad('C9b-2. 计数机制演示读数异常',
+          `逐宿主读数：${shots} / rev-list=${fixtureActualNum}（期望"默认 1 或 与逐行同数"两种形态之一）—— 夹具或命令串坏了`)
+      }
+    }
+  }
+} catch (error) {
+  bad('C9b. 计数机制演示夹具可运行', String(error?.message ?? error))
+} finally {
+  rmSync(TMPFIX, { recursive: true, force: true, maxRetries: 3 })
+}
+
+// ── C9c: **取数命令契约**必须真的在文档里（#115 AC「钉死取数命令 + 写明为何」）────────
+// 为什么单列一条：C9 只对账**数字**、C9b 只演示**机制**，两者都不会因为"契约整节被删掉"
+// 而变红（扰动实测 P7：删掉 915 字符后 exit 仍是 0）。于是"契约存在"必须有自己的断言——
+// 缺了它，本票的契约面就是**没被守着的**，下一个会话把整节删掉都不会有人知道。
+// 判据三条同现才算契约在场：① 只许 `rev-list --count` 的**命令原文**；
+// ② **为何**（误报机制：逐对象计数）；③ 该错法**朝向危险侧**（绕过护栏，不是随便一个 bug）。
+const CONTRACT_POINTS = [
+  ['命令原文：`git rev-list --count`（唯一许可）', /git rev-list --count/],
+  ['理由：`Measure-Object` 一族**逐对象**计数（不是逐行）', /逐\s*\*\*对象\*\*计数|逐对象计数/],
+  ['为何贵：错法朝向"把 ≥5 读成 1"、绕过护栏', /绕过护栏[\s\S]{0,60}不报警|恰好绕过护栏/],
+  ['命令白名单被测例钉住（C9 的判据指向它）', /只许.*rev-list --count|一律用.*rev-list --count/],
+]
+const missingContract = CONTRACT_POINTS.filter(([, re]) => !re.test(DOC)).map(([n]) => n)
+if (missingContract.length === 0)
+  ok('C9c. 取数命令契约在场（命令 + 为何 + 危险侧同现）', CONTRACT_POINTS.length + ' 条判据')
+else bad('C9c. 取数命令契约缺失/被削弱', `docs/batch-state.md 缺: ${missingContract.join(' / ')}`)
+
+report('BATCH-STATE VERIFY (C1–C9)')
