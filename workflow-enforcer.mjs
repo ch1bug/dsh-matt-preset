@@ -98,6 +98,23 @@
  * (`git log origin/<branch>..HEAD` / `git status -sb`): 已推但无落盘 → 补跑或
  * 记 marker，不静默丢素材. This plugin never runs that probe itself — it is
  * reminder-only and writes no file.
+ *
+ * HOME-DELETE REMINDER (#113): a THIRD declared face on the same structured core
+ * (`HOME_DELETE_TRIGGER`), for the 2026-10-18 third recurrence of the home-
+ * deletion incident. That command reached the ⚠ gate's blind spot: the gate list
+ * matches WORD RUNS at the command position (`rm -rf`), and a PowerShell cmdlet
+ * form — `Remove-Item -Recurse -Force $env:DSH_HOME` — names no gate word at
+ * all, so it was invisible. The new face is a COMBINATION, not a longer word
+ * list: a delete verb (`Remove-Item` / `ri` / `rm` / `rmdir` / `del` / `erase` /
+ * `rd`) at a command position AND a home-shaped target somewhere in that
+ * command's argv. Judged by the same `actionSurface` + `matchesSurface` core, so
+ * `write` / `edit` / `pty_send` / `str_replace_editor` bodies can never arm it
+ * (`echo "Remove-Item -Recurse $env:DSH_HOME"` is text — the target rides
+ * `echo`'s argv, whose command position names no delete verb), and `rm -rf
+ * ./dist` / `Remove-Item ./build` carry no home target. Reminder-only, like
+ * every other face here — nothing is intercepted (the honest boundary of #113:
+ * a repository-side guard cannot physically stop a shell command the agent is
+ * about to write).
  */
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
@@ -192,6 +209,12 @@ const retroPush = new WeakMap()
  * one-shot: the declaration is an opening move, not a checkpoint to re-nag
  * on every assembly (the same one-shot shape as `batchClose`). */
 const batchDeclared = new WeakMap()
+
+/** Sessions whose latest call matched the home-delete face (#113) — armed by the
+ * tool/call hook on that face's structured surface, consumed by the next
+ * assemble, which then injects the one-shot reminder inside the SAME
+ * `workflow:gates` section (one assemble, one shot, no extra section). */
+const homeDelete = new WeakMap()
 
 /** Skill-tool names that put a session into grill/triage interview mode. */
 const GRILL_SKILL_NAMES = ['grilling', 'grill-with-docs', 'grill-me', 'triage']
@@ -304,6 +327,41 @@ export const RETRO_TRIGGER = {
   // and, critically, a `.md` name would be swept up by the aggregation's own
   // `read EVERY .scratch/retro/*.md` and be mistaken for a candidate file.
   aggregatedMarker: '.scratch/retro/.aggregated',
+}
+
+/** Home-delete detections (#113): the arming decision for the one-shot reminder
+ * that fires when a command would recursively delete a home directory.
+ *
+ * WHY A NEW FACE, NOT A LONGER GATE WORD: the ⚠ gate list is word runs at a
+ * command position, and the command that deleted the real `~/.dsh` on
+ * 2026-10-18 (for the third time) was `Remove-Item -Recurse -Force
+ * $env:DSH_HOME` — a PowerShell cmdlet that names NO gate word at all, so it
+ * was structurally invisible to the gate. Appending `Remove-Item -Recurse` to
+ * the gate list would fix that one spelling and stay blind to `ri` / `rd` / the
+ * `del /s` form and to every future alias; worse, as a word run it would fire on
+ * `Remove-Item ./build` (a routine cleanup of one's own output).
+ *
+ * So the face is a COMBINATION, declared in TWO lists and judged structurally:
+ *   - `verbs` — the delete spellings, matched at a COMMAND POSITION (verbatim,
+ *     or as a path/executable-suffix-normalized token: `Remove-Item.exe`,
+ *     `/usr/bin/rm`).
+ *   - `targets` — the home-shaped targets, matched anywhere in that command's
+ *     argv as a path/name-equivalence test (`~/…`, an env-var expansion,
+ *     `.dsh`, `%USERPROFILE%\…`, `$HOME`).
+ * BOTH must hold in the SAME command segment, which is what keeps the negatives
+ * clean: `echo "Remove-Item -Recurse $env:DSH_HOME"` puts the target on
+ * `echo`'s argv while the delete verb is quoted payload — no segment satisfies
+ * both; `rm -rf ./dist` has the verb but no home target; `Remove-Item ./build`
+ * likewise. And `write` / `edit` / `pty_send` declare no action field at all
+ * (#79), so a document that merely mentions such a command can never arm this.
+ *
+ * The declared limits are the SAME as every other face's (option-laden command
+ * positions, PTY fragments, script-mediated deletes are uncovered by design) —
+ * 宁严勿宽: a false trigger costs a stop and dilutes a reminder the model must
+ * obey, so this never grows a substring fallback. */
+export const HOME_DELETE_TRIGGER = {
+  verbs: ['Remove-Item', 'ri', 'rm', 'rmdir', 'del', 'erase', 'rd'],
+  targets: ['$env:DSH_HOME', '$HOME', '~/.dsh', '%USERPROFILE%\\.dsh'],
 }
 
 /** The field NAMES of `.scratch/batch-state.md` that this plugin's reminders
@@ -748,6 +806,101 @@ function apiFaceMatches(seg, face) {
   return String(method ?? '').toLowerCase() === face.method.toLowerCase() && field && hasPath
 }
 
+/** Whether one command segment is a home-shaped TARGET: a path/name-equivalence
+ * test that mirrors where a home directory can be named in argv.
+ *
+ * NOTE ON THE TOKEN VOCABULARY: this runs on the tokens `shellWords` produced,
+ * and that tokenizer is SHARED with the ⚠ gate — it drops an UNQUOTED `$` (a
+ * bare `$var` is command-substitution punctuation to it, `shellWords`'s
+ * documented behaviour). So an unquoted `$env:DSH_HOME` arrives as
+ * `env:DSH_HOME` and `$HOME` as `HOME`, while a QUOTED `"$HOME\.dsh"` keeps its
+ * `$`. Matching the shell spelling alone would therefore have been blind to
+ * EVERY unquoted form — which is exactly the incident command (measured: the
+ * first draft of this face missed `Remove-Item … $env:DSH_HOME`, `rm -rf
+ * $HOME`, and every alias carrying them). The predicates below therefore accept
+ * both the shell spelling and its tokenizer residue.
+ *
+ *   - `~`-prefixed paths: any first component `~` (or `~user`) — `~/`, `~/.dsh`,
+ *     `~\.dsh`;
+ *   - a variable expansion naming a DECLARED home variable — `DSH_HOME` / `HOME` /
+ *     `USERPROFILE` — in the `$env:NAME` / `${env:NAME}` / `$NAME` / `%NAME%`
+ *     spellings or as the unquoted tokenizer residue `env:NAME` / `NAME`. The
+ *     variable name is matched as a WHOLE token, deliberately: `$env:TEMP` and
+ *     `%TEMP%` must NOT match (the temp directory is the SAFE target — the
+ *     reminder's whole point is that the target must be a path this command
+ *     created, and flagging the correct form would train the model to ignore it);
+ *   - the `.dsh` home directory as a PATH COMPONENT, not a substring:
+ *     `.dsh` / `.dsh/data` / `C:\Users\me\.dsh` hit, while `.dshbackup` and
+ *     `dsh-temp-home-abc` do not (the `targetMatches` name discipline).
+ *
+ * Deliberately NOT matched: a bare `$env:TEMP` / `%TEMP%` path (that is the SAFE
+ * target — the reminder's whole point is that the temp dir must be one this
+ * command created, and flagging the correct form would train the model to ignore
+ * it). */
+function homeTargetMatches(word) {
+  const raw = String(word ?? '').replace(/^["']|["']$/g, '')
+  if (raw === '') return false
+  // ~ / ~user prefix
+  if (/^~[\\/]/.test(raw) || raw === '~') return true
+  // A variable expansion naming a DECLARED home variable, in every spelling the
+  // two shells here use plus the tokenizer's residue. The name is matched as a
+  // WHOLE token so that `$env:TEMP` / `%TEMP%` stay unmatched (see the docblock).
+  const HOME_VARS = '(?:DSH_HOME|HOME|USERPROFILE)'
+  const expansion = new RegExp(
+    `^(?:`
+    + `\\$\\{?env:${HOME_VARS}\\}?`   // $env:DSH_HOME / ${env:DSH_HOME}
+    + `|\\$${HOME_VARS}\\b`          // $DSH_HOME / $HOME
+    + `|%${HOME_VARS}%`              // %USERPROFILE%
+    + `|(?:env:)?${HOME_VARS}`       // env:DSH_HOME / HOME (unquoted tokenizer residue)
+    + `)$`, 'i')
+  if (expansion.test(raw)) return true
+  // The same expansion carrying a path suffix: `env:DSH_HOME/data`,
+  // `%DSH_HOME%\\x`, `$HOME\\.dsh`, `HOME/x`.
+  const expansionPath = new RegExp(
+    `^(?:`
+    + `\\$\\{?env:${HOME_VARS}\\}?`
+    + `|\\$${HOME_VARS}\\b`
+    + `|%${HOME_VARS}%`
+    + `|(?:env:)?${HOME_VARS}`
+    + `)[\\\\/]`, 'i')
+  if (expansionPath.test(raw)) return true
+  // home directory named as a path component / bare token
+  if (/^\.dsh$/i.test(raw)) return true
+  const parts = raw.split(/[\\/]/).filter(p => p !== '' && p !== '.')
+  return parts.some(p => /^\.dsh$/i.test(p))
+}
+
+/** Whether a call is a HOME-DELETE candidate (#113): a delete verb at a COMMAND
+ * POSITION and a home-shaped target SOMEWHERE in that same command's argv.
+ *
+ * Both halves are required, and they must hold in the SAME segment — that is the
+ * whole discrimination (see `HOME_DELETE_TRIGGER`). A tool without a declared
+ * action field never reaches here.
+ *
+ * The VERB half rides the shared structured core (`matchesSurface`, the same
+ * matcher the ⚠ gate, the ticket nudges and the push trigger use): a delete verb
+ * is a word run at a COMMAND POSITION, which is exactly what that matcher
+ * resolves — including the transparent-prefix (`sudo rm …`), command-separator
+ * (`cd x && rm …`) and executed-payload (`bash -c "rm …"`) cases, for free and
+ * consistently with every other face. The TARGET half cannot ride it: the
+ * declaration is a list of *shapes* (a variable expansion, a `~` path, a `.dsh`
+ * path component), not word runs, so it is a predicate over the segment's argv.
+ * Both halves read the declaration; neither is a hand-copied second matcher. */
+function homeDeleteHit(call) {
+  const surface = actionSurface(call)
+  if (surface === null) return false
+  const verbHit = HOME_DELETE_TRIGGER.verbs.some(verb => matchesSurface(verb, surface))
+  if (!verbHit) return false
+  return surface.segments.some(seg => {
+    // Only a segment whose command position IS a declared verb can carry the
+    // action: the target must sit in the SAME command as the delete verb (an
+    // `echo "… $env:DSH_HOME"` puts the target on `echo`'s argv — inert).
+    const isDeleteVerb = HOME_DELETE_TRIGGER.verbs.some(v => commandToken(v) === seg.command)
+    if (!isDeleteVerb) return false
+    return seg.primary.some(tok => homeTargetMatches(tok))
+  })
+}
+
 /** Which ticket-lifecycle nudges a tool call arms, judged on its declared
  * action surface (the #79 core). A tool WITHOUT an action field (write / edit /
  * str_replace_editor / pty_send / run_code / …) has no surface → arms nothing,
@@ -938,6 +1091,9 @@ export const INJECTIONS = [
   // same knob as the retro faces it guards.
   { id: 'batch-state-probe-failed', marker: 'Batch-state probe FAILED', config: 'retroTriggerCheck' },
   { id: 'batch-declared', marker: 'Batch declared', config: 'batchDeclareCheck' },
+  // #113 — the home-delete reminder. Reminder-only, on its own knob: a project
+  // that wants this face silent can switch it off without touching the ⚠ gate.
+  { id: 'home-delete', marker: 'Home-delete candidate', config: 'homeDeleteCheck' },
 ]
 
 /** The reminder section text for one request, or null when nothing applies. */
@@ -977,6 +1133,25 @@ async function reminderText(agent, config, ctx, assembled) {
         }
       }
     }
+  }
+  if (homeDelete.get(agent.session) === true && config.homeDeleteCheck !== false) {
+    homeDelete.delete(agent.session) // consume: one reminder per matched call
+    parts.push([
+      '⚠ Home-delete candidate — this command deletes a home-shaped target.',
+      'A recursive delete may only ever target a path THIS command created itself',
+      '(`mktemp` / `mkdtemp` output); never a path re-derived from an environment',
+      'variable. `$HOME` and `$PID` are READ-ONLY automatic variables in',
+      'PowerShell — assigning to `$home` is a NON-TERMINATING error, so the script',
+      'keeps running with the REAL home and every derived path silently falls back',
+      'to it (that is how `~/.dsh` was deleted on 2026-10-18, the third time this',
+      'happened). Name temporary-directory variables something else (`$tmpHome`).',
+      'To run something against an isolated home, use',
+      '`node scripts/with-temp-home.mjs -- <cmd…>` instead of hand-writing the',
+      'sandbox — it creates the home under `os.tmpdir()`, refuses unsafe targets',
+      'before creating and again before deleting, and removes exactly the path it',
+      'created. If you still write it by hand: echo the resolved absolute path',
+      'first, and delete only that echoed path.',
+    ].join(' '))
   }
   if (foldIntent.get(agent.session) === true && config.contextEvidence !== false) {
     foldIntent.delete(agent.session) // consume: one evidence line per claim
@@ -1158,6 +1333,12 @@ export function apply(ctx, config = {}) {
       // and has the agent's cwd; arm BOTH here and let the assembly pick.
       retroPush.set(session, true)
     }
+    // Home-delete reminder (#113): a command that would recursively delete a home
+    // directory arms the one-shot warning. Judged on the SAME structured core as
+    // the ⚠ gate and every other face here — the combination is declared in
+    // `HOME_DELETE_TRIGGER`, so a tool without an action field (write / edit /
+    // pty_send / …) can never arm it. Reminder-only: nothing is intercepted.
+    if (homeDeleteHit(call)) homeDelete.set(session, true)
   })
 
   // Arm context evidence: assistant fold-in claims AND user assessments of

@@ -251,6 +251,26 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   安装器现在对 `DSH_HOME` / store 根 / 删除目标做纯路径守卫（`lib/safe-target.mjs`，
   `tests/verify-installer-guards.mjs` 钉住），`scripts/verify-all.mjs` 也会给子进程注入
   临时 `DSH_HOME`；但守卫只覆盖安装器与套件，**手工命令仍靠上面的纪律**。
+- **只读自动变量陷阱（第三次事故的直接机制，2026-10-18）**：手工造沙箱 home 的那段
+  PowerShell 用了 `$home` 作变量名，而 `$HOME` 是 PowerShell 的**只读自动变量**（大小写不敏感）
+  ——赋值是**非终止错误**（stderr 一行，脚本继续），`$home` 仍是真实 profile；随后
+  `New-Item $home` 因目标已存在而失败，**沙箱 home 从未建出来**，`Join-Path $home '.dsh'` /
+  `$env:DSH_HOME` 静默指向真实 home，收尾按环境变量展开的递归删除删掉了真实 `~/.dsh`。
+  所以：临时目录变量**换名**（`$tmpHome`），删除目标只能是**本条命令自己建出来的路径**。
+  这个坑相邻工作区（`dsh-ops`）的 CI 工作流里早已写明并留了注释（该仓
+  `.github/workflows/ci.yml` 的 hermetic 步骤）：
+  「Not `$home`: that name is PowerShell's own read-only variable for the user profile, so
+  assigning to it fails this step before the suite ever runs」——即"别用 `$home` 这个名字：
+  它是 PowerShell 自己的只读变量，赋值会让这一步在套件跑起来之前就失败"），同一处还提醒
+  `[System.IO.Path]::GetTempPath()` 可能与 Node 的 `os.tmpdir()` 不一致、应改用两边都认的
+  `$env:RUNNER_TEMP`。
+- **别手写这段 PowerShell**：需要一条命令跑在隔离 home 里时，用
+  `node scripts/with-temp-home.mjs -- <cmd…>` —— 它在 `os.tmpdir()` 下 `mkdtemp`、**建之前**
+  过 `assertSafeTempHome`、**删之前再过一次**、且只删自己建的那一个路径（不是任何环境变量的
+  再解析）；子进程拿到 `DSH_HOME=<那个路径>`、stdio 继承、退出码透传，缺 `--` / 空命令时
+  **响亮失败**。守卫纯函数由 `tests/verify-temp-home-guard.mjs` 钉住。
+  `workflow-enforcer` 另认「删除动词 + home 目标」的组合（`HOME_DELETE_TRIGGER`）并提醒一次
+  —— **只提醒、不拦截**，不是物理防线（真正的拦截要 harness 侧 pre-tool hook，#113 边界）。
 
 ## 2. 宿主锚点（ADR-0008）
 

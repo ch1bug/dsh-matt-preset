@@ -31,16 +31,17 @@ everywhere, or change `marker:`.
 
 ## What it injects
 
-Eleven sections, each with its own switch in the per-row config below (the ⚠ line
-has none). The baseline and the grill contract re-render on every assembly; the
-rest fire once and are consumed. Five judge an **action** through the structured
-判定面 below — the ⚠ high-risk line, the ticket close, the ticket create, and
-#71's push-triggered retro (the per-ticket 落盘 reminder, the batch-end
-aggregation when the batch already carries the `retro:` marker, or the loud
-probe-failure report when that file could not be read) — while four are
-**conversation observations** armed by text keywords (batch close-out,
+Twelve sections, each with its own switch in the per-row config below (the ⚠ line
+has none; the three #71 retro faces share one). The baseline and the grill
+contract re-render on every assembly; the rest fire once and are consumed.
+**Seven judge an action** through the structured 判定面 below — the ⚠ high-risk
+line, the ticket close, the ticket create, #71's three push-triggered retro
+faces (the per-ticket 落盘 reminder, the batch-end aggregation when the batch
+already carries the `retro:` marker, the loud probe-failure report when that
+file could not be read), and #113's home-delete reminder — while **four are
+conversation observations** armed by text keywords (batch close-out,
 fold-in/capacity evidence, grill/triage mode, and the batch declaration), so
-those never fire from a tool call alone; the baseline is unconditional.
+those never fire from a tool call **alone**; the baseline is unconditional.
 The split is deliberate, not incidental: a push **has** a `(toolName, argv)`
 action surface, so it is judged there and only there (the text layer is
 structurally excluded — 宁严勿宽, #71); a batch declaration has no tool call at
@@ -130,6 +131,18 @@ all, so its only possible face is the text layer.
   `docs/batch-state.md` — copy that template, do not invent fields. The `retro:`
   line is the **agent's** to write; this plugin only reads the marker and is
   reminder-only (it writes no file).
+- A command that would **recursively delete a home directory** (#113, structured
+  — see 判定面 below) gets a one-shot **Home-delete candidate** `⚠` reminder on
+  the next assembly (consumed after firing): the target may only ever be a path
+  **this command created itself** (`mktemp` / `mkdtemp` output) and never one
+  re-derived from an environment variable; **`$HOME` and `$PID` are READ-ONLY
+  automatic variables in PowerShell**, so `$home = …` is a **non-terminating**
+  error and every derived path silently falls back to the real home — name
+  temporary-directory variables something else (`$tmpHome`); and for an isolated
+  run, use `` `node scripts/with-temp-home.mjs -- <cmd…>` `` instead of
+  hand-writing the sandbox. **Reminder-only — nothing is intercepted** (a
+  repository-side guard cannot physically stop a shell command the agent is
+  about to write; that is #113's declared boundary).
 
 ## Gate list
 
@@ -160,6 +173,7 @@ a reminder the model is supposed to obey.
 | 单个词的门（`sandcastle` / `run-ticket`） | 同上 | 调用链（`RUNNERS`：`npx`/`pnpm`/`tsx`/`node`/`python`/`sh`/`bash`/`pwsh`…）上目标的**名字**匹配：basename 去扩展名或任一路径组件等于该门——`.sandcastle/run-ticket.mts` 命中 `sandcastle`/`run-ticket`；`sandcastle-notes.mjs`、`run-ticket-helpers.mjs` 不命中（名字相等，不是子串） |
 | **票生命周期 nudge**（关票 fresh-subagent 抽查 O5 / 建票 D20，`TICKET_LIFECYCLE`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（#82）：关票 = 命令位置词串 `gh issue close`；**关票的 API 形态**仍走 shell 的 `command` 字段，但其判定面**显式声明**为 `gh api`（命令位置 + 子命令）+ 声明的方法 flag（`-X`/`--method` = `PATCH`）+ 声明的载荷 flag（`-f`/`--raw-field`、`-F`/`--field` = `state=closed`）+ `issues/<n>` 路径 token；建票 = 命令位置词串 `gh issue create`。`write`/`edit`/`str_replace_editor` 正文、`echo`、commit 消息、`--grep`、`--body`/`--title` 里提到这些命令**永不** arm；`gh api` 的其余面显式不覆盖（`--input -` 读 stdin、非 `PATCH` 方法、其它字段、紧跟未声明 flag 的 endpoint——那个 token 可能是该 flag 的值——交 #71 事实探测） |
 | **#71 push 触发面**（retro：每票落盘 / 批末聚合，`RETRO_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**：push = 命令位置词串 `git push`（`RETRO_TRIGGER.push.words`），判定输入**恒为** `(toolName, argv)`；工具层 + 命令层都经 `matchesSurface`，与 ⚠ 门的 push 追随行**同一次判定、同一个声明**（两者不可能分歧）。**文本事件层永不 arm push**（`assistant/message` / `user/message` / `text-chunks` / `agent/inbox/spliced` 结构上无动作字段；会话/思考里讨论"推送/push"、retro 文档、handoff 正文一律不触发——宁严勿宽）。**批宣告是唯一允许文本面的面**：`RETRO_TRIGGER.batchDeclare` 的关键词组（`攒批`/`批量模式`/`系列处理`/`大系列`/`这批攒批`）——宣告是**人说的话**，根本没有工具调用，文本层是它唯一可能的判定面（与 `BATCH_CLOSE_KEYWORDS` 同构），读成两个**存在性** marker——`RETRO_TRIGGER.retroMarker`（`retro:`）与 `RETRO_TRIGGER.aggregatedMarker`（`.scratch/retro/.aggregated`），都只判**存在性**、不解析任何表格/内容，两者组合决定落盘 vs 聚合（`retro:` 且无 `.aggregated` → 聚合；`retro:` 且有 `.aggregated` → 落盘，不聚合但不丢素材）。**探针失败是独立的响亮路径**：读 `` `.scratch/batch-state.md` `` 失败（非 `ENOENT`）走 `Batch-state probe FAILED` 节（**无 `⚠` 前缀**），绝不静默降级成"无 marker"。**声明不覆盖**：PTY 分片写（`pty_send`）、经脚本/`xargs`/`node deploy.mjs` 间接 push、其它工作区工具面（`write`/`edit` 无动作字段）一律不触发——与 #79 declared-not-covered 同口径，交**事实探测**兜底（`git log origin/<branch>..HEAD` / `git status -sb`），本插件**不为它长模糊匹配** |
+| **#113 home-delete 提醒面**（`HOME_DELETE_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（删除动词半边走 `matchesSurface`，与 ⚠ 门同一匹配器，故 `sudo rm …`、`cd x && rm …`、`bash -c "rm …"` 与其它面一致地免费覆盖），但判定是**组合**而非更长的词表：**删除动词**（`Remove-Item` / `ri` / `rm` / `rmdir` / `del` / `erase` / `rd`，取命令位置、经 `commandToken` 归一化）**且**该命令 argv 里有**home 形态目标**（`$env:DSH_HOME` / `$HOME` / `~/.dsh` / `%USERPROFILE%\.dsh`）。事故命令 `Remove-Item -Recurse -Force $env:DSH_HOME` 对旧 ⚠ 门**完全隐形**（cmdlet 形态不含任何门词），故新增此面。**两半必须落在同一条命令段**，这正是负例的判据：`echo "Remove-Item -Recurse $env:DSH_HOME"` 里 `echo` 占**命令位置**（删除动词只出现在 `echo` 的**参数**里，不是命令位置），`rm -rf ./dist` / `Remove-Item ./build` 无 home 目标 —— **均不触发**；`write`/`edit`/`pty_send` 正文结构上永不 arm。⚠ **token 口径**：本面读的是 `shellWords` 产出的 token，而该分词器（与 ⚠ 门共用）会**丢掉未加引号的 `$`**（`shellWords` 明文行为）——未加引号的 `$env:DSH_HOME` 到达时是 `env:DSH_HOME`、`$HOME` 是 `HOME`，加引号的 `"$HOME\.dsh"` 才保留 `$`；故 predicates 同时接受 shell 拼写与其分词残留（实测：只按 shell 拼写匹配会漏掉**全部未加引号形态**，正是事故命令那条）。目标里的 `$env:TEMP` / `%TEMP%` 之类**故意不匹配**（那是**安全**目标，提醒它等于教模型忽略本提醒）——变量名按**整 token** 匹配（`DSH_HOME`/`HOME`/`USERPROFILE`），不是"任意 `$env:` 展开"（第一版正是后者，实测 `$env:TEMP` 会触发）。**声明不覆盖**：选项在前的命令位置、PTY 分片、脚本间接触发一律不触发——与 #79 declared-not-covered 同口径，**不为它长模糊匹配** |
 | `write` / `edit` / `str_replace_editor` / `pty_send` / `pty_open` / `run_code` / 其它工作区工具面 | — | **显式不覆盖**：带正文、分片写入或**程序正文**的参数永不命中，不用模糊匹配弥补（PTC 下经 SDK 的嵌套调用是真实 `tool/call`，仍按该调用的动作字段照常判定） |
 
 Which flag values are executed is **declared** (`EXEC_FLAGS`: shell `-c`,
@@ -201,6 +215,22 @@ to cover them.
 > covers #71's `RETRO_TRIGGER`, whose declared elements (`push.words` /
 > `batchDeclare.words` / `retroMarker` / `aggregatedMarker`) are written verbatim
 > in the row above, so extending the guard to that declaration cannot drift.
+> V32 pins #113's home-delete reach (the incident command + alias / quoted /
+> `~`-form / wrapper / command-list / executed-payload), V33 the false positives
+> the ticket outlaws (a quoted payload, a `write`/`edit`/`str_replace_editor`
+> body, an ordinary clean-up of one's own output, and a **temp-directory**
+> target — the safe form, flagging which would train the model to ignore the
+> reminder), V33b the reminder's content contract (the read-only-variable trap,
+> the `$tmpHome` naming rule, the `scripts/with-temp-home.mjs` pointer, the
+> own-created-path rule), V33c the target VOCABULARY matrix (every declared home
+> spelling fires; `$env:TEMP` / `%TEMP%` and other temp spellings never do — the
+> unit-level pin for the deliberate temp exclusion, which the real-command
+> negatives alone did not catch), V34 that the arming really reads
+> `HOME_DELETE_TRIGGER`
+> (a runtime-added verb arms, removing it disarms), V34b that every declared
+> verb **and** target is reachable from a canonical invocation (a dead verb is
+> lost coverage, not a tightening — the V20 discipline), and V34c that this row
+> documents every declared element.
 
 ### Per-project override: `workflow-gates.yml`
 
@@ -235,6 +265,7 @@ config:
   batchCloseCheck: true          # AUTO-HANDOFF nudge on a batch close-out (default true)
   retroTriggerCheck: true        # #71: per-ticket 落盘 / batch-end aggregation after a real push (default true)
   batchDeclareCheck: true        # #71: batch-state.md initialization on a batch declaration (default true)
+  homeDeleteCheck: true          # #113: home-delete candidate warning after a delete-verb + home-target call (default true)
   gatesFile: workflow-gates.yml  # project file name/path (default)
   includeDefault: false          # merge project file with the default list
   extraExternal: ["./release.sh"]

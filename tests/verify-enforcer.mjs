@@ -1,9 +1,10 @@
 /**
- * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V31; the
+ * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V34; the
  * structured gate-matching block added by #79 is V18–V20, the structured
  * ticket-lifecycle nudge arming added by #82 is V21–V23, V24 pins the doc's
- * 「What it injects」+ config block against `INJECTIONS`, and the
- * push-triggered retro added by #71 is V25–V31).
+ * 「What it injects」+ config block against `INJECTIONS`, the push-triggered
+ * retro added by #71 is V25–V31, and the home-delete reminder added by #113 is
+ * V32–V34).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -1308,6 +1309,248 @@ if (aggregateText(v31c) && !retroText(v31c))
 else bad('V31c. unreadable .aggregated suppressed the aggregation',
   `aggregate: ${aggregateText(v31c)} | lands: ${retroText(v31c)}`)
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── V32–V34 (#113): the HOME-DELETE reminder. The third recurrence of the
+// home-deletion incident (2026-10-18) reached the ⚠ gate's blind spot: the gate
+// list matches WORD RUNS at the command position (`rm -rf`), so the PowerShell
+// cmdlet form `Remove-Item -Recurse -Force $env:DSH_HOME` — which names no gate
+// word at all — was structurally invisible to it. The new face is a
+// COMBINATION declared in `HOME_DELETE_TRIGGER` (a delete verb at a command
+// position AND a home-shaped target in that same command's argv), judged on the
+// SAME structured core (`actionSurface` + `matchesSurface`) as every other face
+// here. Reminder-only: nothing is intercepted (#113's honest boundary — a
+// repository-side guard cannot physically stop a shell command).
+//
+// V32 is the POSITIVE matrix (AC4): the three spellings the ticket names, plus
+// the verb/alias and wrapper reach the declaration promises.
+// V33 is the NEGATIVE matrix (AC5, 宁严勿宽): the exact false positives the
+// ticket outlaws — a quoted payload, a `write` body, an ordinary clean-up of
+// one's own output, and a temp-directory target (the SAFE form — flagging it
+// would train the model to ignore the reminder).
+// V34 pins that the arming READS the declaration (runtime-added verb arms,
+// removal disarms) and that the whole verb/alias family is reachable — a
+// hand-copied matcher or a dead declared verb reddens it.
+//
+// Non-vacuous: deleting the `homeDeleteHit` wiring (or the injected section)
+// reddens V32 wholesale; widening the judgement to a substring over the
+// serialized call — the pre-#79 bug shape — reddens V33.
+const HOME_MARK = 'Home-delete candidate'
+const homeText = (text) => text.includes(HOME_MARK)
+const homeDown = (label, text) => bad(label, (text.split('\n').find(l => l.includes(HOME_MARK)) ?? text.slice(-200)))
+
+// V32 (#113 AC4): the ticket's own command, verbatim — the exact spelling that
+// was invisible to the gate.
+const h1 = await afterCall('pwsh', { command: 'Remove-Item -Recurse -Force $env:DSH_HOME' }, 601)
+if (homeText(h1)) ok('V32a. Remove-Item -Recurse -Force $env:DSH_HOME → home-delete reminder (AC4)')
+else homeDown('V32a. the incident command stayed invisible', h1)
+
+const h2 = await afterCall('bash', { command: 'rm -rf $HOME' }, 602)
+if (homeText(h2)) ok('V32b. rm -rf $HOME → home-delete reminder (AC4)')
+else homeDown('V32b. rm -rf $HOME missed', h2)
+
+const h3 = await afterCall('cmd', { command: 'del /s %USERPROFILE%\\.dsh' }, 603)
+if (homeText(h3)) ok('V32c. del /s %USERPROFILE%\\.dsh → home-delete reminder (AC4)')
+else homeDown('V32c. del /s home form missed', h3)
+
+// One-shot: consumed by the assembly that fires it, like every other face. The
+// assertion is CONJUNCTIVE on purpose — "no repeat" alone is satisfied by an
+// implementation that never fires at all (measured: with `homeDeleteHit` disabled
+// this case stayed green while V32a–V32c went red, i.e. it was vacuous). It now
+// requires that the first render DID carry the line and the next did NOT.
+const h1b = await render()
+if (homeText(h1) && !homeText(h1b)) ok('V32d. home-delete reminder fires once then is consumed (no repeat)')
+else homeDown('V32d. consumed-once contract broken', `first fired: ${homeText(h1)} | second fired: ${homeText(h1b)}`)
+
+// The declared reach — aliases, `~`-forms, the unix rmdir, wrappers and a
+// command list (red if the verb list is reduced to one spelling, or if only a
+// line's FIRST command is judged).
+const HOME_REACH = [
+  ['pwsh', { command: 'ri -Recurse -Force $env:DSH_HOME' }, 'alias ri'],
+  ['pwsh', { command: 'Remove-Item -Recurse -Force "$HOME\\.dsh"' }, 'quoted $HOME'],
+  ['bash', { command: 'rm -rf ~/.dsh' }, '~/.dsh'],
+  ['bash', { command: 'rmdir -p ~/.dsh' }, 'rmdir'],
+  ['bash', { command: 'sudo rm -rf $HOME/.dsh' }, 'sudo wrapper'],
+  ['bash', { command: 'cd x && Remove-Item -Recurse -Force $env:DSH_HOME' }, 'command list'],
+  ['bash', { command: 'bash -c "rm -rf $HOME/.dsh"' }, 'executed payload'],
+]
+const homeReachMisses = []
+for (const [i, [name, args, label]] of HOME_REACH.entries()) {
+  const text = await afterCall(name, args, 610 + i)
+  if (!homeText(text)) homeReachMisses.push(label)
+}
+if (homeReachMisses.length === 0)
+  ok('V32e. declared reach: alias / quoted $HOME / ~/.dsh / rmdir / wrapper / command-list / payload all fire', `${HOME_REACH.length} cases`)
+else bad('V32e. declared home-delete reach lost', homeReachMisses.join(', '))
+
+// V33 (#113 AC5, 宁严勿宽): the false positives the ticket outlaws. Each of
+// these is a REAL shape from this repo's daily work — a cleanup of one's own
+// build output, a doc/body mentioning the incident command, and (critically)
+// the SAFE sandbox form whose target is the temp directory.
+const HOME_FALSE_POSITIVES = [
+  ['bash', { command: 'echo "Remove-Item -Recurse $env:DSH_HOME"' }, 'echo of the incident command'],
+  ['bash', { command: 'rm -rf ./dist' }, 'ordinary build cleanup'],
+  ['bash', { command: 'Remove-Item ./build -Recurse' }, 'ordinary PowerShell cleanup'],
+  ['bash', { command: 'rm -rf /tmp/dsh-enforcer-x' }, 'temp-dir target (the SAFE form)'],
+  ['bash', { command: 'rm -rf $env:TEMP/dsh-x' }, 'temp-VARIABLE target (the SAFE form — must not be flagged)'],
+  ['cmd', { command: 'rmdir /s %TEMP%\\dsh-x' }, 'temp-VARIABLE target, cmd spelling'],
+  ['bash', { command: 'rm -rf node_modules' }, 'dependency cleanup'],
+  ['bash', { command: 'git commit -m "note: rm -rf $HOME 的事故"' }, 'commit message'],
+  ['bash', { command: 'git log --grep="Remove-Item -Recurse $env:DSH_HOME"' }, '--grep pattern'],
+  ['write', { file_path: 'docs/x.md', content: '事故命令是 Remove-Item -Recurse -Force $env:DSH_HOME' }, 'write body (AC5 verbatim)'],
+  ['edit', { file_path: 'x.md', old_string: 'a', new_string: 'rm -rf $HOME' }, 'edit body'],
+  ['str_replace_editor', { command: 'create', path: 'x.md', file_text: 'rm -rf ~/.dsh' }, 'str_replace_editor body'],
+  ['pty_send', { id: 'p', data: 'rm -rf $HOME\n' }, 'PTY fragment (declared not covered)'],
+]
+const homeFalsePositives = []
+for (const [i, [name, args, label]] of HOME_FALSE_POSITIVES.entries()) {
+  const text = await afterCall(name, args, 630 + i)
+  if (homeText(text)) homeFalsePositives.push(label)
+}
+if (homeFalsePositives.length === 0)
+  ok('V33. AC5 negatives: quoted payload / own-output cleanup / temp target / text bodies → no reminder', `${HOME_FALSE_POSITIVES.length} cases`)
+else bad('V33. home-delete false positive', homeFalsePositives.join(' | '))
+
+// The reminder's content contract: it must name the read-only-variable trap, the
+// remedy (`scripts/with-temp-home.mjs`), and the "only a path this command
+// created" rule. A reminder that merely says "careful" is not the fix.
+const h4 = await afterCall('pwsh', { command: 'Remove-Item -Recurse -Force $env:DSH_HOME' }, 650)
+const h4parts = {
+  'names the read-only trap': /READ-ONLY/.test(h4),
+  'names $HOME': h4.includes('$HOME'),
+  'names $tmpHome guidance': h4.includes('$tmpHome'),
+  'points at the helper': h4.includes('scripts/with-temp-home.mjs'),
+  'own-created-path rule': h4.includes('THIS command created'),
+}
+const h4missing = Object.entries(h4parts).filter(([, hit]) => !hit).map(([k]) => k)
+if (homeText(h4) && h4missing.length === 0)
+  ok('V33b. reminder carries the read-only-variable trap + helper pointer + own-path rule')
+else bad('V33b. reminder content incomplete', `fired: ${homeText(h4)} | missing: ${h4missing.join(', ') || '—'}`)
+
+// V33c: the target VOCABULARY itself — a direct matrix over the spellings that
+// must fire and the ones that must not. This is the case that pins the
+// deliberate exclusion of `$env:TEMP` / `%TEMP%`: the temp directory is the SAFE
+// target, and flagging it would train the model to ignore the reminder. It is a
+// UNIT-level pin on top of V33's behavioural negatives because the first draft of
+// this face matched ANY `$env:` expansion (measured: `$env:TEMP` fired) — a
+// widening that V33's real-command samples alone did not catch.
+const HOME_TARGET_POSITIVES = [
+  '~/.dsh', '~\\.dsh', '~', '$env:DSH_HOME', '${env:DSH_HOME}', 'env:DSH_HOME',
+  '$HOME', '$DSH_HOME', '$HOME/x', '%USERPROFILE%\\.dsh', '%DSH_HOME%',
+  'HOME', 'USERPROFILE', 'env:USERPROFILE', '.dsh', 'C:\\Users\\me\\.dsh',
+  '/home/me/.dsh', 'foo/.dsh/bar', '$HOME\\.dsh', 'env:DSH_HOME/x',
+]
+const HOME_TARGET_NEGATIVES = [
+  '$env:TEMP', '%TEMP%', 'env:TEMP/x', '$env:TEMP\\x', '$env:RUNNER_TEMP',
+  '/tmp/dsh-enforcer-x', './dist', 'node_modules', 'build', 'dsh-temp-home-abc',
+  '.dshbackup', 'mydsh', 'C:\\Users\\me\\projects', 'HOME_DIR', 'HOMEDRIVE',
+]
+const targetMisses = []
+const targetFalsePositives = []
+for (const [i, probe] of [...HOME_TARGET_POSITIVES, ...HOME_TARGET_NEGATIVES].entries()) {
+  const want = i < HOME_TARGET_POSITIVES.length
+  const text = await afterCall('bash', { command: `rm -rf "${probe}"` }, 700 + i)
+  const fired = homeText(text)
+  if (want && !fired) targetMisses.push(probe)
+  if (!want && fired) targetFalsePositives.push(probe)
+}
+if (targetMisses.length === 0 && targetFalsePositives.length === 0)
+  ok('V33c. target vocabulary: declared home spellings fire, temp-directory spellings never do', `${HOME_TARGET_POSITIVES.length} pos / ${HOME_TARGET_NEGATIVES.length} neg`)
+else bad('V33c. target vocabulary drifted',
+  `missed: ${targetMisses.join(', ') || '—'} | false positives: ${targetFalsePositives.join(', ') || '—'}`)
+
+// V34 (#113 AC「声明式、非子串」): the arming READS the declaration — add a verb
+// at runtime and it arms; remove it again and it stops. A hand-copied matcher
+// (or any hard-coded path that bypasses `HOME_DELETE_TRIGGER`) leaves this
+// green, so this is the non-vacuous single-source-of-truth pin (same shape as
+// V23b for `TICKET_LIFECYCLE`).
+import { HOME_DELETE_TRIGGER } from '../workflow-enforcer.mjs'
+// `try/finally` (not a bare push/pop pair): the runtime mutation below is shared
+// module state, so an assertion that throws between them would leave the
+// declaration polluted for every LATER case in this file — a flake that would
+// read as someone else's failure.
+let homeMutated
+let homeUnmutated
+// Truncate back to the ORIGINAL LENGTH rather than `pop()`: `pop()` removes the
+// LAST element, which is only the pushed one while nothing else appended in
+// between — a length snapshot is order-independent and exception-safe.
+const homeVerbCount = HOME_DELETE_TRIGGER.verbs.length
+try {
+  HOME_DELETE_TRIGGER.verbs.push('wipe-home-probe')
+  homeMutated = await afterCall('bash', { command: 'wipe-home-probe -rf $HOME' }, 660)
+} finally {
+  HOME_DELETE_TRIGGER.verbs.length = homeVerbCount
+}
+homeUnmutated = await afterCall('bash', { command: 'wipe-home-probe -rf $HOME' }, 661)
+if (homeText(homeMutated) && !homeText(homeUnmutated))
+  ok('V34. arming reads HOME_DELETE_TRIGGER.verbs (runtime-added verb arms, removal disarms — #113 single source)')
+else bad('V34. home-delete declaration is not the arming single source',
+  `add → ${homeText(homeMutated) ? 'armed' : 'did NOT arm'} | remove → ${homeText(homeUnmutated) ? 'still armed' : 'disarmed'}`)
+
+// Every DECLARED verb must be reachable from a real invocation — a dead verb is
+// lost coverage, not a tightening (the V20 discipline). `rd` and `erase` are the
+// two the incident's family implies but nobody would think to test.
+const HOME_VERB_CANONICAL = {
+  'Remove-Item': { name: 'pwsh', arguments: { command: 'Remove-Item -Recurse -Force $env:DSH_HOME' } },
+  'ri': { name: 'pwsh', arguments: { command: 'ri -Recurse -Force $HOME' } },
+  'rm': { name: 'bash', arguments: { command: 'rm -rf $HOME' } },
+  'rmdir': { name: 'bash', arguments: { command: 'rmdir ~/.dsh' } },
+  'del': { name: 'cmd', arguments: { command: 'del /s %USERPROFILE%\\.dsh' } },
+  'erase': { name: 'cmd', arguments: { command: 'erase /s %USERPROFILE%\\.dsh' } },
+  'rd': { name: 'cmd', arguments: { command: 'rd /s %USERPROFILE%\\.dsh' } },
+}
+const deadVerbs = []
+const unprovenVerbs = []
+// Step numbers come from the ITERATION INDEX, not `verbs.indexOf(verb)`: with a
+// duplicated declaration entry `indexOf` returns the FIRST match for both, so two
+// cases would share one step number (and the numbering would silently depend on
+// array order rather than on the loop).
+for (const [i, verb] of HOME_DELETE_TRIGGER.verbs.entries()) {
+  const canonical = HOME_VERB_CANONICAL[verb]
+  if (canonical === undefined) { unprovenVerbs.push(verb); continue }
+  const text = await afterCall(canonical.name, canonical.arguments, 670 + i)
+  if (!homeText(text)) deadVerbs.push(verb)
+}
+// Every declared TARGET must likewise be reachable (a target nobody can write is
+// a declaration the model can never benefit from). The probe is DERIVED from the
+// declaration — `probe(target)` builds the command that carries exactly that
+// declared target — so the correspondence is checked, not assumed: a hand-written
+// parallel list would let both sides drift together (and a bare
+// `probes.length === targets.length` count is near-tautological).
+const targetProbeCall = (target) => {
+  // The declared spellings are shell syntax; each is carried into a real command
+  // for the shell that actually writes it that way.
+  if (target.startsWith('%')) return { name: 'cmd', arguments: { command: `del /s ${target}` } }
+  if (target.startsWith('$env:')) return { name: 'pwsh', arguments: { command: `Remove-Item -Recurse -Force ${target}` } }
+  if (target.startsWith('$')) return { name: 'bash', arguments: { command: `rm -rf ${target}` } }
+  return { name: 'bash', arguments: { command: `rm -rf ${target}` } }
+}
+const deadTargets = []
+for (const [i, target] of HOME_DELETE_TRIGGER.targets.entries()) {
+  const call = targetProbeCall(target)
+  // Self-check the probe really carries the declared target (the needle must hit).
+  if (!String(call.arguments.command).includes(target)) {
+    deadTargets.push(`${target} (probe does not carry it)`)
+    continue
+  }
+  const text = await afterCall(call.name, call.arguments, 680 + i)
+  if (!homeText(text)) deadTargets.push(target)
+}
+if (deadVerbs.length === 0 && unprovenVerbs.length === 0 && deadTargets.length === 0)
+  ok('V34b. every declared verb and target is reachable from a canonical invocation', `${HOME_DELETE_TRIGGER.verbs.length} verbs / ${HOME_DELETE_TRIGGER.targets.length} targets`)
+else bad('V34b. dead / unproven home-delete declaration',
+  `unproven: ${unprovenVerbs.join(', ') || '—'} | dead verbs: ${deadVerbs.join(', ') || '—'} | dead targets: ${deadTargets.join(', ') || '—'}`)
+
+// V34c: the documented 判定面 row must not drift from the declaration — the same
+// doc↔code guard V17/V23c apply (one-directional by nature: that row is prose).
+const docHome = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
+  .split('\n').find(l => l.includes('HOME_DELETE_TRIGGER')) ?? ''
+const declaredHomeElements = [...HOME_DELETE_TRIGGER.verbs, ...HOME_DELETE_TRIGGER.targets]
+const missingHomeInDoc = declaredHomeElements.filter(s => !docHome.includes(s))
+if (docHome !== '' && missingHomeInDoc.length === 0)
+  ok('V34c. 判定面 row documents every declared home-delete element (no doc↔code drift)', `${declaredHomeElements.length} elements`)
+else bad('V34c. home-delete doc/declaration drift',
+  docHome === '' ? 'no 判定面 row mentioning HOME_DELETE_TRIGGER' : `missing from the row: ${missingHomeInDoc.join(', ')}`)
+
 // Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
@@ -1331,6 +1574,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V31) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V34) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
