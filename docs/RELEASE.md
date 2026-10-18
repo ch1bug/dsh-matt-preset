@@ -47,7 +47,7 @@ node bin/install.mjs --version
 | 顺序 | dsh | pnpm |
 | --- | --- | --- |
 | 1 | `--dsh <path>` | `--pnpm <path>` |
-| 2 | `DSH_MATT_DSH` | `DSH_PNPM` |
+| 2 | `DSH_MATT_DSH` | `DSH_PNPM`（别名 `DSH_MATT_PNPM` 亦认） |
 | 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） |
 | 4 | `DSH_DESKTOP_ROOT` 下的 `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` |
 | 5 | `DSH_MATT_DSH_SRC` 下的 `<src>/apps/cli/lib/bin.js`（经 `node` 跑） | — |

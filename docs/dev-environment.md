@@ -320,7 +320,7 @@ $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 15/15、exi
 | 顺序 | dsh | pnpm | 说明 |
 | --- | --- | --- | --- |
 | 1 | `--dsh <path>` | `--pnpm <path>` | 显式参数说了算；给了就不回落其它来源 |
-| 2 | `DSH_MATT_DSH` | `DSH_PNPM` | 脚本 / CI 的稳定出口 |
+| 2 | `DSH_MATT_DSH` | `DSH_PNPM`（别名 `DSH_MATT_PNPM` 亦认） | 脚本 / CI 的稳定出口 |
 | 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） | 平台候选名按 PATHEXT 惯例 |
 | 4 | `DSH_DESKTOP_ROOT` → `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` | 桌面安装版惯例；**`DSH_DESKTOP_ROOT` = 桌面应用根目录**（含 `resources` 的那一层）。设成 `<app>/resources` 也认 —— 该档对每个候选都试「先 `<root>/resources/…`、再 `<root>/…` 回落」两种读法，实测两种读法收敛到**同一条真实路径**（2026-10-18）；档位顺序不变，回落只在**本档内**发生 |
 | 5 | `DSH_MATT_DSH_SRC` → `<src>/apps/cli/lib/bin.js`（**经 `node` 跑**） | — | 源码检出惯例 |

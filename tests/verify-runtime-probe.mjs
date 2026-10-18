@@ -238,6 +238,35 @@ test('R3d. env 键存在但路径不存在 → detail 指明该来源为何落�
   assert.ok(/PATH 的 1 个目录里没有/.test(joined), joined)
 })
 
+// ── R13 pnpm 的环境变量别名（合并 226aabe 时保留的兼容）──────────────────────
+// 契约名是 `DSH_PNPM`（#86 建议的写法）；同票另一份实现用了 `DSH_MATT_PNPM`（与
+// `DSH_MATT_DSH` 同前缀）。两个都认，且 `DSH_PNPM` 优先——合并后不许只认其中一个。
+test('R13a. DSH_MATT_PNPM 作为别名可命中；两个都设时 DSH_PNPM 优先', () => {
+  const aliasOnly = probePnpm({
+    env: { DSH_MATT_PNPM: 'X:\\env\\pnpm.cmd' },
+    platform: WIN,
+    pathEntries: [],
+    exists: mkExists(['X:\\env\\pnpm.cmd']),
+  })
+  assert.equal(aliasOnly.found, true, aliasOnly.detail.join(' | '))
+  assert.equal(aliasOnly.source, 'env')
+  assert.equal(aliasOnly.path, 'X:\\env\\pnpm.cmd')
+
+  const both = probePnpm({
+    env: { DSH_PNPM: 'X:\\a\\pnpm.cmd', DSH_MATT_PNPM: 'X:\\b\\pnpm.cmd' },
+    platform: WIN,
+    pathEntries: [],
+    exists: mkExists(['X:\\a\\pnpm.cmd', 'X:\\b\\pnpm.cmd']),
+  })
+  assert.equal(both.path, 'X:\\a\\pnpm.cmd', 'DSH_PNPM 必须优先于别名')
+})
+
+test('R13b. 两个名字都没设时，detail 如实说「未设置」（不静默）', () => {
+  const r = probePnpm({ env: {}, platform: WIN, pathEntries: [], exists: () => false })
+  assert.equal(r.found, false)
+  assert.ok(/DSH_PNPM \/ DSH_MATT_PNPM 未设置/.test(r.detail.join(' | ')), r.detail.join(' | '))
+})
+
 // ── R12 DSH_DESKTOP_ROOT 的两种读法都吃（teammate 实测的口径歧义）────────────
 // 契约（冻结 §2）写的是 `<root>/resources/runtime/cli/bin/dsh.cmd` ⇒ **root = 应用根**（含
 // `resources` 那层）。但口语里「桌面运行时根」也常被读成 `<app>/resources` 本身，assertions
@@ -644,6 +673,6 @@ test('R10c. 跳过分支的 upgrade / uninstall 收尾同样不得谎报', () =>
   }
 })
 
-console.log(`\n=== verify-runtime-probe (R1–R12) ===`)
+console.log(`\n=== verify-runtime-probe (R1–R13) ===`)
 console.log(`${process.exitCode ? 'FAILED' : `all ${passed} tests passed`}${skips > 0 ? ` (${skips} 条 loud skip)` : ''}`)
 if (process.exitCode) loudSkip('存在失败用例，环境侧结论不可用')
