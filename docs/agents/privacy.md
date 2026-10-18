@@ -122,13 +122,22 @@ python -m git_filter_repo --force \
 ## 6. 防复发（已就位）
 
 - `scripts/privacy-scan.mjs`：
-  ① 本机运行时身份（`userInfo().username` + `homedir()` 两形）；② 三种布局形态
-  （`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`；`C:/msys64` 是标准安装点，保留）；
+  ① 本机运行时身份（`userInfo().username` + `homedir()` 两形）；② 四种布局形态
+  （`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`、**本机安装布局** `<盘符>:/<目录>/<再一级>`；
+  **标准安装点保留** —— `C:/msys64` 与 `Program Files` 一族都在豁免表里）；
   ③ `<DSH_HOME>/privacy-denylist.txt`；④ 发布面全扫（tracked 内容 / 全部提交消息 / 身份 / ref /
   拟提交消息），`--gh` 再加 issue 正文与评论。大小写不敏感，**整行打码**不回显 token。
-  验收 = `tests/verify-privacy-scan.mjs`（F1–F15：夹具红/绿两面 + 真实仓常驻行），
+  验收 = `tests/verify-privacy-scan.mjs`（F1–F18：夹具红/绿两面 + 真实仓常驻行），
   随 `node scripts/verify-all.mjs` 进 pre-commit；确属误报才在该行内联 `pii-allow` 并写理由
   （比整仓 `SKIP_HOOKS=1` 细一档，且例外留在 diff 里可 review）。
+  - **② 的「本机安装布局」这一条（#107）为什么是"形状"而不是"词表"**：把 `Program Files`
+    写进词表只能抓住标准根，而票面点名的四条里恰有两条是**同一台机器的自定义安装根**
+    （`Other_Program_Files`、`Cadence`）——按词表追就是 D15 记的"无收敛军备竞赛"。
+    故判据取**形状**：`<盘符>:/<目录>/<再一级>`，一级目录落进 `ALLOWED_INSTALL_ROOTS` 的不报。
+  - **豁免面 `ALLOWED_INSTALL_ROOTS` 的判据 = "换台机器它还在不在"**：在（`Program Files` /
+    `msys64` / `WINDOWS` / 占位符 `x`·`me`·`u`…）就不是身份；不在（`Other_Program_Files` /
+    `Cadence` / `D:\Tools`）就是。它与 `ALLOWED_USERS` 同性质——**豁免面必须显式**，
+    否则守卫会把自己与邻仓的合法写法判红。
 - `AGENTS.md` 的硬规则 + 指针；`sync-skills.{ps1,sh}` 的上游目录改 `SYNC_SKILLS_UPSTREAM`
   **必填**（本机路径不再写死，缺失即响亮报错）。
 - **跨仓口径**：邻仓同一脚本，改判据时两边一起看（`dsh-shell-host/docs/agents/privacy.md`）。

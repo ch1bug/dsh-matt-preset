@@ -13,8 +13,10 @@
  * 判据三面（1–3 对齐邻仓）：
  *   1. **本机运行时身份**：`userInfo().username` / `homedir()`（反斜杠与正斜杠两形）——
  *      不写死名单，换台机器就守那台机器的身份；
- *   2. **本机布局形态**：`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`（`C:/msys64` 是
- *      **标准安装点**，保留）——本文用中性写法描述形态，避免守卫自指命中；
+ *   2. **本机布局形态**：`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`、**本机安装布局**
+ *      （`<盘符>:/<目录>/<再一级>`，#107；`C:/msys64` 与 `Program Files` 等**生态标准安装点**、
+ *      以及占位符面都在豁免表 `ALLOWED_INSTALL_ROOTS` 里，保留）——本文用中性写法描述形态，
+ *      避免守卫自指命中；
  *   3. **denylist**：`<DSH_HOME>/privacy-denylist.txt`（一行一个 token、`#` 注释，**永不进仓**）
  *      —— 运行时推不出来的那类（呼号、旧机用户名、个人邮箱、内网 host/IP、旧布局根）。
  *   4. 本仓扩展面：tracked 内容 / 全部提交消息 / 提交身份 / ref 名 / `.git/COMMIT_EDITMSG`，
@@ -41,6 +43,7 @@ export const KINDS = {
   layoutPosix: 'POSIX 布局(/x/dsh-*)',
   layoutWork: '旧工作布局(X:\\Work\\)',
   homePath: '字面家目录(/home|/Users|X:\\Users)',
+  installRoot: '本机安装布局(盘符绝对路径)',
   denylist: 'denylist',
 }
 
@@ -55,6 +58,27 @@ export const ALLOWED_USERS = new Set([
 
 /** 运行期派生形态（`$(whoami)` / `%USERNAME%` / `${USER}`）：不是硬编码身份。 */
 const DYNAMIC_USER = /[$%{}()+*]/
+
+/** 盘符绝对路径里**不是**「本机安装布局」的一级目录（豁免面；大小写不敏感）。
+ *
+ *  与 `ALLOWED_USERS` 同性质、同理由：豁免面**必须显式**，否则守卫会把自己与邻仓的
+ *  合法写法判红（`privacy.md` §6 的跨仓占位符面就是这么来的）。
+ *  三类，各有出处：
+ *    · 家目录面 —— `users` / `home`：**已有专门规则承担**（`homePath`）。这里再报一次
+ *      只会让同一个身份出两条 kind（判定点重复，D6），所以交出去。
+ *    · 标准安装点 —— `msys64` / `msys2` / `program files` / `program files (x86)` /
+ *      `windows` / `programdata` / `temp` / `tmp`：**生态标准**，不是某台机器的身份。
+ *      `msys64` 是 `privacy.md` §6 明文保留的；`Program Files` 与它同源（human 2026-10-18
+ *      拍板 Q3=A）。判据 = 「换台 Windows 机器它还在不在」——在，就不是身份。
+ *    · 占位符 —— 与 `ALLOWED_USERS` 对齐的一批（`x` / `me` / `u` / `g` / `h` / `r` …），
+ *      以及本仓术语面里已由既有规则或占位符承担的（`work` / `src` / `repo` / `scratch`）。
+ *      跨仓口径：邻仓 `dsh-shell-host` 的同一脚本要跟着对（`privacy.md` §6）。 */
+export const ALLOWED_INSTALL_ROOTS = new Set([
+  'users', 'home',
+  'msys64', 'msys2', 'program files', 'program files (x86)', 'windows', 'programdata', 'temp', 'tmp',
+  'x', 'y', 'z', 'g', 'h', 'i', 'j', 'k', 'r', 'c2', 'me', 'u', 'name', 'your-name', 'yourname',
+  'work', 'src', 'repo', 'scratch', 'dsh-matt-preset',
+])
 
 /** 结构性规则（入仓部分）：字面家目录 + 本机布局形态（大小写不敏感）。 */
 export const RULES = [
@@ -71,6 +95,17 @@ export const RULES = [
   { kind: KINDS.layoutWin, re: /[A-Za-z]:[\\/]dsh-[A-Za-z]/gi },
   { kind: KINDS.layoutPosix, re: /\/[a-z]\/dsh-[A-Za-z]/gi },
   { kind: KINDS.layoutWork, re: /[A-Za-z]:[\\/]Work[\\/]/gi },
+  {
+    // **本机安装布局**（#107）：盘符绝对路径的**前两级**（`<盘符>:/<目录>/<再一级>`）。
+    // 判据是**形状**，不是词表（D15：追词表会变成无收敛的军备竞赛——票面点名的四条里
+    // 有两条是同一台机器的自定义安装根，把 `Program Files` 写进词表照样漏掉它们）。
+    // 目录段**允许空格**（`Program Files` 这类），故字符类带空格——否则会在 `Program` 处断掉，
+    // 票面①②反而漏（选型矩阵实测，见 tests/verify-privacy-scan.mjs F16）。
+    // 一级目录落进 `ALLOWED_INSTALL_ROOTS` 的**不报**（豁免面见上）。
+    kind: KINDS.installRoot,
+    re: /(?:[A-Za-z]:[\\/]|\/[a-z]\/)([A-Za-z0-9._][A-Za-z0-9._ -]*)[\\/][A-Za-z0-9._]/g,
+    root: 1,
+  },
 ]
 
 /** 命中行内的显式豁免标记（带理由，留在 diff 里）。 */
@@ -114,7 +149,18 @@ const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  */
 function redact(line, tokens = []) {
   let out = line
-  for (const rule of RULES) out = out.replace(rule.re, (m, user) => (user === undefined ? m : m.slice(0, m.length - user.length) + '<redacted>'))
+  for (const rule of RULES) {
+    out = out.replace(rule.re, (m, group) => {
+      // 只处理**带捕获组**的规则（无捕获组的既有规则保持原行为：原样放行，不在本票范围内改它）。
+      //   · `user` 规则：捕获组在**尾部**（`/home/<user>`）——去掉尾段再遮
+      //   · `root` 规则：捕获组在**中段**（`<盘符>/<root>/x`），首尾都在匹配里 → **整段遮**
+      //     （按"尾段长度"截会把 `<盘符>/<root>/x` 遮成 `<盘符>/<redacted>/x`，中间那个
+      //     目录名正是本票要遮的东西——复核前实测过这个形态）
+      if (group === undefined) return m
+      if (rule.root !== undefined) return '<redacted>'
+      return m.slice(0, m.length - group.length) + '<redacted>'
+    })
+  }
   for (const t of tokens) out = out.replace(new RegExp(escapeRe(t.value), 'gi'), '<redacted>')
   return out
 }
@@ -141,6 +187,8 @@ export function scanText(text, { tokens = [] } = {}) {
           if (!/[A-Za-z0-9]/.test(user)) continue
           if (ALLOWED_USERS.has(user.toLowerCase()) || DYNAMIC_USER.test(user)) continue
         }
+        const root = rule.root === undefined ? undefined : m[rule.root]
+        if (root !== undefined && ALLOWED_INSTALL_ROOTS.has(root.toLowerCase())) continue
         kinds.push(rule.kind)
       }
     }

@@ -87,6 +87,20 @@ msys 里 `gh auth status`、`node tests/…` 会直接失败。source 一条命�
 Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户目录，
 `COREPACK_HOME` 指向 corepack 缓存。
 
+**安装根不进仓（#107）**：本仓 PUBLIC，脚本里**不写死任何**安装布局字面量。标准根由 Windows
+自带的 `%ProgramFiles%` 推出，非标准根由使用者显式给出；缺输入则**响亮说明并跳过那一项**
+（D47，不静默猜一条只在自己机器上存在的路径）：
+
+| 变量 | 管什么 | 缺席时 |
+| --- | --- | --- |
+| `MSYS_ENV_WIN_PROGRAM_FILES` | 标准安装根（cygpath 形态，如 `/c/...`） | 由 `%ProgramFiles%` 推；两者都不可用 → stderr 一行说明 |
+| `MSYS_ENV_WIN_NODE_DIR` | Windows node 目录（含 `node.exe`） | 用 `<标准根>/nodejs` |
+| `MSYS_ENV_WIN_GIT_ROOT` | Windows git 安装根（其下须有 `cmd` 与 `etc` 两个子目录） | stderr 一行说明：未复用 GCM/系统级 gitconfig |
+
+```bash
+MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
+```
+
 **PATH 顺序是硬约束**：Windows node 必须优先于 msys 的 ucrt64 node —— 后者上报
 `platform=win32-x64-gnu`，跑套件会以 `0xC06D007F`（过程/DLL 找不到）崩在原生依赖上
 （实测 `verify.mjs` / `verify-dual-env.mjs`）。
@@ -103,7 +117,8 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
 缺任何一件 PATH 件，安装环就红（`dsh: plugin command failed` → preset 未注册 → 两条 live 报
 `Unknown agent preset: dsh-matt-preset`）——**这是环境缺件，不是仓的缺陷**：
 
-1. **Windows node 优先**（`scripts/msys-env.sh` 已覆盖）；
+1. **Windows node 优先**（`scripts/msys-env.sh` 已覆盖；非标准安装根要先给 `MSYS_ENV_WIN_NODE_DIR`
+   或 `MSYS_ENV_WIN_PROGRAM_FILES`，见上表 —— 缺了就只剩 PATH 默认面）；
 2. **pnpm 所在目录**：`<src>/node_modules/.bin`（`dsh plugin add` 要 shell out 到 pnpm；msys 默认
    PATH 上没有 pnpm）；
 3. **Windows 可 spawn 的 `dsh` shim（`.cmd`）**，且 PATH 必须是 **Windows 形态**——实测 msys 形态

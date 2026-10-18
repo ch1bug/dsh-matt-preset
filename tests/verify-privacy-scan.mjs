@@ -2,10 +2,12 @@
  * verify-privacy-scan.mjs —— `scripts/privacy-scan.mjs` 守卫的非空洞验收
  * （#79 隐私回仓 retro 落地；口径与邻仓 `dsh-shell-host/tests/privacy-scan.spec.ts` 对齐）。
  *
- * 非空洞口径：每条断言都能说出红场景——F2–F8 与 F14–F15 是**植入夹具**的真 git 仓库
+ * 非空洞口径：每条断言都能说出红场景——F2–F8 与 F14–F18 是**植入夹具**的真 git 仓库
  * （把身份 / 布局 / denylist token 放进文件、提交消息、身份、ref 各面），F10 是**常驻守卫**：
  * 真实仓里一旦有人提交个人 / 本机环境串，这一行就红（本会话前车之鉴：77 个提交带个人路径，
  * 无人拦）。F14 用**运行时身份**（`homedir()` / `userInfo().username`）构造夹具，换台机器照样有效。
+ * F16–F18 是 **#107 扩的那条规则**（本机安装布局）的三面：红场景（票面原字的形态，含带空格的
+ * 目录段）/ 豁免面（标准安装点与占位符不被误伤）/ 边界（URL、相对路径、仅盘符根不误报）。
  *
  * 夹具是临时真仓库，用完即删（本仓有临时目录泄漏的教训 #77：不清理的挂具不写）。
  */
@@ -195,10 +197,80 @@ try {
     if (kinds.has(KINDS.layoutWin) && kinds.has(KINDS.layoutPosix)) ok('F15. 布局形态 X:\\dsh-* 与 /x/dsh-* → 命中', [...kinds].join(','))
     else bad('F15. 布局形态未命中', JSON.stringify(findings))
   }
+
+  // F16 **本机安装布局**（#107 扩的那条规则）：票面的真实形态逐条报红 + 整段打码。
+  // 红场景就是票面本体（`scripts/msys-env.sh` 修掉的那 3 行）——把它们的**原始字面形态**
+  // 放进夹具，规则若被删掉/收窄（如目录段不许空格）**这一条必红**。
+  // ⚠ 夹具里**故意**同时放标准根与自定义根：这不是装饰，是**口径本身**（human 2026-10-18 拍 Q3=A）
+  // —— 生态标准根（`Program Files`）**豁免**、本机自定义根（`Other_Program_Files`）**命中**。
+  // 两者同处一个 fixture，F16 才同时钉住"规则活着"与"豁免面没被顺手删掉"。
+  {
+    const root = fixture({ files: { 'scripts/env.sh': [
+      'PREFIX=""',
+      'for d in \\',
+      '  "/c/Program Files/nodejs" \\', // pii-allow: 守卫自身的红场景夹具（票面原字形态）
+      '  "/c/Other_Program_Files/Git/cmd" \\', // pii-allow: 同上（本机自定义安装根）
+      'do [ -d "$d" ] && PREFIX="$PREFIX$d:"; done',
+    ].join('\n') + '\n' } })
+    const { findings } = scanRepo({ root, tokens: [] })
+    const hits = findings.filter(f => f.kind === KINDS.installRoot)
+    // 自定义根那一行必须红；标准根那一行必须**不**红（同 fixture 内的双向判据）
+    const hitLines = new Set(hits.map(h => h.line))
+    if (hitLines.has(4) && !hitLines.has(3))
+      ok('F16. 本机安装布局：自定义安装根命中 / 生态标准根（带空格目录段）豁免', `installRoot 命中行=${[...hitLines].join(',')}`)
+    else bad('F16. 本机安装布局判据不符（规则被删？豁免面被删？目录段收窄到不含空格？）', JSON.stringify(findings))
+    // ⚠ 上面那句**证明不了**"带空格的目录段仍被规则认得"：把目录段的字符类收窄到不含空格后，
+    // `Program Files` 压根不再匹配——可它在豁免面里，于是**不红也不绿，两种原因都让 `has(3)===false`**
+    // （本探针实测：P2 扰动下 F16 仍绿 —— 这正是 D2「锁是空的」）。故**另加一条直接判据**：
+    // 让规则**只**在"真的匹配到了带空格目录段"时才可能命中：把同一形态放进**非豁免**的目录名变体
+    // （`Program Files 2`），它必须命中。这一条能区分"匹配了但被豁免"与"根本没匹配"。
+    {
+      const probeRoot = fixture({ files: { 'docs/spaced.md': '安装根变体：C:\\Other Program Files 2\\bin\\x.exe\n' } }) // pii-allow: 守卫自身的红场景夹具（带空格且非豁免）
+      const spaced = scanRepo({ root: probeRoot, tokens: [] }).findings.filter(f => f.kind === KINDS.installRoot)
+      if (spaced.length > 0) ok('F16c. 目录段**允许空格**（非豁免的带空格形态 → 命中；区分"被豁免"与"没匹配")', spaced.length + ' 行')
+      else bad('F16c. 带空格的目录段未被规则匹配（字符类丢了空格？）', '期望命中，实际 0 行')
+    }
+    // 打码判据：**不得**泄露安装根名的任何**前缀**。只查整串会漏掉"截尾"式的部分泄露
+    // （实测：按尾段截的退化形态输出 `/c/Ot<redacted>it/cmd` —— 整串不在，前缀却在）。
+    if (hits.length > 0 && !/Ot/.test(hits.map(h => h.text).join('\n'))) ok('F16b. 命中输出已整段打码（不泄露安装根名的任何前缀）')
+    else bad('F16b. 输出泄露安装根名（前缀或整串）', JSON.stringify(hits))
+  }
+
+  // F17 扩规则的**豁免面**（不误伤）：标准安装点 / OS 面 / 占位符 / 安全反例 → clean。
+  // ⚠ 这里**绝不能**给夹具行加 `pii-allow`：那会让整行被跳过，于是"clean"来自豁免标记而**不是**
+  // 来自豁免面——本行就退化成同义反复（本仓 D2 的"锁是空的"）。它 clean 的唯一合法理由是
+  // `ALLOWED_INSTALL_ROOTS` 真的放行了这些形态；拿掉表里任一项（如 `program files`）本行即红。
+  {
+    const root = fixture({ files: { 'docs/ports.md': [
+      'msys2 标准点：C:/msys64/usr/bin/bash.exe 与 /c/msys64/home/<user>',
+      '生态标准根：C:\\Program Files\\Git\\cmd（Windows 上人人都有这个）',
+      'OS 面：C:\\WINDOWS\\system32\\bash.exe',
+      '占位符：link:C:/x/matt',
+      '安全反例（前缀比较会放过它）：C:\\Temp\\..\\..\\Users',
+    ].join('\n') + '\n' } })
+    const { findings } = scanRepo({ root, tokens: [] })
+    if (findings.length === 0) ok('F17. 豁免面：标准安装点 / OS / 占位符 / 安全反例 → clean')
+    else bad('F17. 豁免面被误伤', JSON.stringify(findings))
+  }
+
+  // F18 扩规则的**假阳性边界**：它不是"任何绝对路径"。URL / 相对路径 / 仅盘符根 / 正则字面量
+  // → clean（守卫不能变成噪音源——噪音源的下场是本仓 D13 记的"加宽正则 → 绕一层就过"）。
+  // 同 F17：**不加** `pii-allow`，否则 clean 是标记给的、不是判据给的。
+  {
+    const root = fixture({ files: { 'docs/edges.md': [
+      'URL：https://example.com/a/b 与 ./scripts/msys-env.sh',
+      '仅盘符根：C:\\',
+      '正则字面量：/[A-Za-z]:[\\\\/]Users/g',
+    ].join('\n') + '\n' } })
+    const { findings } = scanRepo({ root, tokens: [] })
+    const installHits = findings.filter(f => f.kind === KINDS.installRoot)
+    if (installHits.length === 0) ok('F18. 边界：URL / 相对路径 / 仅盘符根 / 正则字面量 → 无 installRoot 命中')
+    else bad('F18. 假阳性', JSON.stringify(installHits))
+  }
 } finally {
   disposeAll()
 }
 
-console.log('\n=== PRIVACY-SCAN VERIFY (F1–F15) ===')
+console.log('\n=== PRIVACY-SCAN VERIFY (F1–F18) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
