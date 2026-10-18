@@ -49,7 +49,7 @@
  *
  * 成本：一次 `mkdtemp` + 约 10 次 `git` 调用（纯本地，无网络、无 node_modules 依赖）——可忽略。
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,10 +71,18 @@ const RECIPE = join(REPO, 'tests', 'verify-perturbation-recipe.mjs')
 const recipeSrc = readFileSync(RECIPE, 'utf8')
 const HEADER = recipeSrc.split('\n').slice(0, 80).join('\n')
 const HEADER_POINTS = [
-  ['禁令：禁用 `git checkout --` 作为**还原手段**', /禁用\s*`?git checkout --`?|禁\s*`?git checkout --`?/],
-  ['禁令：禁用 `git restore` 作为还原手段', /git restore/],
-  ['前提：未提交工作**没有 git 级副本**', /没有\s*git\s*级副本|无\s*git\s*级副本/],
-  ['前提：**哈希不能替代副本**（只证"变了"，不能恢复）', /哈希\s*不能替代副本|哈希.{0,20}不能.{0,10}恢复/],
+  ['禁令：`git checkout --` 不得作还原手段（短语在场 + 有禁令动词）',
+    /`git checkout --`[\s\S]{0,40}(不得|禁用|禁)\s*作|(禁用|不得|禁)\s*[^\n]{0,20}`git checkout --/],
+  // ⚠ Spec 轴复核发现（本轮修）：初版这条是**裸词** `/git restore/`，而头注里"提到" restore
+  // 的地方不止禁令（叙述里也会提），故"裸词在场"**不承载禁令语义** —— 与 P7 同一条教训
+  // （判据要钉语义、别追出现）。收窄为**同段内**共现：命令 + 还原语境 + 禁令动词。
+  // 窗口取 120 字符（实测：头注写法是「禁用 `git checkout -- <path>` / `git restore <path>`
+  // 作为还原手段」——命令与"还原手段"之间隔着 ` <path>` / ` 与斜杠，40 字符不够）。
+  // ⚠ 别为迁就正则去改正文：判据要读**人写的口径**，不是让口径迁就判据（本仓 D13 的教训）。
+  ['禁令：`git restore` 不得作还原手段（命令 + 禁令动词同段共现，非裸词在场）',
+    /禁用[\s\S]{0,120}`git restore|`git restore[\s\S]{0,120}(作为还原手段|不得作还原|禁用作还原)/],
+  ['前提：未提交工作**没有 git 级副本**', /没有\s*git\s*级副本/],
+  ['前提：**哈希不能替代副本**（只证"变了"，不能恢复）', /哈希不能替代副本|哈希.{0,20}不能.{0,10}恢复/],
   ['口径：还原一律用**副本回写**', /副本回写/],
 ]
 const missingHeader = HEADER_POINTS.filter(([, re]) => !re.test(HEADER)).map(([n]) => n)
@@ -125,46 +133,66 @@ try {
 
 if (fixtureOk) {
   // ══ R3: **三态边界** —— `git checkout --` 到底吃掉什么（本票的核心事实）══════════════
-  // 三态各造一次扰动，各用 `git checkout --` 还原，断言**实际**结果；再与**预期边界**比对。
+  // 三态各造一次扰动，各用被测的 git 级还原跑一次，断言**实际**结果；再与**预期边界**比对。
   // 判据不只是"unstaged 丢"——**三支都要对**，否则守卫在含混地过度声称（或漏掉真危险支）。
+  //
+  // ⚠ **两种被禁机制都要跑**（Spec 轴复核发现，本轮补）：票面口径禁的是
+  //   「`git checkout --` / `git restore`」**两个**命令，而初版 R3 只跑 checkout ——
+  //   实测把还原换成 **`git restore -- <path>`**（或 `git restore --worktree -- <path>`）
+  //   时守卫**全绿**（`.scratch/p108-restore-gap.mjs` 的读数：两种形态 exit=0、零红）。
+  //   即"另一半 AC 无人守"。修法 = 把机制**参数化**，逐机制跑同一张三态表：
+  //   `git restore` 与 `git checkout --` 对**同一文件状态**的语义相同（都从 index 回填），
+  //   故三态的期望值对两者一致——但**必须各自实测**，不能靠"语义相同"的推理代替取证。
+  const MECHANISMS = [
+    {
+      id: 'R3',    name: '`git checkout -- <path>`',
+      cmd: (file) => ['checkout', '--', file],   // R7-EXEMPT: 被测对象（机制定义本身，非本用例的还原动作）
+    },
+    {
+      id: 'R3-alt', name: '`git restore -- <path>`（等价形态，票面同禁）',
+      cmd: (file) => ['restore', '--', file],    // R7-EXEMPT: 被测对象（机制定义本身，非本用例的还原动作）
+    },
+  ]
   const STATES = [
     {
-      id: 'R3a', label: 'tracked + **unstaged** 改动',
+      id: 'a', label: 'tracked + **unstaged** 改动',
       setup: () => { writeFileSync(join(TMP, 'tracked.txt'), MY_VERSION) },          // 只改工作树，不 add
       expectLost: true, why: '工作树副本是唯一载体 → **永久丢失**（本票的真实事故形态）',
     },
     {
-      id: 'R3b', label: 'tracked + **staged** 改动',
+      id: 'b', label: 'tracked + **staged** 改动',
       setup: () => { writeFileSync(join(TMP, 'tracked.txt'), MY_VERSION); G('add', 'tracked.txt') },
       expectLost: false, why: 'index 里有副本 → 回填的是**我的暂存版**，不是 HEAD',
     },
     {
-      id: 'R3c', label: '**untracked** 新文件',
+      id: 'c', label: '**untracked** 新文件',
       setup: () => { writeFileSync(join(TMP, 'untracked.txt'), MY_VERSION) },
       expectLost: false, why: 'git 根本不认它 → 命令**失败**（pathspec），文件原样',
     },
   ]
-  for (const s of STATES) {
-    // 每支从干净的 HEAD 态起步（前一支可能把 tracked.txt 改成 MY_VERSION）。
-    G('reset', '-q', '--hard', 'HEAD')
-    rmSync(join(TMP, 'untracked.txt'), { force: true })
-    const file = s.id === 'R3c' ? 'untracked.txt' : 'tracked.txt'
-    s.setup()
-    const before = read(file)
-    // ── 被测的**还原手段**：`git checkout -- <path>`（公开面直接调用，不拼 shell）。
-    // ⚠ 这是本文件**唯一**许可出现 `checkout` 的**代码**位置（R7 的机器可判形式：
-    //    其余位置一律用副本回写）。用 R7 的豁免标记标出，免得 R7 靠行内巧合过滤。
-    const r = G('checkout', '--', file)   // R7-EXEMPT: 被测对象本身（演示 `git checkout --` 的语义）
-    const after = read(file)
-    const lost = before === MY_VERSION && after !== MY_VERSION
-    s.observed = { exit: r.status, lost, after }
-    if (lost === s.expectLost) {
-      ok(`${s.id}. ${s.label} → ${lost ? '**丢失**' : '保住'}（与实测边界一致）`,
-        `checkout exit ${r.status}；内容 ${lost ? `打回 ${JSON.stringify(after)}` : `仍是我的版本（sha ${sha(after)}）`} —— ${s.why}`)
-    } else {
-      bad(`${s.id}. ${s.label} 的边界与实测不符`,
-        `期望 ${s.expectLost ? '丢' : '保住'}、实测 ${lost ? '丢' : '保住'}；checkout exit ${r.status} —— ` +
-        '夹具坏了或 `git checkout --` 的语义变了，下方纪律的立足事实已不成立')
+  for (const m of MECHANISMS) {
+    for (const s of STATES) {
+      const id = `${m.id}${s.id}`
+      // 每支从干净的 HEAD 态起步（前一支可能把 tracked.txt 改成 MY_VERSION）。
+      G('reset', '-q', '--hard', 'HEAD')
+      rmSync(join(TMP, 'untracked.txt'), { force: true })
+      const file = s.id === 'c' ? 'untracked.txt' : 'tracked.txt'
+      s.setup()
+      const before = read(file)
+      // ── 被测的**还原手段**：本文件**唯一**许可出现这两个命令的**代码**位置（R7 的机器可判形式：
+      //    其余位置一律用副本回写）。用 R7 的豁免标记标出，免得 R7 靠行内巧合过滤。
+      const r = G(...m.cmd(file))   // R7-EXEMPT: 被测对象本身（演示 git 级还原的语义）
+      const after = read(file)
+      const lost = before === MY_VERSION && after !== MY_VERSION
+      s.observed = { exit: r.status, lost, after }
+      if (lost === s.expectLost) {
+        ok(`${id}. ${s.label} → ${lost ? '**丢失**' : '保住'}（与实测边界一致）`,
+          `${m.name} exit ${r.status}；内容 ${lost ? `打回 ${JSON.stringify(after)}` : `仍是我的版本（sha ${sha(after)}）`} —— ${s.why}`)
+      } else {
+        bad(`${id}. ${s.label} 的边界与实测不符`,
+          `期望 ${s.expectLost ? '丢' : '保住'}、实测 ${lost ? '丢' : '保住'}；${m.name} exit ${r.status} —— ` +
+          '夹具坏了或该命令的语义变了，下方纪律的立足事实已不成立')
+      }
     }
   }
 
@@ -203,15 +231,28 @@ if (fixtureOk) {
   const hashArchive = sha(read('tracked.txt'))                 // ① 事前算哈希（事故里的动作）
   G('checkout', '--', 'tracked.txt')                           // ② 用 git 级还原 → 打回 HEAD   R7-EXEMPT: 被测对象（复刻事故的丢失动作）
   const afterWipe = read('tracked.txt')
-  // ③ "拿哈希去恢复"这个动作**不存在**：能做的只有再从一个副本读 —— 而没有副本。
-  const backupGone = !existsSync(join(TMP, 'tracked.txt.backup'))
-  const recoveredFromHash = backupGone ? null : read('tracked.txt.backup')
-  if (afterWipe === HEAD_VERSION && backupGone && recoveredFromHash !== MY_VERSION) {
+  // ③ **哈希给不出内容**这个事实要**正面建立**，不能靠一条恒真的装饰性子句。
+  // ⚠ Standards 轴复核报出（本轮修）：初版写 `const recoveredFromHash = backupGone ? null : read(...)`
+  // 并在判据里加 `recoveredFromHash !== MY_VERSION` —— 但前一行刚 `rmSync` 删了副本，
+  // `backupGone` **恒 true**，于是 `recoveredFromHash` **恒 null**、那条子句**恒真** = 装饰。
+  // 这正是本票自己在 R5 注里批评的"恒真空转"形态，被复核原样抓回（D1 的现成实例）。
+  // 修法：把判据换成**可证伪的两条**——
+  //   ① 打回后内容 == HEAD（丢失确实发生）；
+  //   ② **穷举所有可得的恢复载体**：副本目录里除 tracked.txt 外**没有任何备份**，
+  //      且哈希本身不是载体（类型/长度都不是内容）→ 于是"从哈希恢复"这件事**在输入侧就不可能**。
+  const backups = readdirSync(TMP).filter(f => f.includes('.backup'))
+  const backupGone = backups.length === 0
+  // "哈希不是内容"要**实测**，不是断言：拿哈希去和实际内容比 —— 它既不等长也不相等。
+  const hashIsNotContent = hashArchive.length !== MY_VERSION.length && hashArchive !== MY_VERSION
+  const lost = afterWipe === HEAD_VERSION
+  if (lost && backupGone && hashIsNotContent) {
     ok('R5. 哈希 ≠ 副本：只留 SHA256 时**不可恢复**，唯一可恢复载体是**副本**',
-      `丢失版 sha ${hashArchive}；打回后 ${JSON.stringify(afterWipe.trim())}，副本缺席 → 哈希给不出内容`)
+      `丢失版 sha ${hashArchive}；打回后 ${JSON.stringify(afterWipe.trim())}；` +
+      `夹具内备份文件 ${backups.length} 个（唯一载体缺席）；哈希长 ${hashArchive.length} ≠ 内容长 ${MY_VERSION.length} → 哈希给不出内容`)
   } else {
     bad('R5. 哈希反模式的演示不成立（判据未被建立）',
-      `打回后 ${JSON.stringify((afterWipe ?? '').trim())} / 副本缺席=${backupGone} / 从哈希恢复=${recoveredFromHash}`)
+      `打回后 ${JSON.stringify((afterWipe ?? '').trim())}（期望 HEAD 版）/ 备份文件 ${backups.length} 个 / ` +
+      `哈希长 ${hashArchive.length} vs 内容长 ${MY_VERSION.length} —— 三者须同时成立`)
   }
 
   // ④ 对照：**留了副本**的同一场景可以逐字节恢复（R4 已证）——两条并置，"哈希 vs 副本"才是可归因的变量。
