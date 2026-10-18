@@ -231,6 +231,14 @@ Windows git(GCM)，`GIT_CONFIG_GLOBAL` / `GH_CONFIG_DIR` 指向 Windows 用户�
   模型 shell 调用**注入给模型的输出事实**。拿它们做隔离判断是错的。
 - 桌面端是**稳定升级通道**：开发中的改动不得先装桌面端（CONTEXT「DSH 测试/升级通道分工」）。
 - pnpm store 与 corepack shim 可共享（内容寻址、只读复用），**并发 install 不要共享**。
+- **`DSH_HOME` 可能就是真实 home**：桌面端把 `%USERPROFILE%\.dsh` 导出进 agent shell，子进程
+  原样继承。任何「隔离 / 清理 / 清空 home」的命令都必须先把 `DSH_HOME` 显式覆盖到 `%TEMP%`
+  下的目录、并 echo 解析后的绝对路径；**禁止** `Remove-Item -Recurse -Force $env:DSH_HOME`
+  这类展开。2026-10-18 事故：一轮命令按 `$env:DSH_HOME` 递归删除，把真实 `~/.dsh` 的用户
+  数据整片删掉（会话日志追加写 ENOENT → 宿主退出 → App 用空 home 重建 = 「重置」）。
+  安装器现在对 `DSH_HOME` / store 根 / 删除目标做纯路径守卫（`lib/safe-target.mjs`，
+  `tests/verify-installer-guards.mjs` 钉住），`scripts/verify-all.mjs` 也会给子进程注入
+  临时 `DSH_HOME`；但守卫只覆盖安装器与套件，**手工命令仍靠上面的纪律**。
 
 ## 2. 宿主锚点（ADR-0008）
 

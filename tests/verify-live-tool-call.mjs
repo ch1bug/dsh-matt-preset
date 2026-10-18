@@ -26,7 +26,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -91,6 +91,16 @@ await new Promise(r => mock.listen(0, '127.0.0.1', r))
 const mockPort = mock.address().port
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-matt-live-'))
+/** canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内——`rm(home)` 的 home 一旦
+ *  解析错（如继承到真实 `DSH_HOME`），删的就是真实 home。删前再断言一次。 */
+const TMP_ROOT = resolve(tmpdir())
+const assertTempHome = (p) => {
+  const rel = relative(TMP_ROOT, resolve(p))
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error(`temp-home canary tripped: ${p} is outside ${TMP_ROOT}`)
+  }
+}
+assertTempHome(home)
 let child
 const cleanup = async () => {
   if (child !== undefined) {
@@ -103,6 +113,7 @@ const cleanup = async () => {
     await Promise.race([exited, new Promise(r => setTimeout(r, 5000))])
   }
   mock.close()
+  assertTempHome(home)
   await rm(home, { recursive: true, force: true }).catch(() => {})
 }
 

@@ -33,3 +33,12 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - 源码部署 / 运行时可达性（`dsh` 从哪来；PATH 无 dsh ≠ 运行时缺席）/ **读上游源码查契约与先例**（系统提示里的 `app.asar\dsh\` 读不了；可读检出与 live 面的第二个 DSH_HOME 见 §3.1）/ 隔离契约 / 构建坑（ucrt64、宿主锚、clean、端口冲突）：`docs/dev-environment.md`
 - 驱动实例 / 读耐久证据 / RPC 参数名 / mock LLM：`docs/dsh-runtime-cheatsheet.md`
 - 沙箱批跑（opt-in）：`sandcastle/README.md`
+
+## home 安全（硬规则）
+
+桌面端 shell 里 `DSH_HOME` 已导出为**真实** home（`%USERPROFILE%\.dsh`），子进程原样继承。
+任何会写/删 home 的命令必须先把 `DSH_HOME` 显式覆盖到 `%TEMP%` 下的目录，并 echo 解析后的
+绝对路径；**禁止** `Remove-Item -Recurse -Force $env:DSH_HOME` 一类展开。安装器自带路径守卫
+（`lib/safe-target.mjs`，`tests/verify-installer-guards.mjs` 钉住），`scripts/verify-all.mjs`
+会给子进程注入临时 `DSH_HOME`；但守卫不覆盖手工命令。事故现场与隔离契约见
+`docs/dev-environment.md` §1。

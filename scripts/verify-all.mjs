@@ -17,11 +17,20 @@
  *   DEEPSEEK_API_KEY       真实 LLM 层（或 DSH_MATT_REAL_CREDENTIALS_SOURCE）
  */
 import { spawnSync } from 'node:child_process'
-import { readdirSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+/** 汇总期的**隔离 home**（2026-10-18 事故硬化）：agent shell / 桌面端常把 `DSH_HOME`
+ *  导出成**真实** home，子进程会原样继承；某个用例一旦漏写自己的隔离 home，清理动作就
+ *  会落到真实 home 上（事故现场正是这种继承 + 一条按 `$env:DSH_HOME` 展开的递归删除）。
+ *  这里统一把子进程的 `DSH_HOME` 换成本次汇总的临时目录——用例自己的 `mkdtemp` 覆盖仍是
+ *  首选，本行只是兜底：漏写最多写进垃圾箱。用完即删（成功失败都删）。 */
+const ISOLATED_HOME = mkdtempSync(join(tmpdir(), 'dsh-matt-verify-all-'))
+const childEnv = { ...process.env, DSH_HOME: ISOLATED_HOME }
 
 /** 非用例文件（共享挂具）与需要外部环境、默认跳过的用例。
  *  `why` 口径（retro 2026-10-16）：写清这门禁**挡住哪条链 / 哪半边**——缺环境时读者才知道
@@ -47,7 +56,7 @@ for (const file of files) {
   const run = spawnSync(process.execPath, [join(REPO, 'tests', file)], {
     cwd: REPO,
     encoding: 'utf8',
-    env: process.env,
+    env: childEnv,
   })
   const ms = Date.now() - started
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`
@@ -60,6 +69,9 @@ for (const file of files) {
     output: run.status === 0 ? undefined : output,
   })
 }
+
+// 隔离 home 用完即删（成功失败都删；Windows 上偶有句柄延迟，maxRetries 兜住）。
+rmSync(ISOLATED_HOME, { recursive: true, force: true, maxRetries: 3 })
 
 const label = { PASS: 'PASS', 'PASS*': 'PASS*', FAIL: 'FAIL', SKIP: 'SKIP' }
 console.log('\n=== verify-all ===')

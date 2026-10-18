@@ -20,17 +20,22 @@
  *
  * #21 的 --root（存储根覆盖）仍受支持，用于测试/非默认布局；profile 挂载
  * 一律走 DSH_HOME/profiles/<name>。
+ *
+ * 路径安全（2026-10-18 事故硬化，docs/dev-environment.md §1）：`DSH_HOME`、store 根、以及
+ * 每一次 `rm` 的目标都先过 lib/safe-target.mjs 的**纯路径判定**——等于用户 profile、
+ * 是它的祖先、或盘根，一律 die；`uninstall` / 覆盖安装前还要求目标带本包的归属标记，
+ * 杜绝「删的不是我们的目录」。
  */
 import { spawnSync } from 'node:child_process'
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { payloadOf } from '../lib/payload.mjs'
+import { homeRootProblem, targetProblem } from '../lib/safe-target.mjs'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
 const PKG_NAME = 'dsh-matt-preset'
@@ -42,23 +47,41 @@ function die(msg) {
   process.exit(1)
 }
 
+/** 取选项值：缺值（末尾 / 紧跟着另一个选项）立即 die。
+ *  旧实现是 `args.root = argv[++i]`——`--root` 落在命令行末尾时得到 `undefined`，
+ *  于是 `args.root !== undefined` 为 false、静默回落到 `defaultStoreRoot()`（**真实 home**），
+ *  「看起来隔离、实际打到真实 home」正是 2026-10-18 事故的一环。 */
+function requireValue(argv, i, flag) {
+  const value = argv[i]
+  if (value === undefined || value.startsWith('--')) die(`${flag} requires a value`)
+  return value
+}
+
 function parseArgs(argv) {
   const args = { _: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--version') args.version = true
     else if (a === '--force') args.force = true
-    else if (a === '--root') args.root = argv[++i]
-    else if (a === '--from') args.from = argv[++i]
-    else if (a === '--profile') args.profile = argv[++i]
+    else if (a === '--root') args.root = requireValue(argv, ++i, a)
+    else if (a === '--from') args.from = requireValue(argv, ++i, a)
+    else if (a === '--profile') args.profile = requireValue(argv, ++i, a)
     else if (a.startsWith('--')) die(`unknown option: ${a}`)
     else args._.push(a)
   }
   return args
 }
 
+/** DSH_HOME：默认 `~/.dsh`，但**先过形态检查**——等于用户 profile / 它的祖先 / 盘根一律 die。
+ *  事故现场：`DSH_HOME=C:\Users\<user>`（profile 根）下安装器照写不误，把 store 和 profile
+ *  落到了用户主目录里（`~\\.agent-presets`、`~\\profiles`）。 */
 function dshHome() {
-  return process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+  const problem = homeRootProblem(home)
+  if (problem !== null) {
+    die(`${problem} — refusing to use it as DSH_HOME。请显式指定隔离目录（docs/dev-environment.md §1 隔离契约）`)
+  }
+  return home
 }
 
 function defaultStoreRoot() {
@@ -210,7 +233,35 @@ async function payloadOfOrDie(pkgDir) {
   }
 }
 
-async function installTo(target, { pkgDir, source }, { previousVersion, profile } = {}) {
+/** 目标看起来是不是「我们的 store」：VERSION.json / manifest.json，或 package.json 的
+ *  name 是本包。`uninstall` / `--force` / `upgrade` 只许动这种目录——旧实现只
+ *  `existsSync` 就 `rm`，任何 `<root>/matt` 都会被当成我们的货删掉（2026-10-18 教训：
+ *  「删的不是我们的目录」必须响亮，不许静默）。 */
+function looksLikeOurStore(target) {
+  if (!existsSync(target)) return false
+  if (existsSync(join(target, 'VERSION.json')) || existsSync(join(target, 'manifest.json'))) return true
+  try {
+    const pkg = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'))
+    return pkg?.name === PKG_NAME
+  } catch { return false }
+}
+
+/** 空目录可以安全接管（上次安装半途失败、或操作者预建）。 */
+function isEmptyDir(target) {
+  try { return readdirSync(target).length === 0 } catch { return false }
+}
+
+async function installTo(target, { pkgDir, source }, { previousVersion, profile, storeRoot } = {}) {
+  // 破坏性目标守卫：target 必须是合法 store 下的 `matt/`（见 lib/safe-target.mjs）。
+  const problem = targetProblem(target, storeRoot)
+  if (problem !== null) die(`${problem} — refusing to wipe/replace it`)
+  // 非空且不像我们的目录 → 拒绝覆盖（先删后拷的语义意味着这一步会真删）。
+  if (existsSync(target) && !isEmptyDir(target) && !looksLikeOurStore(target)) {
+    die(`refusing to wipe ${target}: it does not look like a dsh-matt-preset store ` +
+      '(no VERSION.json / manifest.json / package.json). 手工核对后再处理。')
+  }
+  // 先回声再删：2026-10-18 事故纪律——破坏动作前先让绝对路径出现在输出里。
+  console.error(`store: ${target}`)
   const { pkg, entries } = await payloadOfOrDie(pkgDir)
   // 原地替换语义：先清空目标（stale 文件不残留），再整目录拷入
   await rm(target, { recursive: true, force: true })
@@ -255,13 +306,23 @@ async function main() {
   const storeOnly = args.root !== undefined
   const storeRoot = resolve(args.root ?? defaultStoreRoot())
   const target = join(storeRoot, 'matt')
+  // 破坏性目标守卫（2026-10-18 事故硬化）：store 根 / target 先过纯路径判定——
+  // 等于用户 profile、是它的祖先、盘根，一律 die，绝不进入任何 rm 分支。
+  const targetIssue = targetProblem(target, storeRoot)
+  if (targetIssue !== null) die(`${targetIssue} — refusing to continue`)
   const previousVersionOf = async () => existsSync(join(target, 'VERSION.json'))
     ? JSON.parse(await readFile(join(target, 'VERSION.json'), 'utf8')).version
     : null
 
   if (cmd === 'uninstall') {
     if (!existsSync(target)) die(`not installed: ${target} (未安装)`)
+    // 只删带归属标记的目录：`<root>/matt` 恰好是别人的目录时，宁可响亮失败。
+    if (!looksLikeOurStore(target)) {
+      die(`refusing to delete ${target}: it does not look like a dsh-matt-preset store ` +
+        '(no VERSION.json / manifest.json / package.json). 手工核对后再处理。')
+    }
     if (!storeOnly) mountOrWarn(profile, () => unmount(profile), 'unmount')
+    console.error(`store: ${target}`)
     await rm(target, { recursive: true, force: true })
     console.log(`uninstalled: ${target} (profile '${profile}' unmounted)`)
     return
@@ -271,7 +332,7 @@ async function main() {
     if (!existsSync(join(target, 'VERSION.json'))) die(`not installed: ${target} (未安装——请先用 install)`)
     const prev = await previousVersionOf()
     const src = await resolveSource(args.from)
-    const res = await installTo(target, src, { previousVersion: prev, profile })
+    const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
     // link 指向的是存储目录本身，文件已原地替换；重挂一次刷新 pnpm 元数据
     if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
@@ -286,7 +347,7 @@ async function main() {
     }
     const prev = await previousVersionOf()
     const src = await resolveSource(args.from)
-    const res = await installTo(target, src, { previousVersion: prev, profile })
+    const res = await installTo(target, src, { previousVersion: prev, profile, storeRoot })
     if (src.source === 'tarball') await rm(dirname(src.pkgDir), { recursive: true, force: true })
     if (!storeOnly) mountOrWarn(profile, () => mount(profile, target), 'mount')
     console.log(`installed ${res.version} (${res.files} entries) at ${target}${storeOnly ? '' : `, mounted into profile '${profile}'`}`)

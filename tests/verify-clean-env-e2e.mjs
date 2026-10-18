@@ -41,7 +41,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { payloadOf } from '../lib/payload.mjs'
 
@@ -83,6 +83,18 @@ const SRC_ROOT = resolve(CLI, '../../..') // 同 verify-live-tool-call：tsx 解
 const NODE_ARGS = (args) => ['--import', 'tsx/esm', CLI, ...args]
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-matt-clean-'))
+
+/** canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内。
+ *  一条 `rm(home)` 只要 `home` 解析错（例如继承到真实 `DSH_HOME`），就会作用到真实 home；
+ *  删前再断言一次，把「错路径」变成显式失败而不是静默事故。 */
+const TMP_ROOT = resolve(tmpdir())
+const assertTempHome = (p) => {
+  const rel = relative(TMP_ROOT, resolve(p))
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error(`temp-home canary tripped: ${p} is outside ${TMP_ROOT}`)
+  }
+}
+assertTempHome(home)
 
 /** 跑 CLI（bootstrap / dump-config）：DSH_HOME 一律指向临时 home。 */
 const runCli = (args, env = {}) => new Promise((resolveRun) => {
@@ -465,6 +477,7 @@ try {
 }
 
 // 清理（AC「跑完清理」）：成功失败都删——失败现场靠上面的逐环读数定位。
+assertTempHome(home)
 await rm(home, { recursive: true, force: true }).catch(() => {})
 if (!existsSync(home)) ok('Z1. cleanup: temp home removed')
 else bad('Z1. cleanup: temp home removed', home)

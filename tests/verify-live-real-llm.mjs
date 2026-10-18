@@ -26,7 +26,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zstdDecompressSync } from 'node:zlib'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
@@ -77,6 +77,16 @@ const TASK = process.env.DSH_MATT_REAL_PROMPT
 const SESSION_DIR_OWNER = 'sessions'
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-matt-real-'))
+/** canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内——`rm(home)` 的 home 一旦
+ *  解析错（如继承到真实 `DSH_HOME`），删的就是真实 home。删前再断言一次。 */
+const TMP_ROOT = resolve(tmpdir())
+const assertTempHome = (p) => {
+  const rel = relative(TMP_ROOT, resolve(p))
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error(`temp-home canary tripped: ${p} is outside ${TMP_ROOT}`)
+  }
+}
+assertTempHome(home)
 let child
 const cleanup = async () => {
   if (child !== undefined) {
@@ -84,6 +94,7 @@ const cleanup = async () => {
     child.kill('SIGKILL')
     await Promise.race([exited, new Promise(r => setTimeout(r, 5000))])
   }
+  assertTempHome(home)
   await rm(home, { recursive: true, force: true }).catch(() => {})
 }
 

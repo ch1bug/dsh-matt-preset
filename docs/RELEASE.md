@@ -153,9 +153,14 @@ node -e "const p=require(process.env.HOME+'/.dsh/profiles/desktop/package.json')
 # 2) 重装（installer 会写正确路径并重挂 profile link）
 node bin/install.mjs install --profile desktop --force
 
-# 3) 确认 link 已改指，再删掉遗留目录（确认前不要删）
+# 3) 确认 link 已改指，再删掉遗留目录（确认前不要删）。旧分叉目录不是 store 本体，
+#    installer 的 uninstall 不覆盖它，只能手工删——所以这里用**自守卫的 dry-run 脚本**：
+#    DSH_HOME 未设置就报错退出；默认只打印解析后的绝对路径，加 CONFIRM=1 才真删。
+#    2026-10-18 事故的教训：手工 `rm -rf <DSH_HOME>/…` 模板一旦把占位符展开错
+#    （例如展开成用户 profile 根），删掉的就是真实数据。
 node bin/install.mjs --version
-rm -rf <DSH_HOME>/.agent-presets/dsh-matt-preset   # 仅在第 1 步确认它不再被 link 之后
+node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node:path');const h=process.env.DSH_HOME;if(!h)throw new Error('DSH_HOME not set — stop');const p=join(h,'.agent-presets','dsh-matt-preset');console.log('legacy store:',p);if(process.env.CONFIRM!=='1'){console.log('dry-run — 人眼确认路径后加 CONFIRM=1 重跑');process.exit(0)}if(existsSync(p))rmSync(p,{recursive:true,force:true})"
+# 确认输出路径无误后：CONFIRM=1 node -e "…（同上）"
 ```
 
 **判据**：第 1 步的输出变成 `link:<DSH_HOME>/.agent-presets/matt`，且重启后 hero-chip 出现
