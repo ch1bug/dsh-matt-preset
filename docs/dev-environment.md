@@ -167,7 +167,7 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   | 可用的 `bash` | PATH 上的那个（本机是 **WSL bash**：丢弃继承 env、看不见 `D:\`） | 钩子由 msys 的 `sh` 起，子进程看到的是 **msys** 语义（`/c/...`、`/tmp`≠`C:\tmp`） |
   | `cygpath` / coreutils（`mktemp`/`mkdir`） | **不在**继承 PATH 上（`command not found`） | 在（msys 的 `/usr/bin` 可达）→ 同一段脚本走**另一条分支** |
   | `ProgramFiles` 一族 | msys bash 只暴露 **`PROGRAMFILES`**（`ProgramFiles` 拼写**从不成立**） | 同左 |
-  | `node` 在 PATH 上？（决定 `.cmd` 夹具能否被 cmd.exe 起来） | **在**（继承 Windows PATH） | **看钩子是谁起的**：`git commit` 从 agent shell 起 → 继承同一 PATH（**在**）；**手工**则看是不是**登录** shell —— `bash -c`（不登录，继承调用方 PATH）→ **在**（`command -v node` 有值）；`bash -lc`（登录，`-l` 会 source `/etc/profile` 重建 PATH 为 msys 默认，§0.1：不带 Windows node）→ **不在**（`command -v node` 空、`node: command not found`）→ 假件里写裸 `node` 的用例在 cmd.exe 侧起不来 |
+  | `node` 在 PATH 上？（决定 `.cmd` 夹具能否被 cmd.exe 起来） | **在**（继承 Windows PATH） | **看钩子是谁起的**：`git commit` 从 agent shell 起 → 继承同一 PATH（**在**）；**手工**则看是不是**登录** shell —— `bash -c`（不登录，**继承调用方 PATH**）→ **看调用方**：调用方 PATH 有 node 则**在**（从 agent shell 起即如此），否则**不在**（例如从 `-lc` 里再起 `bash -c`）；`bash -lc`（登录，`-l` 会 source `/etc/profile` 重建 PATH 为 msys 默认，§0.1：不带 Windows node）→ **不在**（`command -v node` 空、`node: command not found`）→ 假件里写裸 `node` 的用例在 cmd.exe 侧起不来 |
 
   **判据**：夹具**由被测环境自己的那个 bash** 建出并报出路径（`mktemp -d` + `pwd`），
   期望值与输入**同源**——这样"夹具在哪"与"脚本看到哪"按构造是同一事实，翻译几层都不进判据。
@@ -176,8 +176,9 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   与 bash 的 `/tmp` **不是一处**——写夹具文件也走 bash（`cat >`）。
 
   **上表 `node` 那一行的落地结论**（#124）：夹具里的假 `.cmd` 一律用**正在跑用例的** node
-  绝对路径（`process.execPath`），不要写裸 `node`——后者在手工登录 shell（`-lc`）下起不来，
-  读数会变成「installer 失败（exit 9009）」而不是被测行为。R9 即按此修（#124）。
+  绝对路径（`process.execPath`），不要写裸 `node`——后者在手工登录 shell（`-lc`）下 cmd.exe
+  起不来它，用例会以 `exit 1` 红在「installer 应成功（含空格路径）」这条断言上
+  （内层是 cmd.exe 的 `'node' is not recognized…`），而不是红在被测行为上。R9 即按此修（#124）。
 
   **钩子导出的 git 变量：实测形态（#110，别再按直觉推）**——`git commit` 起钩子时会导出指向
   **调用方仓库**的变量；夹具若原样继承，它的 `git init` / `git config` 会**打到调用方仓上**。
