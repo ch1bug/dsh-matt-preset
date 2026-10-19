@@ -39,9 +39,12 @@
  *   C9d      票数解析器自检：仓内夹具文本（3 行 / 2 完成、6 行 / 6 完成）→ 票数正确；
  *            无表格 / 表头无「状态」列 → **解析失败**（响亮，不返回 0）
  *   C9e      护栏判据自检：`overGuardrail(5) === false`、`(6) === true` —— 把 brief AC
- *            「5 票不喊 / 6 票喊」钉成可跑事实（防后人把 `>` 悄悄改回 `>=` 或按笔判断）
- *   C9f      护栏读数**必须在场**（活文件在时）且**决策只由票数决定**（`fired == overGuardrail(done)`）
- *            —— 整块被删 / 调用点改拿笔数去喊，都变红（防"摘防线仍全绿"）
+ *            「5 票不喊 / 6 票喊」钉成可跑事实（防后人把 `>` 悄悄改回 `>=` 或按笔判断）；
+ *            同时钉**文档同口径句**「票数 **> 5** 才喊」（阈值在代码与 docs 两处载体上，
+ *            单边漂移在第 1 轮复核里无人守 —— D6）
+ *   C9f      护栏**发出去的那一面**：读数必须在场、**入口形状只收 `{done,total}`**（裸笔数被拒）、
+ *            `fired == overGuardrail(done)` 自洽 —— 整块被删 / 调用点改拿笔数去喊，都在
+ *            **任何活文件状态**下变红（不靠"此刻恰好 5 票"那种数据巧合）
  *
  * 零运行时依赖（可独立 `node tests/verify-batch-state.mjs`）：`workflow-enforcer.mjs` 本身只
  * 依赖 `node:*` / `yaml`（**不**依赖 `@deepseek-ai/*`），所以本用例直接 import 它的**稳定导出**
@@ -472,14 +475,28 @@ function parseTickets(live) {
 }
 
 /** 护栏判据（两侧**同为票**）：**超过** 5 票才喊。
- *  `>` 不是 `>=` —— A 批实测的 human 口径：5 票全部完成时「**正好 5**、护栏**未触发**」；
- *  而 5 是**批的成员上限**（D31 (a) / D32），所以这道闸真喊出来时，信号是「批超出宣告
- *  上限 / 成员表漂了」，不是"该 push 了"（push 节奏仍走 D31 的批末总结门）。C9e 把两侧
- *  边界（5 不喊 / 6 喊）钉成可跑事实，防后人悄悄改回 `>=` 或改回按笔判断。 */
+ *  `>` 不是 `>=` —— A 批实测的 human 口径：5 票全部完成时「**正好 5**、护栏**未触发**」。
+ *  5 是**批的成员上限**（**D32**；护栏 (b)「未推送达 5 票」里的 5 见 **D31 (b)**）—— 所以这道闸
+ *  真喊出来时，信号是「批超出宣告上限 / 成员表漂了」；动作仍按正文「暂停并报告、请求 push
+ *  检查点」，但**闸不主张**"必须 push"（批末 push 仍走 D31 的总结门）。C9e 把两侧边界
+ *  （5 不喊 / 6 喊）钉成可跑事实，防后人悄悄改回 `>=` 或改回按笔判断。 */
 const overGuardrail = (tickets) => tickets > 5
 
-/** 票数读数**是否真的发出去过** + 它据以决策的票数 —— C9f 用它守两面：
- *  ① "护栏整块被删仍全绿"的洞；② "决策被接到**笔数**上"的洞（fired 必须 == overGuardrail(done)）。 */
+/** 由**解析出来的票数**产出护栏读数。
+ *  **输入形状本身就是一道结构防线**（第 1 轮复核 D6/C9f 实测：光靠 `fired === overGuardrail(done)`
+ *  自洽，在"活文件 0 票 / 2 笔"时与"把笔数接进来"同值 ⇒ 那道判据是**数据依赖**的）。
+ *  故入口只接受 `parseTickets()` 的成功返回形状 `{ done, total }`；喂裸 number（笔数）、
+ *  字符串或别的东西 → `{ status: 'bad-input' }`，调用方**响亮 ✗**。
+ *  为什么不写成"宽容地取一个数"：本票的病就是**笔数被当票数用**，一个能接受裸 number 的
+ *  入口等于把这个错法请回来；形状判据让"接错量纲"从**巧合**变成**构造上不可能**。 */
+const guardrailOf = (parsed) => {
+  const wrongShape = typeof parsed?.done !== 'number' || typeof parsed?.total !== 'number'
+  return wrongShape
+    ? { status: 'bad-input' }
+    : { status: 'ok', done: parsed.done, total: parsed.total, fired: overGuardrail(parsed.done) }
+}
+
+/** 本轮护栏读数 —— C9f 用它守两面：读数**必须在场**、**输入形状合法**、**决策只由票数决定**。 */
 let guardrailReading = null
 /** 未推送**笔数**（C9-live 的实测值）。**只作展示，不参与护栏比较** —— #119 的核心。 */
 let unpushed = null
@@ -529,25 +546,32 @@ if (LIVE === null) {
     bad('C9-guardrail. 票数可解析（成员表结构取数）',
       `${TICKETS.reason} —— 护栏读不到票数时必须**响亮**；**绝不当 0**（0 是"没超"方向，会把护栏整个废掉）`)
   } else {
-    const fired = overGuardrail(TICKETS.done)
-    guardrailReading = { done: TICKETS.done, total: TICKETS.total, fired }
-    const pen = unpushed === null ? '未知（本轮笔数取数未成功，见上）' : `${unpushed} 笔`
-    const seamNote = seamUsed ? '【⚠ SEAM：笔数来自 DSH_MATT_BATCHSTATE_COUNT】' : ''
-    if (fired) {
-      warn('C9-guardrail. 已完成票数**超 5 票护栏**',
-        `已完成 ${TICKETS.done}/${TICKETS.total} 票 > 5 票（两侧同为**票**）—— 按 @@ batch-mode：` +
-        `**暂停并报告**，请 human 给一个 push checkpoint（或明确继续）。` +
-        `未推送 ${pen}${seamNote}（笔数只作展示，**不参与**本次比较）`)
+    const READING = guardrailOf(TICKETS)
+    guardrailReading = READING
+    if (READING.status !== 'ok') {
+      // 形状不对 = 有人把**笔数**或别的量喂进了护栏入口 —— 这正是本票的原始错法，必须响亮。
+      bad('C9-guardrail. 票数入口的形状（只接受解析出来的 `{done,total}`，**不接受裸笔数**）',
+        `实得 ${JSON.stringify(READING)} —— 入口只收 parseTickets() 的成功返回；喂裸 number 会被拒`)
     } else {
-      // 5 票是正文 D31 的暂停门，而本闸按「超过 5 票」才喊 —— 恰在 5 票时把这条边界明说出来，
-      // 免得"闸没喊"被误读成"规则也不管"（闸不喊 ≠ 正文规则取消）。
-      const boundary = TICKETS.done === 5
-        ? '；已达 5 票 —— 正文 D31「未推送达 5 票」的暂停门在此，本闸按「超过 5 票」才喊，'
-          + '要不要 push 检查点请按正文规则自行决定'
-        : ''
-      ok('C9-guardrail. 护栏两侧同单位（票）：已完成票数未超 5 票护栏',
-        `已完成 ${TICKETS.done}/${TICKETS.total} 票 ≤ 5 票（两侧同为**票**）；` +
-        `未推送 ${pen}${seamNote}（笔数与票数是两个量，笔数只作展示、**不参与**比较${boundary}）`)
+      const pen = unpushed === null ? '未知（本轮笔数取数未成功，见上）' : `${unpushed} 笔`
+      const seamNote = seamUsed ? '【⚠ SEAM：笔数来自 DSH_MATT_BATCHSTATE_COUNT】' : ''
+      if (READING.fired) {
+        warn('C9-guardrail. 已完成票数**超 5 票护栏**',
+          `已完成 ${READING.done}/${READING.total} 票 > 5 票（两侧同为**票**）—— 按 @@ batch-mode：` +
+          `**暂停并报告**：5 是批的成员上限，到第 6 票说明**超出宣告上限 / 成员表漂了**；` +
+          `请 human 裁决（按 D31 (b) 收束并请求 push 检查点，或确认这是**显式扩员**）。` +
+          `未推送 ${pen}${seamNote}（笔数只作展示，**不参与**本次比较）`)
+      } else {
+        // 5 票是正文 D31 的暂停门，而本闸按「超过 5 票」才喊 —— 恰在 5 票时把这条边界明说出来，
+        // 免得"闸没喊"被误读成"规则也不管"（闸不喊 ≠ 正文规则取消）。
+        const boundary = READING.done === 5
+          ? '；已达 5 票 —— 正文 D31「未推送达 5 票」的暂停门在此，本闸按「超过 5 票」才喊，'
+            + '要不要 push 检查点请按正文规则自行决定'
+          : ''
+        ok('C9-guardrail. 护栏两侧同单位（票）：已完成票数未超 5 票护栏',
+          `已完成 ${READING.done}/${READING.total} 票 ≤ 5 票（两侧同为**票**）；` +
+          `未推送 ${pen}${seamNote}（笔数与票数是两个量，笔数只作展示、**不参与**比较${boundary}）`)
+      }
     }
   }
 }
@@ -569,6 +593,10 @@ const TICKET_PARSE_CASES = [
     + '| 1 | #901 | `done` | x |\n| 2 | #902 | `done` | x |\n| 3 | #903 | `done` | x |\n'
     + '| 4 | #904 | `done` | x |\n| 5 | #905 | `done` | x |\n| 6 | #906 | `done` | x |',
     { total: 6, done: 6 }],
+  ['无空格粘连不算完成（`done（#114）` / `done@sha` —— 口径是"**空白分隔的首词**"）',
+    '| # | 票 | 状态 | 说明 |\n| --- | --- | --- | --- |\n'
+    + '| 1 | #901 | done（#114） | x |\n| 2 | #902 | done@abc1234 | x |\n'
+    + '| 3 | #903 | `ready-for-agent` | x |', { total: 3, done: 0 }],
   ['无表格 → 解析失败（响亮，不返回 0）', '本节没有表格，只有一句话。', null],
   ['表头无「状态」列 → 解析失败',
     '| # | 票 | 说明 |\n| --- | --- | --- |\n| 1 | #901 | lane=A |', null],
@@ -587,31 +615,54 @@ if (parseFailures.length === 0)
 else bad('C9d. 票数解析器自检失败（票数取数面已失真）', parseFailures.join(' | '))
 
 // C9e：brief AC 的两侧边界（5 票**不喊** / 6 票**喊**）—— 判据是纯函数，与笔数无关。
+// ⚠ 本票的阈值与判据语义在**两处载体**上（代码 `overGuardrail` + 文档「笔与票」节），
+// 单边漂移（改代码不改文档）此前无人守（第 1 轮复核 D6）。故这里同时钉**文档那侧的同一句话**：
+// 文档必须写明「票数 **> 5** 才喊」，与代码判据同字面量（照 C2d `retroMarker` 的先例）。
+const DOC_THRESHOLD_LINE = '票数 **> 5** 才喊'
 const GUARD_CASES = [
   ['5 票 → 不喊（A 批实测：正好 5，护栏未触发）', 5, false],
   ['6 票 → 喊', 6, true],
   ['0 票 → 不喊', 0, false],
 ]
 const guardFailures = GUARD_CASES.filter(([, n, want]) => overGuardrail(n) !== want).map(([name]) => name)
-if (guardFailures.length === 0)
-  ok('C9e. 护栏判据自检（**票** > 5 才喊：5 不喊 / 6 喊 —— 与笔数无关）',
-    `${GUARD_CASES.length} 个边界：${GUARD_CASES.map(([n]) => n).join(' / ')}`)
-else bad('C9e. 护栏判据自检失败（判据被改回 `>=` 或换回笔数？）', guardFailures.join(' | '))
+const docSaysSame = DOC.includes(DOC_THRESHOLD_LINE)
+if (guardFailures.length === 0 && docSaysSame)
+  ok('C9e. 护栏判据自检（**票** > 5 才喊：5 不喊 / 6 喊 —— 与笔数无关）且文档同口径',
+    `${GUARD_CASES.length} 个边界：${GUARD_CASES.map(([n]) => n).join(' / ')}；docs 含 ${JSON.stringify(DOC_THRESHOLD_LINE)}`)
+else bad('C9e. 护栏判据自检失败',
+  `${guardFailures.length ? '判据被改回 `>=` 或换回笔数？→ ' + guardFailures.join(' / ') : ''}` +
+  `${docSaysSame ? '' : `${guardFailures.length ? '；' : ''}docs 缺同口径句 ${JSON.stringify(DOC_THRESHOLD_LINE)}（代码改了文档没跟 = D6 单边漂移）`}`)
 
-// C9f：护栏读数**必须在场**，且**决策只由票数决定**。为什么需要两条：
-//   ① 缺席判据：把护栏整块删掉时，"没超所以没喊"与"防线被摘掉"读数完全一样；
-//   ② 决策判据：把调用点从 `overGuardrail(done)` 改成拿**笔数**去喊（本票的原始 bug 形态）
-//      时，C9d/C9e 测的是纯函数、仍会全绿 —— 只有把"发出去的读数"与"重算的判据"对照才红。
+// C9f：护栏的**发出去**的那一面 —— 三条一起判：
+//   ① 缺席判据：把护栏整块删掉时，"没超所以没喊"与"防线被摘掉"读数完全一样（只能靠这条抓）；
+//   ② 形状判据：`guardrailOf` 只收 `{done,total}`，**裸笔数必须被拒** —— 第 1 轮复核实测：
+//      只靠 `fired === overGuardrail(done)` 自洽在"活文件 0 票 / 2 笔"时是**数据依赖**的空转
+//      （把调用点改成拿笔数，仍绿）；形状判据不依赖活文件，任何活文件状态下都能红；
+//   ③ 决策判据：发出去的 `fired` 必须等于 `overGuardrail(发出去的 done)`（防"读数改了决策没改"）。
+const SHAPE_CASES = [
+  ['{done:5,total:5} → 不喊', { done: 5, total: 5 }, false],
+  ['{done:6,total:6} → 喊', { done: 6, total: 6 }, true],
+]
+const shapeFailures = SHAPE_CASES.filter(([, input, want]) => guardrailOf(input).fired !== want).map(([n]) => n)
+// 裸数字 / 字符串（= 笔数被误当票数）都必须被入口拒掉：这是本票原始 bug 的形状。
+const rejectsNonTickets = [14, '6', null, undefined].every(v => guardrailOf(v).status === 'bad-input')
 if (LIVE === null) {
   // 无活文件：C9 整体 loud SKIP，护栏按构造不出声 —— 不判红（非批会话）。
+} else if (shapeFailures.length > 0 || !rejectsNonTickets) {
+  bad('C9f. 护栏入口形状自检失败（**票数入口把笔数放进来了**）',
+    `fixture 失败: ${shapeFailures.join(' / ') || '(无)'}；裸 number/字符串被拒 = ${rejectsNonTickets}`)
 } else if (guardrailReading === null) {
   bad('C9f. 护栏读数缺席', '活文件在，却没有 C9-guardrail 读数 —— 护栏被摘掉了（防线缺席必须响亮）')
+} else if (guardrailReading.status !== 'ok') {
+  bad('C9f. 护栏读数的输入形状非法（可能被喂了**笔数**）',
+    `本轮读数 ${JSON.stringify(guardrailReading)} —— 只接受解析出来的 {done,total}`)
 } else if (guardrailReading.fired !== overGuardrail(guardrailReading.done)) {
   bad('C9f. 护栏决策与票数不符（决策可能被接到了**笔数**上）',
     `本轮读数 ${JSON.stringify(guardrailReading)} —— fired 必须是 overGuardrail(已完成票数) 的函数`)
 } else {
-  ok('C9f. 护栏读数在场且**决策只由票数决定**',
-    `已完成 ${guardrailReading.done}/${guardrailReading.total} 票 → fired=${guardrailReading.fired}`)
+  ok('C9f. 读数在场 + **输入形状只收票数** + 决策自洽',
+    `活文件 ${guardrailReading.done}/${guardrailReading.total} 票 → fired=${guardrailReading.fired}；` +
+    `fixture：${SHAPE_CASES.map(([n]) => n).join(' / ')}；裸 number/字符串被入口拒掉`)
 }
 
 // ── C9b: 计数机制的**机械演示夹具**（#115 的非空洞硬要求 + D15 的结构性防线）────────
@@ -703,14 +754,17 @@ try {
       const shots = usable.map(p => `${p.name}: 默认 Count=${p.aNum} / -Line=${p.lNum} / -InputObject=${p.ioNum}`).join(' ｜ ')
       // **可稳定复现的那一支**：`-InputObject` 恒报 1，而真值（`rev-list`）是 3。
       // 这一条**必须绿**——它不依赖"宿主是否把多行折叠"（那个随宿主变，见下），
-      // 且它正是契约要防的那个方向（1 < 3，把 ≥5 读成 1、绕过护栏）。
+      // 且它正是契约要防的那个方向（1 < 3：把 ≥5 笔读成 1 笔）。⚠ #119 起护栏读**票数**，
+      // 所以这条错法的影响面是「未推送清单本身」与批末 push 的输入（C9-live 会对账），
+      // **不再**是"绕过护栏"——那句是 #115 时代（护栏当时读笔数）的形态，别写回来。
       const ioWrong = usable.find(p => p.ioNum === 1 && fixtureActualNum > 1)
       const differ = usable.find(p => p.aNum === 1 && p.lNum === fixtureActualNum)
       const agree = usable.filter(p => p.aNum === fixtureActualNum && p.lNum === fixtureActualNum)
       if (ioWrong !== undefined) {
         ok('C9b-2. 计数机制演示（结构性防线）：同一份 git 输出 —— ' +
           `\`Measure-Object -InputObject\` 恒报 **1**，而 \`rev-list --count\` 报 **${fixtureActualNum}**`,
-          `逐宿主读数：${shots} —— 1 < ${fixtureActualNum} 正是"把 ≥5 读成 1、绕过护栏"的方向；` +
+          `逐宿主读数：${shots} —— 1 < ${fixtureActualNum} 正是"把 ≥5 **笔**读成 1 **笔**"的方向` +
+          '（失真落在未推送清单与批末 push 输入上；护栏 #119 起读票数，不受影响）；' +
           '（默认形态是否同错随宿主变，故不予断言）')
       } else {
         bad('C9b-2. 计数机制演示失灵（`-InputObject` 未报出 1）',
@@ -748,7 +802,8 @@ if (CONTRACT_SECTION === null) {
   const CONTRACT_POINTS = [
     ['命令原文：`git rev-list --count`（唯一许可）', /git rev-list --count/],
     ['理由：`Measure-Object` 一族**逐对象**计数（不是逐行）', /逐\s*\*\*对象\*\*计数|逐对象计数/],
-    ['为何贵：错法朝向"把 ≥5 读成 1"、绕过护栏**且不报警**', /绕过护栏[\s\S]{0,40}不报警|不报警[\s\S]{0,40}绕过护栏/],
+    ['为何贵：把 ≥5 **笔**读成 1 笔 → 未推送清单失真，且 C9-live **只报不阻断**',
+      /未推送清单[\s\S]{0,60}不阻断|只报不阻断[\s\S]{0,60}未推送清单/],
     ['命令白名单被测例钉住（只许 / 一律用）', /只许|一律用/],
   ]
   const missingContract = CONTRACT_POINTS.filter(([, re]) => !re.test(CONTRACT_SECTION)).map(([n]) => n)
