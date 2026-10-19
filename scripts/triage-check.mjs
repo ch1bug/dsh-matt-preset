@@ -110,6 +110,15 @@ function main(argv) {
     console.error(`✗ 读不到票面正文：${targets[0]} —— ${String(error?.message ?? error)}`)
     return 2
   }
+  // 空输入不是「票面没有冲突」，是**取数失败**。不响亮拦下来的话，它会被读成
+  // 「四类核对全缺」——2026-10-19 实测就这么把人骗去追了一个不存在的编码问题：
+  // `gh issue view <n> --json body --jq -r .body` 会被 gh 拒（`accepts 1 arg(s),
+  // received 2`），变量为空、文件为空，判据报四类全缺。
+  if (String(text).trim() === '') {
+    console.error('✗ 输入为空（0 字节）—— 这是取数失败，不是「票面没有冲突」')
+    console.error('  取票面正文：gh issue view <n> --json body --jq .body（--jq 只收一个参数；别加 -r）')
+    return 2
+  }
   const result = checkTicketBody({ text, rfa })
   console.log(render(result, { rfa }))
   console.log(result.pass ? '  · 判据：票面够格（标签动作是人的）' : '  · 判据：不够格 —— 先归零，再打标签')

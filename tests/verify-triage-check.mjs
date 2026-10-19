@@ -176,6 +176,21 @@ function docList(label) {
   else bad('T7c. CLI 用法错', `exit=${usage.status}`)
 }
 
+// ── T10: 空输入必须**响亮**（不是「四类核对全缺」）──────────────────────────
+// 2026-10-19 实测：`gh issue view <n> --json body --jq -r .body` 被 gh 拒
+//（`accepts 1 arg(s), received 2`）→ 变量为空 → 写空文件 → 本判据报「四类全缺」，
+// 把人骗去追了一个不存在的编码问题。空输入属于**取数失败**，必须与「票面不够格」分开。
+{
+  const empty = spawnSync(process.execPath, [SCRIPT, '-', '--rfa'], { input: '', encoding: 'utf8' })
+  const blank = spawnSync(process.execPath, [SCRIPT, '-'], { input: '   \n\n', encoding: 'utf8' })
+  const loud = /输入为空/.test(`${empty.stderr ?? ''}${empty.stdout ?? ''}`)
+  const hint = /--jq \.body/.test(`${empty.stderr ?? ''}`)
+  if (empty.status === 2 && loud && hint) ok('T10a. 空输入 → exit 2 + 响亮（点名取数写法，不报四类核对）')
+  else bad('T10a. 空输入未被响亮拦下', `exit=${empty.status} loud=${loud} hint=${hint}`)
+  if (blank.status === 2) ok('T10b. 只有空白的输入同样按取数失败处理')
+  else bad('T10b. 空白输入', `exit=${blank.status}`)
+}
+
 // ── T8: 渲染面（读数行与判据同源，不另写一份）───────────────────────────────
 {
   const green = render(checkTicketBody({ text: CLEAN_RFA, rfa: true }), { rfa: true })
