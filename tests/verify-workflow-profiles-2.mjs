@@ -389,6 +389,9 @@ else bad('AC2h. example leakage', leakedExamples.join(', '))
 // deriving it from the delta would make the check tautological.
 const RULE_ANCHORS = ['MINIMAL FLOW', 'DONE — verification includes the remote CI', 'TEST SCOPE TIERING',
   'RECOVERY DISCIPLINE', 'BATCH MODE', 'ONE TICKET PER SESSION', 'AUTO-HANDOFF', 'ISSUE DISCIPLINE',
+  // #128：压缩不等于删除 —— 票面契约 / 冲突归零 / 预授权清单 / 收口步必须仍在 minimal 里，
+  // 否则 minimal 档位的会话会退回「什么问题都停下来问」的老病灶。
+  'ENTRY CONTRACT', 'CONFLICT ZERO', 'PRE-AUTHORIZATION', 'CLOSE-OUT STEP',
   'TEXT PUSHES EXCLUDE ACTIONS', 'CONTEXT HYGIENE', 'METHODOLOGY', 'ON-RAMPS', 'HEALTH',
   'STANDALONE', 'UTILITIES', 'PRECONDITION', 'INITIALIZATION']
 const lostAnchors = RULE_ANCHORS.filter(anchor => !minText.includes(anchor))

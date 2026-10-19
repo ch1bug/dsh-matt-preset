@@ -34,12 +34,63 @@ Create a GitHub issue.
 
 Read it as in **Read an issue** above.
 
+## 标签回读不变量（建票 / 改票后必核）
+
+**每条票面写完后回读一次标签**，不靠「我刚才好像加了」：
+
+```sh
+gh issue view <n> --json labels --jq '[.labels[].name]'
+```
+
+判据 = **恰一个 category**（`bug` / `enhancement`）+ **恰一个 state**（`needs-triage` /
+`needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix` 之一）。缺了就用
+`gh issue edit <n> --add-label` 补上，再回读一次。
+
+**为什么是不变量而不是习惯**：没有 state 的票在**任何按 state 过滤的面**上都不可见——
+`frontier`、`gh issue list --label`、批内盘点都读不到它。本仓 #126 / #127 就是这样建出来的
+（只有 `bug`、无 state）；邻仓实测一次会话连建 4 张票**全漏 state**，一张都进不了面。
+
+`scheduled`（已排入批次）与 `P0`（阻断可用性）**正交于**五状态：`scheduled` **不参与**
+「恰一个 state」判定，`P0` 只调优先级。术语表见 `docs/agents/triage-labels.md`。
+
+## 分诊产出前置项（冲突归零）
+
+分诊（triage）与 grill 的产出**不止**「票面写清 + 打标签」，还有一步：**冲突归零**。
+「冲突」指下面四类，**每一类都要在票面里写出处置结论**，写不出就**不许打 RFA**：
+
+| 类 | 判据 | 归零动作 |
+| --- | --- | --- |
+| **① 票面内部** | AC 之间互斥、正文与验收节矛盾、两处对同一事的口径不同 | 改到一致（算术可行性也在这里判） |
+| **② 票面 vs 实测** | 票面写的现象 / 根因与 HEAD 不符 | **重测**（一条命令 + 读数，D9），或标注「未实测，按此假设」 |
+| **③ 文档 vs 实测** | 票面引用的 ADR / CONTEXT 决策 / `docs/**` 与票面相反或已过期 | `git grep -n <票面关键词> -- docs/ *.md` 逐条判「仍成立 / 已过时」；不一致的**已改**或**票面显式声明以本票为准** |
+| **④ 票级** | 与其它票重复、依赖边方向错、批次归属相冲 | 查重 / 修边 / 重新归批（与同批成员的写域与判据不得交叉） |
+
+**三种出路**（每条冲突必须选一个，**不是记下来就算归零**）：
+
+- **(a) 消解**：改票面或改文档，使两者一致 —— 给出改后的逐字口径；
+- **(b) 拍板**：需要 human 决策的，**分诊 / grill 阶段就问掉**，把结论写进票面（问在开工前）；
+- **(c) 显式声明**：确实无法在分诊期消解的，写**唯一口径 + 依据**，并标注「此项已定，实现时不得再问」。
+
+**措辞黑名单**（出现即在推诿决策，等同「有一类冲突没读」）：
+
+- **机械面**（`scripts/triage-check.mjs` 会红）：`草案` / `可微调` / `时微调` / `视情况` /
+  `酌情` / `待定` / `TBD`。
+- **人判面**（工具判不了，**如实声明**不装成守卫）：`或`（并列选项语境）、`建议`（"要不要做"
+  语境）、挂在决策上的裸 `?`。
+
+用法：`node scripts/triage-check.mjs <body-file | ->`（读票面正文；`--rfa` 时额外要求
+「四类核对」声明在场）。**票面在 GitHub，套件不联网核**（D15）：这个脚本由分诊会话**手动**跑，
+`tests/verify-triage-check.mjs` 只用夹具样例守它的判据，不去查线上票。
+
+与 `docs/code-review-brief.md` **§2.5** 的关系：§2.5 是**复核期**的兜底（票面可证伪断言 + AC
+互斥），本节要求**前移**——分诊期就做掉，复核期只验证「确实做过了」。**§2.5 不废除。**
+
 ## Ready frontier（可开工票集合）
 
 排批 / 预检的输入 = **open + `ready-for-agent` + 无 open 阻塞 + 无 assignee**。现算，不读票面文字：
 
 ```sh
-node scripts/frontier.mjs              # 默认 ready-for-agent（当前 18 张）
+node scripts/frontier.mjs              # 默认 ready-for-agent（不印票数：数字会漂）
 node scripts/frontier.mjs --label ready-for-human
 node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理由)
 ```
@@ -50,6 +101,8 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
   但边仍在（看 `total_blocked_by`）。2026-10-16 曾据此把"已满足的历史边"误判成"缺边"。
 - 正文里的 `## Blocked by` 段只是叙述，会过期（#61 曾正文写 `None.` 而边是 `← #59`）。
   改阻塞关系 = 改**边**，正文顺手对齐。
+- **已 DONE 但未关的票仍算 open**：frontier 会把它们算进可开工（实测 28 vs 真实 25）。
+  排批前先按 `docs/batch-state.md` 的「收口记录」把它们剔掉——否则排队数字永远虚高。
 - `gh issue view <n> --json blockedBy` **读空数组（假）**：2026-10-17 实测 #57 / #58 / #59 / #60 全返回 `[]`，
   同一时刻 REST `.../dependencies/blocked_by` 有值（`#59 ← [56,57,58]`）。查边一律走上面那条 REST 命令——
   别把空数组读成"边已掉"（gh 2.96 实测）。

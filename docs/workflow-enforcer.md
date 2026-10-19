@@ -64,7 +64,9 @@ all, so its only possible face is the text layer.
 - A ticket **create** (`gh issue create`) gets a one-shot **ONE ISSUE PER SESSION**
   reminder (D20): the new ticket is its own session's work — create it
   and continue the current ticket only, never fix/close/fold it inline (TICKET
-  EXIT).
+  EXIT). The same nudge carries the **label read-back invariant** (#128):
+  read the labels back and require exactly one category + exactly one state —
+  a ticket with no state is invisible on every state-filtered surface.
 - A batch close-out (ticket reported done while `.scratch/batch-state.md`
   exists) gets a one-shot **AUTO-HANDOFF** nudge, plus the close-out evidence
   rule: the ticket's batch-state Progress row must carry the three evidence
@@ -125,8 +127,13 @@ all, so its only possible face is the text layer.
   **Batch declared** reminder — a **text-layer observation**, deliberately unlike
   the push trigger above (the declaration is something the human says; it has no
   tool call at all): `` write `.scratch/batch-state.md` now `` (members, end point,
-  the Progress rows' three evidence elements — proving command / exit code /
-  evidence path — a lane marker per ticket, the successor ticket, and the
+  the **closing-confirmation mode** — per-ticket / in-batch pre-authorized /
+  batch-end once, with a loud line when the declaration names none — the
+  **pre-authorization list** (write scope / create-only tickets / closing / one
+  push at the batch end), the **close-out record** (classification + same-family
+  merges + done-but-unclosed dropped), the Progress rows' three evidence
+  elements — proving command / exit code / evidence path — a lane marker per
+  ticket, the successor ticket, and the
   `` `retro: done @ <commit>` completion marker `` at the batch end). Its shape is
   `docs/batch-state.md` — copy that template, do not invent fields. The `retro:`
   line is the **agent's** to write; this plugin only reads the marker and is

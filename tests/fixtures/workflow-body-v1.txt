@@ -94,6 +94,83 @@ record, do not re-derive state from context.
 BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
 系列处理 / 大系列"); never on by default. Single-issue work keeps the
 per-issue push rhythm.
+- TICKET ENTRY CONTRACT（票面契约 —— every ticket, batch or not）: RFA = the
+  ticket needs NO user in the loop AND has NO open decision. It is a checklist,
+  not a vibe — five things are pinned IN THE TICKET BODY before the label goes
+  on: (1) the write-domain whitelist (including "may touch a same-family file
+  when the criterion requires it"), (2) the criterion's form (what the assertion
+  compares against), (3) the acceptance reading (exact command + expected
+  output), (4) the closing rule (which ticket(s) it closes, and who may close),
+  (5) the push checkpoint. A ticket that cannot pin one of the five is RFH, not
+  RFA.
+- RFA is not "fully specified on paper": if implementing it needs the human to
+  pick a direction, supply a credential or environment, judge a real-UI run, or
+  be present while it is verified, it is RFH however well the body is written.
+- A REAL open decision found at runtime — mutually exclusive ACs, a destructive
+  step, a write outside the declared scope, a criterion that contradicts the
+  measured repo — DOWNGRADES the ticket to RFH and STOPS. Ask-then-continue is
+  the failure this rule forbids. What counts as real is exactly that list plus
+  the enforcer's high-risk list; everything else is routine — decide it and put
+  one line of "decided X because Y" in the delivery comment so the human can
+  audit it afterwards.
+- CONFLICT ZERO（四类冲突归零）— at triage / grill close-out, four faces, all
+  four read before the RFA label goes on:
+  - ① inside the ticket: the ACs do not contradict each other and their
+    arithmetic is feasible;
+  - ② ticket vs measured reality: the symptom / root-cause section was
+    re-measured on HEAD (one command + its reading, D9) or is marked "not
+    measured, assumed";
+  - ③ DOCUMENT vs measured reality: `git grep -n <the ticket's keywords> -- docs/
+    *.md`, every hit judged "still true" or "stale, this ticket supersedes it";
+    a document that contradicts the ticket is either fixed or explicitly
+    overridden inside the ticket;
+  - ④ ticket vs tickets: duplicates, dependency direction and batch assignment
+    checked against `gh issue list`, and no write-scope or criterion overlap
+    with the other members of its batch.
+  One unread face → NOT RFA. Each face's disposal (resolved / decided /
+  explicitly declared) is written INTO the ticket, never left in the chat.
+- No decision-pushing wording in a ticket body: 或 as an option list / 草案 /
+  可微调 / 视情况 / 酌情 / 待定 / TBD / a bare "?" hung on a decision. Each such
+  phrase IS an unread conflict face. `scripts/triage-check.mjs <body-file | ->`
+  machine-checks the unambiguous tokens; the contextual ones (或 / 建议 / ?)
+  stay a human read and are DECLARED as such in docs/agents/issue-tracker.md.
+- BATCH DECLARATION PRE-AUTHORIZATION LIST（批宣告预授权清单）— the declaration
+  is the license for autonomous execution, and it authorizes exactly four
+  things:
+  - WRITE SCOPE: the declared write-domain whitelist + "a same-family file when
+    the criterion requires it" + the ticket's own evidence artifacts. A write
+    outside it is a real decision → stop.
+  - CREATE TICKETS: in-batch you may CREATE tickets for discoveries outside the
+    ticket's scope（只建不关 — never close them in-batch). Read the labels back
+    after creating: `gh issue view <n> --json labels --jq '[.labels[].name]'` —
+    exactly one category (bug / enhancement) + exactly one state (one of the
+    five roles). A ticket with no state is invisible on every state-filtered
+    surface (#126 / #127 were built that way).
+  - CLOSE TICKETS: the confirmation mode of closing is chosen AT DECLARATION
+    TIME and recorded in the batch state — (a) per-ticket confirm (report →
+    human confirms → close; the default), (b) in-batch pre-authorization (a
+    finished member is closed without asking, on the batch-end review), or
+    (c) batch-end once (nothing closed in-batch; the summary gate closes the
+    whole membership). If the declaration names no mode, (a) applies AND the
+    declaration prints the loud line 「closing mode not declared — per-ticket
+    confirmation」 (D47: absence is loud, never the convenient default).
+    Comment-closing is still an external action (D21) — the authorization covers
+    the DECLARED members only and NEVER carries into another batch.
+  - PUSH: once, at the batch end, through the summary gate. Never per ticket.
+- CLOSE-OUT STEP — BEFORE A BATCH IS DECLARED（收口步）: classify the open
+  backlog (series / needs-triage / ready-for-human / standalone), MERGE the
+  same-family tickets that one session or one edit would close together, and
+  only then allocate batches (cap 5 per batch). When counting "ready to start",
+  DROP the tickets that are already DONE but not yet closed — a frontier that
+  counts them overstates the queue (measured 28 vs a true 25). Record the
+  close-out in the batch state (the classification line + the merge decisions)
+  so the next session reads it instead of re-deriving it.
+- EXPLICITLY NOT GUARDED (D15): tickets live on GitHub and the local suite
+  NEVER queries the tracker. The ticket-side faces above — labels, close mode,
+  conflict-zero declarations — are verified at the batch-end review, not by a
+  guard. Guards cover only what is decidable in-repo: this body verbatim, the
+  batch-state shape, the frozen fixtures, the bundle, and the enforcer's
+  injection text.
 - Batch = the set of issues the human declares (usually one series,
   e.g. #503 T1/T2/T3, or a to-tickets feature's ticket group). The
   declaration must name the members and the end point (last ticket).
@@ -254,21 +331,18 @@ per-issue push rhythm.
     origin/<branch>..HEAD` and `git status -sb` — and when the probe says
     "pushed but nothing landed", re-run the retro or record a marker.
     Silent loss of retro material is the one failure this rule forbids.
-- BATCH DECLARATION INITIALIZES THE STATE FILE: when the human declares
-  a batch, write .scratch/batch-state.md — 成员 (members and order),
-  结束点 (the end point), the progress log, and the unpushed-commit
-  list — in the shape given by docs/batch-state.md (the single source of
-  truth for that shape; do not re-derive it here).
+- BATCH DECLARATION INITIALIZES THE STATE FILE (this is what keeps batches
+  from piling up): when the human declares a batch, write
+  .scratch/batch-state.md — 成员 / 结束点 / 预授权清单 / 收口记录 / the progress
+  log / the unpushed-commit list — in the shape given by docs/batch-state.md
+  (the single source of truth for that shape; do not re-derive the fields
+  here). Update it after every ticket; each Progress row carries the evidence
+  pointer — proving command + exit code + evidence path (the test output
+  itself counts; a row missing any element is BLOCKED, not done). You must
+  always know you are in a batch, what is left, and where the last push
+  checkpoint was.
 - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
   the next code push.
-- BATCH STATE IS EXPLICIT (this is what keeps batches from piling up):
-  on declaration write .scratch/batch-state.md (members, end point,
-  progress, unpushed-commit list); update it after every ticket. Each
-  Progress row carries the evidence pointer — proving command + exit
-  code + evidence path (the test output itself counts; no separate
-  artifact needed); a row missing any element is BLOCKED, not done.
-  You must always know you are in a batch, what is left, and where the
-  last push checkpoint was.
 - Anti-pileup guardrails: (a) a batch contains only its declared
   members — adding a ticket requires an explicit human extension; (b)
   at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push

@@ -37,6 +37,22 @@ stale, or contradicts the observed environment, STOP and ask — never guess and
 never silently rewrite the record.
 @@ batch-mode
 BATCH MODE — only when the human declares a batch; never on by default.
+- ENTRY CONTRACT: RFA = no user in the loop AND no open decision; five things
+  pinned in the body (write scope, criterion form, acceptance reading, closing
+  rule, push checkpoint) — else RFH. A real decision found mid-work (exclusive
+  ACs, a destructive step, an out-of-scope write) downgrades to RFH and stops;
+  everything else is routine: decide, and record "decided X because Y".
+- CONFLICT ZERO before labelling RFA: ACs consistent; the symptom re-measured
+  on HEAD; the docs the ticket cites read (`git grep`) and judged still-true or
+  superseded; duplicates / dependency direction / batch overlap checked. No
+  wording that pushes a decision forward (草案 / 可微调 / 视情况 / 待定 / TBD).
+- PRE-AUTHORIZATION LIST (what a declaration licenses): the write scope; create
+  tickets (never close in-batch, read the labels back — one category + one
+  state); closing per the mode chosen at declaration (default: per-ticket
+  confirm; undeclared → loud line), never outside the declared members; one
+  push at the batch end.
+- CLOSE-OUT STEP before declaring: classify the backlog, merge same-family
+  tickets, drop done-but-unclosed tickets from the ready count, record it.
 - Batch = the issues the human names, plus the end point. Inside a batch: each
   ticket → local commit + local verification + code-review → NO per-ticket
   push; the remote CI is confirmed once, at the batch-end push.

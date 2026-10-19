@@ -391,6 +391,9 @@ export const BATCH_STATE_TEMPLATE = [
   '成员', '结束点',
   '证明命令', 'exit code', '证据路径',
   'lane', '后继票', 'retro:',
+  // #128: 批宣告还定死两件事 + 宣告前先收口。缺任一项就没有「授权范围」可判：
+  // 关票方式未声明时正文默认最保守（响亮），越界写与批外关票都会被当成"批内例行"。
+  '关票确认方式', '预授权清单', '收口记录',
 ]
 
 /** Keywords that mark a fold-in claim (lowercased match). */
@@ -1174,6 +1177,11 @@ async function reminderText(agent, config, ctx, assembled) {
       'the new ticket is its own session\'s work. Do NOT fix, close, or fold',
       'it into the current ticket here; leave it to a fresh session (TICKET',
       'EXIT — create the ticket, then continue the current ticket only).',
+      'Read the labels back now (`gh issue view <n> --json labels --jq',
+      '\'[.labels[].name]\'`): exactly one category (bug / enhancement) +',
+      'exactly one state (needs-triage / needs-info / ready-for-agent /',
+      'ready-for-human / wontfix). A ticket with no state is invisible on',
+      'every state-filtered surface — see docs/agents/triage-labels.md.',
     ].join(' '))
   }
   if (batchClose.get(agent.session) === true && config.batchCloseCheck !== false) {
@@ -1269,6 +1277,11 @@ async function reminderText(agent, config, ctx, assembled) {
     batchDeclared.delete(agent.session) // consume: one initialization reminder per declaration
     parts.push([
       'Batch declared — write `.scratch/batch-state.md` now (members, end point,',
+      'the closing-confirmation mode — (a) per-ticket / (b) in-batch',
+      'pre-authorization / (c) batch-end once; if the declaration names none,',
+      'say loudly that (a) applies — the pre-authorization list (write scope /',
+      'create-only tickets / closing / one push at the batch end), the close-out',
+      'record (classification + same-family merges + done-but-unclosed dropped),',
       'the Progress rows\' three evidence elements — proving command / exit code /',
       'evidence path — a lane marker per ticket, the successor ticket, and the',
       '`retro: done @ <commit>` completion marker at the batch end). Its shape is',

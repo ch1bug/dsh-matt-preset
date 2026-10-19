@@ -119,6 +119,11 @@ const REQUIRED_FIELDS = [
   // #119：成员表「状态」列的首词 `done` 是**票数**的机械取数面（C9-guardrail 读它）。
   // 文档若删掉这个字面量，读者的成员表就失去唯一可辨认的完成标记 → 护栏静默读 0。
   ['状态列完成标记 done', /`done`/],
+  // #128：批宣告还定死「关票方式」并写下「授权清单 / 收口记录」。文档删掉任一字面量，
+  // 读者就写不出完整体（关票方式缺席时正文默认最保守，授权范围则无从判）。
+  ['关票确认方式', /关票确认方式/],
+  ['预授权清单', /预授权清单/],
+  ['收口记录', /收口记录/],
 ]
 const missingFields = REQUIRED_FIELDS.filter(([, re]) => !re.test(DOC)).map(([name]) => name)
 if (missingFields.length === 0)
@@ -136,6 +141,9 @@ if (fenced !== null) {
     ['后继票', /后继票=/],
     ['retro: done 标记', /retro:\s*done\s*@\s*<commit>/],
     ['状态列完成标记 done', /`done`/],
+    ['关票确认方式（三选一）', /关票确认方式[\s\S]*逐票确认[\s\S]*批内预授权[\s\S]*批末一次/],
+    ['预授权清单（四列）', /预授权清单[\s\S]*写域[\s\S]*只建不关[\s\S]*push/],
+    ['收口记录', /收口记录/],
   ]
   const tmplMissing = wantInTemplate.filter(([, re]) => !re.test(tmpl)).map(([n]) => n)
   if (tmplMissing.length === 0)
@@ -144,6 +152,29 @@ if (fenced !== null) {
 } else {
   bad('C1b. 模板骨架', 'docs/batch-state.md 里找不到 ```markdown 模板块')
 }
+
+// ── C10: 「缺字段必红」判据自检（#128 —— 非空洞，brief §3.1「守卫」面）─────
+// 同一条判据（REQUIRED_FIELDS 的 regex 集合）喂两份输入：
+//   ① 真的 docs —— 新字段必须全中（与 C1 同一判据，这里只再取一次读数）；
+//   ② 「把新字段逐字删掉」的镜像副本 —— 必须把三个字段**逐个报缺**。
+// ② 就是这条判据的伪装输入：字段被悄悄删掉时守卫必须红。若判据恒绿（说不出什么输入
+// 能让它红），②这一项自己也红 —— 那才是断言空转。
+const NEW_DECLARATION_FIELDS = ['关票确认方式', '预授权清单', '收口记录']
+const strippedDoc = NEW_DECLARATION_FIELDS.reduce((text, name) => text.split(name).join(''), DOC)
+const realMissingNew = REQUIRED_FIELDS
+  .filter(([name]) => NEW_DECLARATION_FIELDS.includes(name))
+  .filter(([, re]) => !re.test(DOC))
+  .map(([name]) => name)
+const strippedMissingNew = REQUIRED_FIELDS
+  .filter(([name]) => NEW_DECLARATION_FIELDS.includes(name))
+  .filter(([, re]) => !re.test(strippedDoc))
+  .map(([name]) => name)
+if (realMissingNew.length === 0 && strippedMissingNew.length === NEW_DECLARATION_FIELDS.length
+  && strippedDoc !== DOC && strippedDoc.length > 0)
+  ok('C10. 「缺字段必红」判据自检（删掉新字段的镜像副本 → 逐字段报缺）',
+    `真 docs 缺 0 个；镜像副本缺 ${strippedMissingNew.length}/${NEW_DECLARATION_FIELDS.length}：${strippedMissingNew.join(' / ')}`)
+else bad('C10. 缺字段判据空转或被绕过',
+  `真 docs 缺: ${realMissingNew.join(', ') || '(无)'}；镜像副本报缺 ${strippedMissingNew.length}/${NEW_DECLARATION_FIELDS.length}（应报满）`)
 
 // ── C2: enforcer↔docs 漂移守卫（非空洞，双向）────────────────────────────────
 // 声明式面：直接 import enforcer 的稳定导出（V23c 同形）。import 失败 = 契约面塌了 → 响亮红。
@@ -173,7 +204,8 @@ else bad('C2a. enforcer 指针漂移', `workflow-enforcer.mjs 缺: ${missingPoin
 // 字符串形态是 docs 模板的第二份手抄且**已实际漂移**，头注却自称 "cannot drift apart"；
 // 收敛成字段名清单后结构漂移无处可生）。两种形状都接受——本断言的**判据**本就是
 // 「字段名双向钉住」，数组更贴合其本意；覆盖面（TMPL_FIELD_WORDS 逐字全中）不放宽。
-const TMPL_FIELD_WORDS = ['成员', '结束点', '证明命令', 'exit code', '证据路径', 'lane', '后继票', 'retro:']
+const TMPL_FIELD_WORDS = ['成员', '结束点', '证明命令', 'exit code', '证据路径', 'lane', '后继票', 'retro:',
+  '关票确认方式', '预授权清单', '收口记录']
 const TMPL = ENFORCER_MOD?.BATCH_STATE_TEMPLATE
 /** `string` 或 `string[]` → 一段可 `includes` 的声明文本（数组逐项拼回）。 */
 const tmplText = typeof TMPL === 'string' ? TMPL
@@ -282,6 +314,12 @@ const RULE_KEYWORDS = [
   ['批宣告初始化状态文件', /BATCH DECLARATION INITIALIZES THE STATE FILE/],
   ['免确认 / 不阻断', /CONFIRMATION-FREE and\s*\n?\s*NON-BLOCKING|CONFIRMATION-FREE/],
   ['宁严勿宽（误触发更贵）', /宁严勿宽/],
+  // #128：票面契约 / 冲突归零 / 批宣告预授权 / 收口步（正文被改回旧版 → 这里红）。
+  ['票面契约（RFA 判据清单）', /TICKET ENTRY CONTRACT/],
+  ['四类冲突归零', /CONFLICT ZERO/],
+  ['批宣告预授权清单', /BATCH DECLARATION PRE-AUTHORIZATION LIST/],
+  ['收口步', /CLOSE-OUT STEP/],
+  ['显式未覆盖声明（套件不联网核票面）', /EXPLICITLY NOT GUARDED/],
 ]
 const missingRules = RULE_KEYWORDS.filter(([, re]) => !re.test(batchSection)).map(([n]) => n)
 if (missingRules.length === 0)
@@ -313,6 +351,9 @@ const SHARED_VOCAB = [
   ['lane', /lane/i],
   ['后继票', /后继票|successor/i],
   ['retro:', /retro:/],
+  ['关票确认方式', /关票确认方式|confirmation mode of closing/i],
+  ['预授权清单', /预授权清单|PRE-AUTHORIZATION LIST/i],
+  ['收口记录', /收口记录|CLOSE-OUT STEP/i],
 ]
 const drift = SHARED_VOCAB.filter(([, re]) => !re.test(DOC) || !re.test(batchSection)).map(([n]) => n)
 if (drift.length === 0)
