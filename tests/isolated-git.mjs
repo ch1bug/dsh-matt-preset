@@ -38,9 +38,11 @@
  * ⚠ **一律用 `git -C <dir>`，不要用 spawn 的 `cwd:` 选项**（本机 `startup` 脚本族会在每次子进程
  *   启动时把 cwd 复位到 Windows 用户目录，`cwd:` **静默失效** → 夹具命令全打在调用方仓库上；
  *   这正是 #110 的另一条同族通路）。`-C` 是 git 自己的参数，宿主改不了它。
- * ⚠ **不**清 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`：清掉它们不是必要动作，而覆盖成夹具自己的
- *   空文件才有意义（否则夹具会读本机 `~/.gitconfig`，身份与 `core.autocrlf` 都成了机器相关量）。
- *   本函数只负责**删**，覆盖由调用方显式给 —— 见 `fixtureEnv` 的参数。
+ * ⚠ **配置面（`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`）由调用方显式覆盖**：本函数按
+ *   `GIT_` 前缀**无条件全删**（含这两个），因为"漏了某个新变量"正是本票要防的漂移。
+ *   删除是对的，但**只删不覆盖**会让夹具回落到 git 的默认链（读本机 `~/.gitconfig`），
+ *   于是身份与 `core.autocrlf` 变成机器相关量 —— 故自建仓的用例应当传
+ *   `fixtureEnv({ GIT_CONFIG_GLOBAL: <夹具自己的空文件> })`，见 `fixtureEnv` 的参数。
  */
 import { spawnSync } from 'node:child_process'
 

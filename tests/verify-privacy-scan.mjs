@@ -33,6 +33,10 @@ const fixtures = []
 function fixture({ files = {}, message = 'fixture', name = 'Fixture Author', email = 'fixture@example.com', branch } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-privacy-'))
   fixtures.push(root)
+  // ⚠ 这里**有意**不覆盖 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM`（与同笔另两个夹具不同）：
+  //   本用例的 F14 断言的是"**运行时身份**（homedir + username）→ 命中（不写死名单）"，
+  //   即它**故意要让本机的全局 gitconfig / 身份面参与**，才谈得上"换台机器照样有效"。
+  //   把配置面指到空文件会让 F14 失去它要测的那个面。故此处只借用挂具的**清 `GIT_*`** 那一半。
   const env = fixtureEnv()
   const git = (args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', env })
   git(['init', '-q'])

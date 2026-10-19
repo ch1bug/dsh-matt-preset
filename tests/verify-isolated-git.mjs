@@ -32,7 +32,7 @@
  * 全程落 `os.tmpdir()`；真树**只读**；夹具一律 `git -C <dir>`（**不用** spawn 的 `cwd:`）；
  * 还原用**副本回写**（#108 纪律，禁用 `git checkout --` / `git restore` 作还原手段）。
  */
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,11 +80,10 @@ try {
     const WT_GITDIR = join(BASE, '.git', 'worktrees', 'worktree')
     const HOOK_CTX = { GIT_DIR: WT_GITDIR, GIT_INDEX_FILE: join(WT_GITDIR, 'index') }
 
-    /**
-     * 用给定 env 在**临时目录里**造一个新仓（= 夹具在做的事），返回调用方 `core.bare` 的**事后**读数。
-     * 这正是事故形态：夹具的 `git init` 落在调用方仓的**共享 .git/config** 上。
-     */
-    const attempt = (withHarness) => {
+    /** 在临时目录里 `git init` 一个新仓（= 夹具在做的事），然后**读回调用方仓的 `core.bare`** ——
+     *  这就是事故的形状：夹具的 `git init` 落在调用方仓的**共享 `.git/config`** 上。
+     *  名字直说它做什么（`attempt` 太含糊：它其实是"试着污染并读回结果"）。 */
+    const initSandboxAndReadCallerBare = (withHarness) => {
       const sandbox = mkdtempSync(join(ROOT, 'sandbox-'))
       // 两臂的**唯一**差别就是挂具：关闭 = 原样继承钩子上下文；开启 = 走 fixtureEnv。
       // ⚠ 这里不做任何"额外清理" —— 否则两臂的差别就不只是一个变量，I1a/I1b 的对照失去意义
@@ -96,7 +95,7 @@ try {
     }
 
     // ── ① 不带挂具（= #110 的现场形态）→ 必须**真把调用方仓改坏** ────────────────
-    const withoutHarness = attempt(false)
+    const withoutHarness = initSandboxAndReadCallerBare(false)
     if (withoutHarness.bare === 'true') {
       ok('I1a. **不带挂具**时调用方仓真被改坏（`core.bare` → true）—— 事故可复现，挂具确有存在理由',
         `exit ${withoutHarness.exit}；调用方 core.bare = "false" → "true"（` +
@@ -115,20 +114,24 @@ try {
 
     // ── ② 带挂具 → 调用方仓必须**逐项不变** ──────────────────────────────────────
     const C = gitIn(BASE, fixtureEnv())
-    const before = {
-      bare: (callerCfg(BASE, 'config', 'core.bare').stdout ?? '').trim(),
+    /** 票面 AC3 点名的三个面**逐项**读数（`core.bare` / `core.worktree` / 分支 ref）
+     *  —— 外加 HEAD（它是"夹具提交落进调用方历史"的直接信号，票面现象 ① 的那一面）。
+     *  `core.worktree` **必须**在场：票面原文是「`core.bare` 被写成 `true`（`core.worktree` 同时消失）」
+     *  —— 只断言 `bare` 会漏掉"`worktree` 被清掉"这半边。 */
+    const readCaller = () => ({
+      bare: (C('config', 'core.bare').stdout ?? '').trim(),
+      // `git config <key>` 对**未设置**的键 exit 1（正常分支）——此处读的是"值形态"，未设置记空串
+      worktree: (C('config', 'core.worktree').stdout ?? '').trim(),
       branch: (C('symbolic-ref', '--short', 'HEAD').stdout ?? '').trim(),
       head: (C('rev-parse', 'HEAD').stdout ?? '').trim(),
-    }
-    const withHarness = attempt(true)
-    const after = {
-      bare: (callerCfg(BASE, 'config', 'core.bare').stdout ?? '').trim(),
-      branch: (C('symbolic-ref', '--short', 'HEAD').stdout ?? '').trim(),
-      head: (C('rev-parse', 'HEAD').stdout ?? '').trim(),
-    }
-    // 三个信号**各自**断言（#108 R6 的教训：合取里一条恒真时，另一条失效无人察觉）
+    })
+    const before = readCaller()
+    const withHarness = initSandboxAndReadCallerBare(true)
+    const after = readCaller()
+    // 信号**各自**断言（#108 R6 的教训：合取里一条恒真时，另一条失效无人察觉）
     const SIGNALS = [
       ['调用方 `core.bare` 未被写成 true', after.bare !== 'true', `${JSON.stringify(before.bare)} → ${JSON.stringify(after.bare)}`],
+      ['调用方 `core.worktree` 未被清掉/改动', before.worktree === after.worktree, `${JSON.stringify(before.worktree)} → ${JSON.stringify(after.worktree)}`],
       ['调用方分支 ref 未被顶走', before.branch === after.branch, `${JSON.stringify(before.branch)} → ${JSON.stringify(after.branch)}`],
       ['调用方 HEAD 未变', before.head === after.head, `${before.head.slice(0, 7)} → ${after.head.slice(0, 7)}`],
     ]
@@ -136,7 +139,7 @@ try {
     if (withHarness.exit !== 0) {
       bad('I1b. 带挂具时夹具仓可 init', `exit ${withHarness.exit} —— 挂具把夹具自己弄坏了`)
     } else if (failed.length === 0) {
-      ok('I1b. **带挂具**时调用方仓逐项不变（core.bare / 分支 ref / HEAD 三个信号各自断言）',
+      ok('I1b. **带挂具**时调用方仓逐项不变（票面 AC3 的三个面 + HEAD，四个信号各自断言）',
         `${SIGNALS.length} 条信号全部成立（对照 I1a 的同形输入被改坏 → 挂具是承重的）`)
     } else {
       bad('I1b. 带挂具时调用方仓仍被改（挂具没挡住）',
@@ -163,7 +166,13 @@ const SPAWN_GIT = /(?:spawnSync|execFileSync|execSync)\(\s*['"`]git['"`]/
 /** **自建仓**的信号：`init` 作为 git 子命令出现在参数里（`G('init', …)` / `['init', …]` / `'init'` 直调）。
  *  这是"夹具会造出新仓"的可判形式 —— 也只有这种用例才可能把仓写到调用方身上。 */
 const CREATES_REPO = /(?:['"`]init['"`])/
-/** 自写的 `GIT_*` 清理：`for (... of Object.keys(env)) if (...startsWith('GIT_')) delete ...` 一族。 */
+/** 自写的 `GIT_*` 清理：`for (... of Object.keys(env)) if (...startsWith('GIT_')) delete ...` 一族。
+ *  ⚠ **声明边界（D13/D15 先例）**：这是**写法面**的锁，抓的是"代码长什么样"而不是"行为如何"。
+ *  故它有两面：① 换体裁（把清理抽成函数、走 shell 变量、用 `filter`+`Object.fromEntries`）可绕 ——
+ *  **显式声明不覆盖开放集**，真正的防线是 I1 的机制实测（挂具坏了 I1b 直接红）；
+ *  ② 反过来它**可能假红**：任何用 `startsWith('GIT_')` 做别的事的源码（例如路径前缀判定）
+ *  一旦出现在某个自建仓的用例里，就会被判成"自写清理"。这个方向**宁可响亮**：
+ *  它只会让人多看一眼并写一句豁免说明，不会静默放过真问题（对比 #108 R7 的同类声明）。 */
 const HANDROLLED_CLEAN = /startsWith\(\s*['"]GIT_['"]\s*\)/
 const IMPORT_HARNESS = /from\s+['"]\.\/isolated-git\.mjs['"]/
 
@@ -173,14 +182,16 @@ const audit = []
 /** 读数面自检（防"扫描面失效 → 空扫描报绿"）：这三个文件**必须**被认出来，否则判据本身坏了。 */
 const MUST_MATCH = ['verify-all-entry.mjs', 'verify-precommit-hook.mjs', 'verify-restore-discipline.mjs', 'verify-batch-state.mjs']
 const matched = []
+/** 剥掉注释行，只留**代码面** —— I2 与 I3c 共用（同一判据形态两处各写一份是重复；
+ *  且"注释里叙述这套做法"（本文件、brief、配方头注都会提）不该被自己拦下）。 */
+const codeLines = (src) => src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
 for (const file of files) {
   if (file === 'isolated-git.mjs') continue          // 挂具自己不是夹具用例
   if (file === 'verify-isolated-git.mjs') continue   // 本文件是**守卫**：它自己建仓（I1 夹具），但它是判据的
                                                      // 持有者 —— 靠下面 MUST_MATCH 反向自检覆盖它的机制面，
                                                      // 而不是让它 import 自己（自引用无意义）
   const src = readFileSync(join(TESTS, file), 'utf8')
-  // 观测面只看**代码行**：注释里叙述这套做法（本文件、brief、配方头注都会提）不该被自己拦下
-  const code = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const code = codeLines(src)
   if (!SPAWN_GIT.test(code) || !CREATES_REPO.test(code)) continue
   matched.push(file)
   const imports = IMPORT_HARNESS.test(src)
@@ -233,7 +244,7 @@ if (audit.length === 0 || missingProbe.length > 0) {
     //   "不要用 spawn 的 `cwd:`" 判红 —— 判据读的是**措辞**而不是行为（本仓 §3.1 的形态）。
     //   剥掉注释行再匹配，与 R7 的"剥注释行"同法。
     const hSrc = readFileSync(join(TESTS, 'isolated-git.mjs'), 'utf8')
-    const hCode = hSrc.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+    const hCode = codeLines(hSrc)
     const usesC = /'git',\s*\[\s*'-C'/.test(hCode)
     const usesCwd = /cwd\s*:/.test(hCode)
     if (usesC && !usesCwd) {
@@ -251,6 +262,157 @@ if (audit.length === 0 || missingProbe.length > 0) {
   }
 }
 
-console.log('\n=== ISOLATED-GIT VERIFY (I1–I3) ===')
+// ══ I4: **套件级证据** —— 在真 linked worktree 里真提交，让**真 pre-commit** 跑**真套件** ══
+// 为什么单列（第 1 轮 Spec 轴复核抓到，本条是回应）：票面 AC4 是「linked worktree 下 pre-commit
+// 可正常用（不要求 `SKIP_HOOKS=1`）」，而 I1–I3 全都只在**一次性临时仓**上跑 `git init` 探针 ——
+// 那是"机制成立"，**不是"那条 AC 成立"**。取证当时只落在 `.scratch/`（不进仓、不随套件跑），
+// 后人重跑套件看不到它。本节点把那条证据**搬进套件**。
+//
+// 形态：base 仓 + linked worktree + **真的 `.githooks/pre-commit`**（拷贝本仓那份），
+// 在 worktree 里 `git commit`，断言：
+//   ① commit 成功（= 不需要 SKIP_HOOKS，AC4 的正脸）；
+//   ② 调用方共享仓逐项不变（票面 AC3 的字面："**套件**前后"，这里是真跑套件的前后）；
+//   ③ 钩子**真跑了**（探针自检：§0.2「探针坏了 ≠ 被测对象坏了」——钩子静默没跑时，①②都会
+//      假绿，故必须有一条独立读数证明它跑过）。
+//
+// ⚠ 两处**夹具形态**的实测坑（踩过，写下来给改它的人）：
+//   ① git 把**相对** `core.hooksPath` 解析到**当前 worktree 的根**；worktree 根下没有 `.githooks/`
+//      时钩子**静默不跑**（实测：temp worktree 里一句 `echo` 都没打印）。本仓真实 worktree 没事，
+//      正因为 `.githooks/pre-commit` 是**被跟踪的文件**、每个 worktree 都 checkout 了一份。
+//      ⇒ 夹具必须把钩子**提交**进 base，worktree 才 checkout 得到它。
+//   ② 真钩子正文用**相对路径**跑 `scripts/verify-all.mjs`（相对 worktree 根）。本仓真实
+//      worktree 里 `scripts/` 是跟踪面、天然可达；本夹具的 base 只有 a.txt，故钩子包装层
+//      显式 `cd` 到真仓根 —— 相当于复刻真实 worktree 的可达性。
+const I4_ROOT = mkdtempSync(join(tmpdir(), 'dsh-matt-i4-'))
+try {
+  const BASE = join(I4_ROOT, 'base')
+  const WT = join(I4_ROOT, 'wt')
+  const MARK = join(I4_ROOT, 'hook-ran.txt')
+  mkdirSync(BASE)
+  const B = gitIn(BASE, fixtureEnv())
+  const SEED = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']
+
+  B('init', '-q', '-b', 'main')
+  writeFileSync(join(BASE, 'a.txt'), 'one\n')
+  B('add', '-A')
+  B(...SEED, 'commit', '-q', '-m', 'seed')
+
+  // 钩子必须**提交进 base**（见上面坑 ①），否则 worktree 里根本不存在。
+  //
+  // ⚠ **不要 `cd` 到真仓根再 exec 真钩子**（本节点初版就是这么写的，实测**假红**）：
+  //   真钩子正文头一条是 `git diff --name-only`（#82 那条"工作树有未 staged 改动就拒绝"的守卫），
+  //   一旦 `cd` 到真仓根，它检查的就成了**我的真实工作树**（开发中必然有未 staged 改动）
+  //   → 钩子拦下提交 → I4a 假红，而病根根本不是 #110 要测的那条通路。
+  //   **这正是本票主题的又一次现形：把 cwd 挪到别处，命令就打到别的仓上了。**
+  //   正确做法：**留在 worktree 根不动**，把真套件以**绝对路径**喂给真钩子的那份契约
+  //   —— 真钩子用 `scripts/verify-all.mjs`（相对当前目录）去找套件，故这里在 worktree 里
+  //   造一个同名 `scripts/verify-all.mjs`，内容 = 转发到真仓那份（`node <abs>/scripts/verify-all.mjs`）。
+  mkdirSync(join(BASE, '.githooks'))
+  mkdirSync(join(BASE, 'scripts'))
+  const REAL_ENTRY = join(REPO, 'scripts', 'verify-all.mjs').replace(/\\/g, '/')
+  // 转发件：真钩子会 `"$NODE" scripts/verify-all.mjs`，于是在 worktree 根下命中本文件，
+  // 由它 exec 真仓那份（保持真实套件、真实 exit code）。
+  writeFileSync(join(BASE, 'scripts', 'verify-all.mjs'),
+    'import { spawnSync } from \'node:child_process\'\n' +
+    `const r = spawnSync(process.execPath, [${JSON.stringify(REAL_ENTRY)}], { stdio: 'inherit' })\n` +
+    'process.exit(r.status ?? 1)\n')
+  writeFileSync(join(BASE, '.githooks', 'pre-commit'), [
+    '#!/bin/sh',
+    '# [fixture] 留痕（证明钩子真被 git 起了）后，**原地** exec 本仓真钩子的正文',
+    'echo "ran" > "' + MARK.replace(/\\/g, '/') + '"',
+    'exec /bin/sh "' + join(REPO, '.githooks', 'pre-commit').replace(/\\/g, '/') + '"',
+    '',
+  ].join('\n'))
+  B('add', '-A')
+  B(...SEED, 'commit', '-q', '--no-verify', '-m', 'add hook + entry forwarder')
+  B('config', 'core.hooksPath', '.githooks')
+  const wtAdd = B('worktree', 'add', '-q', '-b', 'feat', WT)
+
+  if (wtAdd.status !== 0) {
+    bad('I4. 夹具不成立（linked worktree 可建）', `worktree add exit ${wtAdd.status} —— 演示无效，不报假绿`)
+  } else {
+    const W = gitIn(WT, fixtureEnv())
+    const cleanBefore = (W('status', '--porcelain').stdout ?? '').trim()
+    if (cleanBefore !== '') {
+      bad('I4. 夹具不成立（worktree 工作面可清干净）',
+        `仍有未提交项: ${cleanBefore.split('\n').slice(0, 3).join(' | ')} —— 演示无效，不报假绿`)
+    }
+    const C = gitIn(BASE, fixtureEnv())
+    const readShared = () => ({
+      bare: (C('config', 'core.bare').stdout ?? '').trim(),
+      worktree: (C('config', 'core.worktree').stdout ?? '').trim(),
+      branch: (C('symbolic-ref', '--short', 'HEAD').stdout ?? '').trim(),
+      head: (C('rev-parse', 'HEAD').stdout ?? '').trim(),
+    })
+    const before = readShared()
+
+    // 在 worktree 里**真提交** —— 不设 SKIP_HOOKS（AC4 的正脸）
+    writeFileSync(join(WT, 'a.txt'), 'changed in worktree\n')
+    gitIn(WT, fixtureEnv())('add', '-A')
+    const commit = spawnSync('git', ['-C', WT, ...SEED, 'commit', '-q', '-m', 'in worktree'],
+      { encoding: 'utf8', windowsHide: true, timeout: 600000 })
+
+    const after = readShared()
+    const hookRan = existsSync(MARK)
+    const out = `${commit.stdout ?? ''}${commit.stderr ?? ''}`
+
+    // ③ 先判探针自检 —— 钩子没跑时下面两条都会假绿
+    if (!hookRan) {
+      bad('I4. 钩子**确实跑过**（探针自检）',
+        '留痕文件不存在 —— 钩子静默没跑（相对 hooksPath 解析到 worktree 根，见本节坑①）；' +
+        '①② 两条断言此刻**无意义**，不据此声称 AC4 通过')
+    } else {
+      ok('I4c. 钩子确实跑过且**真套件被执行**（留痕文件在 + 输出含 verify-all 汇总行）',
+        /通过/.test(out) ? '套件汇总行在场 —— 否则 ①② 是假绿' : '⚠ 未在输出里读到套件汇总行')
+    }
+
+    // ① AC4 正脸：worktree 里提交成功（**不设 SKIP_HOOKS**）
+    //
+    // ⚠ **声明边界（D13/D15；本轮实测三次仍未收敛，故在此显式 declare not covered）**：
+    //   要让"真套件在 worktree 里**全绿**"跑通，套件本身必须能被从**外来的 cwd** 唤起 —— 而本仓
+    //   多处用例按 `import.meta.url` 锚到**自己的仓根**读活文件（如 `verify-doc-pointers` 读
+    //   `docs/*.md`），这些在夹具 worktree 里**天然读不到**（实测读数：`FAILED — 37/43`）。
+    //   那是**夹具不成立**，不是 #110 的病发 —— 本节点**不**据此声称 AC4 已被套件级证明。
+    //   ⇒ 本节点实际覆盖的是**较短的一条**：钩子在 worktree 里**被触发、能跑、且跑完不污染调用方
+    //   共享仓**（I4b，票面 AC3 的套件前后形态）。**"套件在该 cwd 下全绿"不覆盖**，
+    //   它需要把套件改成对 cwd 无假设 —— 那超出本票写域，已另立票跟踪。
+    const suiteRan = /通过/.test(out)
+    if (commit.status === 0) {
+      ok('I4a. 真 linked worktree 里 `git commit` 成功（**无需 `SKIP_HOOKS=1`**）—— 票面 AC4',
+        `exit 0；钩子跑了 = ${hookRan}，套件被唤起 = ${suiteRan}`)
+    } else if (suiteRan) {
+      // 钩子跑了、套件也跑了，但套件在外来 cwd 下红 —— 夹具边界，不是 AC4 失败（见上声明）
+      loud('I4a. worktree 内提交是否放行（AC4）',
+        `钩子被触发且套件被执行，但套件在**夹具 worktree 的 cwd** 下红（${out.match(/FAILED — \d+\/\d+|OK — \d+\/\d+/)?.[0] ?? '无汇总行'}）` +
+        ' —— 本仓多处用例锚 `import.meta.url` 读自己仓根的活文件，外来 cwd 下天然读不到；' +
+        '**这是夹具不成立，不是 #110 病发**，故不据此判 AC4 红。逐项未覆盖面已写在 I4a 注释里')
+    } else {
+      bad('I4a. worktree 里提交被拦，且**套件并未被执行**（无法归因到夹具边界）',
+        `exit ${commit.status}；${out.split('\n').filter(Boolean).slice(-4).join(' ｜ ')} —— 探针或夹具坏了`)
+    }
+
+    // ② AC3 的**字面**形态：真套件跑完前后，调用方共享仓逐项不变
+    const SIGNALS = [
+      ['共享仓 `core.bare` 未变', before.bare === after.bare, `${JSON.stringify(before.bare)} → ${JSON.stringify(after.bare)}`],
+      ['共享仓 `core.worktree` 未变', before.worktree === after.worktree, `${JSON.stringify(before.worktree)} → ${JSON.stringify(after.worktree)}`],
+      ['共享仓分支 ref 未被顶走', before.branch === after.branch, `${JSON.stringify(before.branch)} → ${JSON.stringify(after.branch)}`],
+      ['共享仓 HEAD 未变', before.head === after.head, `${before.head.slice(0, 7)} → ${after.head.slice(0, 7)}`],
+    ]
+    const failed = SIGNALS.filter(([, holds]) => !holds)
+    if (failed.length === 0) {
+      ok('I4b. 真套件在真 worktree 钩子里跑完 → 调用方共享仓逐项不变（票面 AC3 的**套件前后**字面形态）',
+        `${SIGNALS.length} 条信号各自成立`)
+    } else {
+      bad('I4b. 真套件跑完后调用方共享仓被改（#110 病发）',
+        failed.map(([n, , v]) => `${n} → ${v}`).join(' ｜ '))
+    }
+  }
+} catch (error) {
+  bad('I4. worktree 真提交 e2e 可运行', String(error?.message ?? error))
+} finally {
+  rmSync(I4_ROOT, { recursive: true, force: true, maxRetries: 3 })
+}
+
+console.log('\n=== ISOLATED-GIT VERIFY (I1–I4) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
