@@ -23,8 +23,10 @@
  *        ① 带挂具（`fixtureEnv`）→ 调用方仓 `core.bare` **不变**；
  *        ② 不带挂具（原样继承）→ 调用方仓 `core.bare` **被写成 true**（这条必须真红才说明
  *           挂具是承重的 —— 与 R3 的三态表同一种"把机制变成可跑的事实"手法）。
- *   I2 **结构**：扫描 `tests/*.mjs`，凡**调用 git 的夹具用例**必须 import 挂具。
- *     这是 D15 的结构性防线：不追"下一个漏写的文件"，而是让"漏写"本身可判。
+ *   I2 **结构（#125 起是白名单/默认拒绝）**：扫描 `tests/*.mjs`，凡**碰 git** 的用例必须
+ *      ① 走挂具（`import` 挂具），或 ② 在 `REGISTRY` 里**显式登记**（只读 / 债务）；两者都不是 ⇒ 红。
+ *      #125 换形态的理由（旧形态是"枚举自建仓写法"、只认带引号的 `init`）写在 I2 节头 ——
+ *      **别退回加宽正则**（D15：自建仓的写法是开放集，正则永远差一条）。
  *   I3 **挂具自检**：`fixtureEnv()` 真的删掉了全部继承 `GIT_*`（含 `CALLER_GIT_VARS` 全表），
  *      且重名覆盖仍生效 —— 挂具自己先被测，免得"守卫守着一个坏的挂具"。
  *
@@ -152,82 +154,279 @@ try {
   rmSync(ROOT, { recursive: true, force: true, maxRetries: 3 })
 }
 
-// ══ I2: 结构断言 —— 凡**自建 git 仓的夹具用例**必须走挂具（D15 的结构性防线）════════
-// 为什么是"结构"而不是"逐文件加正则"：本票的病灶正是"隔离有 4 份、靠每处自觉"。
-// 追下一个漏写的文件是**无收敛的军备竞赛**；让"漏写"本身可判才是结构性防线。
+// ══ I2: 结构断言 —— **默认拒绝**：碰 git ⇒ 走挂具或显式登记（#125 替换 #110 的"枚举自建仓写法"）════════
+// ── 为什么换形态（D15；**后来者请先读这段，别退回加宽正则**）──────────────────────────
+// #110 立的 I2 判据是 `CREATES_REPO = /(?:['"`]init['"`])/` —— 用「`init` 作为**带引号的**
+// git 子命令出现」来认「自建仓的用例」。这个**方向**是错的（#125 的实测与替换）：
+//   ① **漏**（假绿面）：`clone` / `worktree add` 自建仓的用例认不出；`sandcastle-e2e.mjs`
+//      的 `git -C "$W" init` 写在模板字符串里、**没有引号**，同样认不出 —— 而它确实自建了仓
+//      （#127 已登记为债务，见 REGISTRY）。
+//   ② **追不动**：把 `init` 加宽成 `init|clone|worktree` 只是把"下一个写法"往后推一格 ——
+//      自建仓的写法是**开放集**（init / clone / worktree add / submodule / 将来任何一种），
+//      正则永远差一条，这是 D15 点名的无收敛军备竞赛。
+// ⇒ 新形态是**白名单/默认拒绝**：判据不再猜"用例怎么建仓"，而是要求用例**自己声明**分类：
+//   (a) 走挂具（`import { … } from './isolated-git.mjs'`）—— 默认允许，无需登记；
+//   (b) 不碰 git（`touchesGit === false`）—— 不在观测面上；
+//   (c) 例外 —— 在 `REGISTRY` 里**逐文件显式登记**（只读调用方仓 / 已知债务）。**没有第四条路。**
+//   于是"新增一个自建仓用例但忘了挂具"默认落进「未登记」⇒ **红**。判据因此不再需要认出
+//   "建仓的写法"（开放集），只需要认出"碰没碰 git"（封闭集：见下面三个模式）。
 //
-// ⚠ 判据的**收窄**（本票实测，别按"凡 spawn git"理解）：初版把判据写成"凡直接 spawn git 的
-//   用例"，实测一次扫出 5 个文件，其中 4 个是**假红** —— 它们只用 git **读调用方仓自己**
-//   （`git ls-files` 取仓内文件清单 / `rev-parse` 探仓是否存在），**不建任何夹具仓**。
-//   给它们套隔离是错的（隔离会清掉它们**故意要读的**那个仓库上下文）。真正的危险面是
-//   **自建仓**：一旦 `git init` 继承了外层 `GIT_DIR`，它就会写到**调用方仓**上（I1a 已实测）。
-//   ⇒ 判据 = "**自建仓库**的用例必须走挂具"，用 `git init` / `git -C <tmp> init` 一族认出来。
+// ── 未覆盖面（AC6：如实写出，别让后来者以为它是全能的）────────────────────────────────
+//   ① 观测面只认**可识别的** git 触碰（`SPAWN_GIT` / `SPAWN_GIT_SHELL` / `USES_HARNESS_CALL`）。
+//      把 git 可执行文件**动态解析**出来再 spawn（`spawnSync(join(bin,'git'))`）、或**经 bash /
+//      heredoc 起的 git**（`sandcastle-e2e.mjs` 的形态即此）**不在观测面上** —— 前者未覆盖，
+//      后者已登记为债务并在读数里响亮列出（I2c）。
+//   ② `REGISTRY` 是**人写的**白名单：只读登记若用到 `READ_ONLY_SUBCOMMANDS` 之外的子命令
+//      ⇒ 红（默认拒绝），必须人来扩白名单并写理由。它不会静默放过，但也不会自己发现新用法。
+//   ③ `readOnly` 只核对**字面** argv；动态拼的 argv 记为「不可解析」⇒ 红。
+//   ④ 本判据是**写法面**的结构锁（抓"代码长什么样"），不是运行时防线 —— 真正的机制防线
+//      是 I1（挂具坏了 I1b 直接红）。故以上三点一律选「响亮失败」而非「静默放过」。
 const SPAWN_GIT = /(?:spawnSync|execFileSync|execSync)\(\s*['"`]git['"`]/
-/** **自建仓**的信号：`init` 作为 git 子命令出现在参数里（`G('init', …)` / `['init', …]` / `'init'` 直调）。
- *  这是"夹具会造出新仓"的可判形式 —— 也只有这种用例才可能把仓写到调用方身上。 */
-const CREATES_REPO = /(?:['"`]init['"`])/
+/** 同一条通路的另一种拼法：把整条命令拼成 shell 串（`execSync('git clone …')`）。
+ *  ⚠ 这是**观测面**的补全（闭合集里的又一种"可识别写法"），不是"建仓写法"的枚举 ——
+ *  它认的是"怎么调 git"，不是"用 git 做什么"（后者正是本票删掉的那条错路）。
+ *  仍不覆盖「动态解析 git 路径」与「经 bash/heredoc 起的 git」（见未覆盖面①）。 */
+const SPAWN_GIT_SHELL = /(?:execSync|exec)\(\s*['"`][^'"`]*\bgit\s/
 /** 走挂具的调用形态：`gitIn(...)`（挂具导出的 `git -C` 调用器）。
- *  ⚠ **为什么需要它**（本守卫第 1 轮的实测缺口，记下）：初版只用 `SPAWN_GIT`（直接 spawn git）
- *  来"认出夹具用例"，于是**改用挂具的文件反而掉出观测面** —— `verify-review-fixed-point.mjs`
- *  接了挂具之后不再直接 `spawnSync('git'`，I2 就**看不见它**了（实测：文件数从 6 掉回 5）。
- *  这是**方向错误**的盲区：越是守规矩的文件越不被检查。修法 = 把"走挂具"本身也当作**观测信号**
- *  （`CREATES_REPO` 仍要求它真建仓，故不会把纯读调用方仓的用例卷进来）。 */
+ *  ⚠ **为什么它也算观测信号**（#110 第 1 轮实测的反向盲区）：初版只用「直接 spawn git」认用例，
+ *  于是**改用挂具的文件反而掉出观测面** —— `verify-review-fixed-point.mjs` 接了挂具之后不再
+ *  直接 `spawnSync('git'`，I2 就看不见它了（实测：文件数从 6 掉回 5）。越是守规矩越不被检查，
+ *  是方向错误的盲区；故"走挂具"本身也是观测信号（但它**不 import** 就仍是 offender）。 */
 const USES_HARNESS_CALL = /\bgitIn\s*\(/
-/** 自写的 `GIT_*` 清理：`for (... of Object.keys(env)) if (...startsWith('GIT_')) delete ...` 一族。
+const IMPORT_HARNESS = /from\s+['"]\.\/isolated-git\.mjs['"]/
+/** 自写的 `GIT_*` 清理：`startsWith('GIT_')` 一族 —— 与登记册并行的**第二条禁忌**（走挂具的
+ *  清理是唯一来源，"每处各写一份"正是 #110 的病灶）。
  *  ⚠ **声明边界（D13/D15 先例）**：这是**写法面**的锁，抓的是"代码长什么样"而不是"行为如何"。
- *  故它有两面：① 换体裁（把清理抽成函数、走 shell 变量、用 `filter`+`Object.fromEntries`）可绕 ——
+ *  故它有两面：① 换体裁（抽函数、走 shell 变量、`filter`+`Object.fromEntries`）可绕 ——
  *  **显式声明不覆盖开放集**，真正的防线是 I1 的机制实测（挂具坏了 I1b 直接红）；
  *  ② 反过来它**可能假红**：任何用 `startsWith('GIT_')` 做别的事的源码（例如路径前缀判定）
- *  一旦出现在某个自建仓的用例里，就会被判成"自写清理"。这个方向**宁可响亮**：
+ *  一旦出现在某个碰 git 的用例里，就会被判成"自写清理"。这个方向**宁可响亮**：
  *  它只会让人多看一眼并写一句豁免说明，不会静默放过真问题（对比 #108 R7 的同类声明）。 */
 const HANDROLLED_CLEAN = /startsWith\(\s*['"]GIT_['"]\s*\)/
-const IMPORT_HARNESS = /from\s+['"]\.\/isolated-git\.mjs['"]/
+
+/** 只读子命令**白名单**（闭合集，默认拒绝）—— `readOnly` 登记的核对面。
+ *  故意**不含** `config`（`git config k v` 是写）与 `checkout`/`add`/`commit`/`init`/`clone` 一族：
+ *  要用到白名单之外的子命令 ⇒ 登记理由不成立 ⇒ 红，由人来扩并写理由。 */
+const READ_ONLY_SUBCOMMANDS = new Set([
+  'ls-files', 'rev-parse', 'status', 'log', 'show', 'diff', 'symbolic-ref',
+  'for-each-ref', 'cat-file', 'ls-tree', 'grep', 'describe', 'merge-base', 'count-objects',
+])
+
+/**
+ * 例外登记册 —— **I2 的唯一放行通道**。新增一条 = 一次**显式决定**（必须写 `why`）。
+ *   `readOnly` —— 只用 git **读调用方仓自己**、不建仓。断言：它的**字面** argv 子命令全在
+ *                `READ_ONLY_SUBCOMMANDS` 里；核不到字面调用 / argv 不可解析 ⇒ 红（默认拒绝）。
+ *   `debt`     —— 已知**未走挂具**的债务。断言：它**确实仍未走挂具**（修好后本条会红 → 逼人摘牌），
+ *                并在读数里逐条响亮列出（I2c）。登记债务不是"允许"，是**记账**：让缺口可见、
+ *                有票号、有摘牌条件，而不是像旧判据那样**假装它不存在**。
+ */
+const REGISTRY = {
+  'verify-doc-pointers.mjs': {
+    kind: 'readOnly',
+    why: '用 `git ls-files` 取**本仓**跟踪文件清单（`tests/node_modules` 是 junction 森林，walk 会爆）',
+  },
+  'verify-review-brief-readonly.mjs': {
+    kind: 'readOnly',
+    why: '同上：`git ls-files` 取本仓跟踪文件清单，核对 brief 的只读面',
+  },
+  'sandcastle-e2e.mjs': {
+    kind: 'debt',
+    why: '在 `os.tmpdir()` 里**自建临时仓**（setup.sh 的 `git -C "$W" init` + 生成脚本里的 ' +
+      'checkout/add/commit），且 env 原样继承 `GIT_*` —— 与 I1a 同形的污染面，但未走挂具。' +
+      '另有一个独立缺陷：本机搭台即失败（msys bash 吃掉反斜杠脚本路径，setup exit 127），' +
+      '加之 `DSH_MATT_E2E=1` 门控 ⇒ 长期未真正跑过。#127 跟踪修复；修好后本条会红，摘牌即可',
+  },
+}
+
+/** 剥掉注释行，只留**代码面** —— I2 与 I3c 共用（同一判据形态两处各写一份是重复；
+ *  且"注释里叙述这套做法"（本文件、brief、配方头注都会提）不该被自己拦下）。 */
+const codeLines = (src) => src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+
+/** 观测面：这份代码**碰没碰 git**（封闭问题）。
+ *  认的是"怎么调 git"（三种可识别写法），**不是**"用 git 做什么" —— 后者是开放集，正是
+ *  本票从判据里删掉的那条错路（`CREATES_REPO`）。 */
+const touchesGit = (code) =>
+  SPAWN_GIT.test(code) || SPAWN_GIT_SHELL.test(code) || USES_HARNESS_CALL.test(code)
+
+/**
+ * 单文件分类（**纯函数**：真扫描与 I2e 自检共用同一份判据 —— "判据一套、自检另一套"
+ * 是这类守卫最常见的腐烂方式）。
+ * @param {string} name 文件名（相对 `tests/`）
+ * @param {string} src 源码全文
+ * @param {Record<string, {kind?: string}>} [registry] 登记册（自检可传合成登记册）
+ * @returns {'irrelevant'|'harness'|'registered'|'offender'}
+ */
+function classify(name, src, registry = REGISTRY) {
+  const code = codeLines(src)
+  if (!touchesGit(code)) return 'irrelevant'
+  if (IMPORT_HARNESS.test(src)) return 'harness'
+  if (Object.hasOwn(registry, name)) return 'registered'
+  return 'offender'
+}
+
+/** 抽**字面** git argv 的首词（子命令）：`['ls-files']` → `ls-files`；`[...a]` → 不可解析。
+ *  `readOnly` 登记靠它核"确实没有自建仓"—— 只读白名单之外的任何子命令都会被判红。
+ *  @returns {{found: string[], unresolved: number}} */
+function literalGitSubcommands(code) {
+  const re = /(?:spawnSync|execFileSync|execSync|execFile|spawn|exec)\(\s*['"]git['"]\s*,\s*\[([^\]]*)\]/g
+  const found = []
+  let unresolved = 0
+  for (const m of code.matchAll(re)) {
+    const first = m[1].split(',')[0].trim()
+    const lit = /^(['"])([^'"]*)\1$/.exec(first)
+    if (lit) found.push(lit[2]); else unresolved++
+  }
+  return { found, unresolved }
+}
 
 const files = readdirSync(TESTS).filter(f => f.endsWith('.mjs')).sort()
-const offenders = []
-const audit = []
 /** 读数面自检（防"扫描面失效 → 空扫描报绿"）：这些文件**必须**被认出来，否则判据本身坏了。
  *  ⚠ 名单**含 `verify-review-fixed-point.mjs`**（它走挂具、不直接 spawn git）——
- *  这正是用来钉住"接挂具 ⇒ 掉出观测面"那个盲区不回退的反向自检（见 `USES_HARNESS_CALL` 的注）。 */
+ *  正是用来钉住"接挂具 ⇒ 掉出观测面"那个盲区不回退的反向自检（见 `USES_HARNESS_CALL` 的注）。 */
 const MUST_MATCH = [
   'verify-all-entry.mjs', 'verify-precommit-hook.mjs', 'verify-restore-discipline.mjs',
   'verify-batch-state.mjs', 'verify-review-fixed-point.mjs', 'verify-privacy-scan.mjs',
 ]
+const SKIP = new Set([
+  'isolated-git.mjs',        // 挂具自己不是夹具用例
+  'verify-isolated-git.mjs', // 本文件是**守卫**：它自己建仓（I1/I4 夹具）且 import 挂具，但它是判据的
+                             // 持有者 —— 靠下方 I2a 的反向自检覆盖它的机制面，而不是让它扫自己
+                             // （自引用无意义）
+])
 const matched = []
-/** 剥掉注释行，只留**代码面** —— I2 与 I3c 共用（同一判据形态两处各写一份是重复；
- *  且"注释里叙述这套做法"（本文件、brief、配方头注都会提）不该被自己拦下）。 */
-const codeLines = (src) => src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+const audit = []
+const offenders = []
 for (const file of files) {
-  if (file === 'isolated-git.mjs') continue          // 挂具自己不是夹具用例
-  if (file === 'verify-isolated-git.mjs') continue   // 本文件是**守卫**：它自己建仓（I1 夹具），但它是判据的
-                                                     // 持有者 —— 靠下面 MUST_MATCH 反向自检覆盖它的机制面，
-                                                     // 而不是让它 import 自己（自引用无意义）
+  if (SKIP.has(file)) continue
   const src = readFileSync(join(TESTS, file), 'utf8')
-  const code = codeLines(src)
-  // 观测面 = "会碰 git" ∧ "自建仓"；碰 git 的两条路都算：**直接 spawn** 或**走挂具**（gitIn）
-  const touchesGit = SPAWN_GIT.test(code) || USES_HARNESS_CALL.test(code)
-  if (!touchesGit || !CREATES_REPO.test(code)) continue
+  const kind = classify(file, src)
+  if (kind === 'irrelevant') continue
   matched.push(file)
-  const imports = IMPORT_HARNESS.test(src)
-  const handrolled = HANDROLLED_CLEAN.test(code)
-  audit.push(`${file}${imports ? ' ✓挂具' : ' ✗无挂具'}${handrolled ? ' ✗自写清理' : ''}`)
-  if (!imports || handrolled) offenders.push({ file, imports, handrolled })
+  const handrolled = HANDROLLED_CLEAN.test(codeLines(src))
+  const tag = kind === 'harness' ? '✓挂具'
+    : kind === 'offender' ? '✗未登记'
+    : REGISTRY[file].kind === 'debt' ? '⤼债务' : '✓登记(只读)'
+  audit.push(`${file} ${tag}${handrolled ? ' ✗自写清理' : ''}`)
+  if (kind === 'offender' || handrolled) offenders.push({ file, kind, handrolled })
 }
 
+// ── I2a 登记册一致性（AC4 反向自检：登记在册的文件被删除/改名 → 响亮，不静默放过）──────
+const registryNames = Object.keys(REGISTRY)
+const readOnlyNames = registryNames.filter(f => REGISTRY[f].kind === 'readOnly')
+const debtNames = registryNames.filter(f => REGISTRY[f].kind === 'debt')
+const registryMissing = registryNames.filter(f => !files.includes(f))
+const registryInvisible = registryNames.filter(f => files.includes(f) && !matched.includes(f))
+const registryMasked = registryNames.filter(f => files.includes(f) &&
+  classify(f, readFileSync(join(TESTS, f), 'utf8')) === 'harness')
+const registryBadKind = registryNames.filter(f => !['readOnly', 'debt'].includes(REGISTRY[f].kind))
+const readSrc = (f) => readFileSync(join(TESTS, f), 'utf8')
+if (registryMissing.length > 0) {
+  bad('I2a. 登记册与文件一一对应（登记在册的文件被删/改名 ⇒ 响亮）',
+    `登记在册但文件**不存在**：${registryMissing.join(', ')} —— ` +
+    '登记 ≠ 永久豁免：要么恢复文件，要么摘掉这条登记（留着就是名册在说谎）')
+} else if (registryInvisible.length > 0) {
+  bad('I2a. 每条登记都落在观测面上',
+    `登记在册但判据**看不见它碰 git**：${registryInvisible.join(', ')} —— ` +
+    '要么该文件的 git 用法已移除（摘牌），要么观测面失效（扫描面坏了，不报假绿）')
+} else if (registryMasked.length > 0) {
+  bad('I2a. 登记不得与「已走挂具」并存（避免名册变成永久豁免）',
+    `已走挂具却仍在登记册：${registryMasked.join(', ')} —— 该文件已合规，摘掉这条登记`)
+} else if (registryBadKind.length > 0) {
+  bad('I2a. 登记类目只能是 readOnly / debt', registryBadKind.map(f => `${f}=${REGISTRY[f].kind}`).join(', '))
+} else {
+  ok(`I2a. 登记册一致：${registryNames.length} 条登记逐条有文件、落在观测面上、且都未走挂具`,
+    `readOnly ${readOnlyNames.length} / debt ${debtNames.length} —— 删除或改名任何一条登记文件，本行即红`)
+}
+
+// ── I2b readOnly 登记的「确实没有自建仓」核对（只读子命令白名单，闭合集）───────────────
+const readOnlyOk = []
+const readOnlyProblems = []
+for (const file of readOnlyNames) {
+  if (!files.includes(file)) continue
+  const { found, unresolved } = literalGitSubcommands(codeLines(readSrc(file)))
+  const uniq = [...new Set(found)]
+  const outOfList = uniq.filter(s => !READ_ONLY_SUBCOMMANDS.has(s))
+  if (uniq.length === 0 && unresolved === 0) {
+    readOnlyProblems.push(`${file}（核不到任何**字面** git 调用 ⇒ 无法证明只读，默认拒绝）`)
+  } else if (unresolved > 0) {
+    readOnlyProblems.push(`${file}（${unresolved} 处 argv 不可静态解析 ⇒ 无法证明只读，默认拒绝）`)
+  } else if (outOfList.length > 0) {
+    readOnlyProblems.push(`${file}（子命令不在只读白名单：${outOfList.join(', ')}）`)
+  } else {
+    readOnlyOk.push(`${file}: ${uniq.join('/')}`)
+  }
+}
+if (readOnlyProblems.length > 0) {
+  bad('I2b. readOnly 登记的文件**确实没有自建仓**（只读子命令白名单）', readOnlyProblems.join(' ｜ '))
+} else {
+  ok(`I2b. readOnly 登记的 ${readOnlyNames.length} 个文件逐条核对：字面 argv 子命令全在只读白名单内`,
+    readOnlyOk.join(' ｜ '))
+}
+
+// ── I2c 债务逐条**响亮**列出（登记债务不是放行，是记账）──────────────────────────────
+for (const file of debtNames) {
+  loud(`I2c·债务 ${file}（碰 git、未走挂具、已登记）`, REGISTRY[file].why)
+}
+
+// ── I2d 主体：白名单外零放行 ─────────────────────────────────────────────────────────
 const missingProbe = MUST_MATCH.filter(f => !matched.includes(f))
 if (audit.length === 0 || missingProbe.length > 0) {
-  loud('I2. 结构断言（凡**自建仓**的夹具用例必走挂具）',
+  loud('I2d. 结构断言（默认拒绝：碰 git ⇒ 走挂具或显式登记）',
     audit.length === 0
-      ? '没扫到任何自建仓的用例 —— 扫描面失效，**不报假绿**'
-      : `判据没认出这些已知自建仓的用例: ${missingProbe.join(', ')} —— 观测面失效，**不报假绿**`)
+      ? '没扫到任何碰 git 的用例 —— 扫描面失效，**不报假绿**'
+      : `判据没认出这些已知碰 git 的用例: ${missingProbe.join(', ')} —— 观测面失效，**不报假绿**`)
 } else if (offenders.length === 0) {
-  ok(`I2. 凡**自建仓库**的用例都走共享挂具、且无自写 \`GIT_*\` 清理（${audit.length} 个文件）`,
+  ok(`I2d. 碰 git 的用例全部**走挂具或显式登记**（${audit.length} 个文件；白名单外零放行）`,
     audit.join(' ｜ '))
 } else {
-  bad(`I2. 有用例绕过共享挂具（#110 病灶复发：隔离又变成"每处各写一份"）`,
-    offenders.map(o => `${o.file}（${[!o.imports && '未 import 挂具', o.handrolled && '自写 GIT_* 清理'].filter(Boolean).join(' + ')}）`).join(' ｜ ') +
-    ' —— 改成 `import { fixtureEnv } from \'./isolated-git.mjs\'` 并用它构造 env')
+  bad('I2d. 有用例**既不走挂具也没登记**（#125 病灶：碰 git 却不声明分类 ⇒ 默认拒绝）',
+    offenders.map(o => `${o.file}（${[o.kind === 'offender' && '未登记', o.handrolled && '自写 GIT_* 清理'].filter(Boolean).join(' + ')}）`).join(' ｜ ') +
+    ' —— 改成 `import { fixtureEnv } from \'./isolated-git.mjs\'`；确属"只读调用方仓"的，' +
+    '在 REGISTRY 里登记 `readOnly` 并写 `why`')
 }
+
+// ── I2e 判据自检（**非空洞**，AC5）────────────────────────────────────────────────
+// 把判据本身当被测对象：构造违规 / 合规输入，逐条断言 `classify()` 的裁决。
+// **合成登记册**：自检不依赖真 `REGISTRY` 的内容（登记册会变，机制不该跟着变）。
+// 若有人把判据改回"只认 `init`"，前三条立刻红 —— 判据自带回归测试。
+const SYNTH_REGISTRY = { 'synthetic-readonly.mjs': { kind: 'readOnly', why: '自检用' } }
+const SELF_CASES = [
+  ['clone 自建仓、未走挂具', "spawnSync('git', ['clone', 'src', 'dst'])", 'unregistered-clone.mjs', 'offender'],
+  ['worktree add 自建仓、未走挂具', "spawnSync('git', ['worktree', 'add', '../wt'])", 'unregistered-worktree.mjs', 'offender'],
+  ['shell 串自建仓、未走挂具', "execSync('git clone src dst')", 'unregistered-shell.mjs', 'offender'],
+  ['只读调用方仓 + 登记在册', "execFileSync('git', ['ls-files'], { cwd: REPO })", 'synthetic-readonly.mjs', 'registered'],
+  ['只读调用方仓但**未**登记', "execFileSync('git', ['ls-files'], { cwd: REPO })", 'unregistered-readonly.mjs', 'offender'],
+  ['走挂具（import + fixtureEnv）', "import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b'], { env: fixtureEnv() })", 'with-harness.mjs', 'harness'],
+  ['不碰 git', 'const x = 1', 'no-git.mjs', 'irrelevant'],
+]
+const selfBad = []
+for (const [label, src, name, expect] of SELF_CASES) {
+  const got = classify(name, src, SYNTH_REGISTRY)
+  if (got !== expect) selfBad.push(`${label}：期望 ${expect}，实测 ${got}`)
+}
+if (selfBad.length > 0) {
+  bad(`I2e. 判据自检（${SELF_CASES.length} 条裁决）`, selfBad.join(' ｜ ') + ' —— 判据本身坏了')
+} else {
+  ok(`I2e. 判据自检：${SELF_CASES.length} 条合成输入的裁决全部符合预期`,
+    SELF_CASES.map(([l, , , e]) => `${l}→${e}`).join(' ｜ '))
+}
+// 与**旧判据**（#110 的"只认 init"）对照：前三条在旧判据下是**假绿**，新判据下红。
+// 这个 delta 就是本票修的缺口；有人把判据改回去，上面那条自检立刻红。
+const OLD_CREATES_REPO = /(?:['"`]init['"`])/
+const oldVerdict = (src) => {
+  const code = codeLines(src)
+  return SPAWN_GIT.test(code) && OLD_CREATES_REPO.test(code)
+}
+const oldMissed = SELF_CASES.slice(0, 3).filter(([, src]) => !oldVerdict(src))
+if (oldMissed.length === 3) {
+  ok('I2e·对照. 三条自建仓违规（clone / worktree add / shell 串）在**旧判据**下是假绿、新判据下红',
+    '旧判据漏掉的正是这三条 —— 把它加宽只是把"下一个写法"往后推一格（D15）')
+} else {
+  bad('I2e·对照. 旧判据对照失效',
+    `旧判据只漏了 ${oldMissed.length}/3 条 —— 自检输入或旧判据形态变了，复核本节点`)
+}
+
+
 
 // ══ I3: 挂具自检 —— 守卫别守着一个坏的挂具 ═══════════════════════════════════════
 {
