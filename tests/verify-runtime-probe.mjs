@@ -465,8 +465,15 @@ test('R9. 含空格的 dsh 路径经 shell 起得来（fake dsh 真被调用）'
     mkdirSync(binDir, { recursive: true })
     const record = join(dir, 'record.txt')
     writeFileSync(record, '')
-    // fake dsh：把 argv 追加进 record，再 exit 0（挂载那步只要求 status 0）
-    writeFileSync(join(binDir, 'dsh.cmd'), '@echo off\r\nnode "%~dp0fake.mjs" %*\r\n')
+    // fake dsh：把 argv 追加进 record，再 exit 0（挂载那步只要求 status 0）。
+    // ⚠ 假件里**不许**写裸 `node`（#124 实测，见 docs/dev-environment.md §0.2）：手工
+    // `bash -lc` 起的 msys 非交互 shell 的 PATH 里没有 node（`command -v node` 空），
+    // 而 cmd.exe 侧按 PATH 解析 `node` → 假件起不来，断言读成「installer 失败（exit 1 /
+    // 9009）」——红在**夹具自己的工具链假设**上，而不是本条的判据（含空格路径被 shell
+    // 从空格处截断）。改用**正在跑本用例的** node 绝对路径，判据就只依赖被测行为本身。
+    // （该绝对路径本身可能含空格，故加引号——那是夹具侧的 cmd 语法，不是被测对象。）
+    writeFileSync(join(binDir, 'dsh.cmd'),
+      `@echo off\r\n"${process.execPath}" "%~dp0fake.mjs" %*\r\n`)
     writeFileSync(join(binDir, 'fake.mjs'),
       'import { appendFileSync } from "node:fs"\n'
       + 'appendFileSync(process.env.PROBE_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n")\n')

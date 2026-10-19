@@ -158,7 +158,7 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   - 两者的桥是 `lib/runtime-probe.mjs`：它把 pnpm 的**四种来源**（`--pnpm` → `DSH_PNPM` → PATH →
     桌面惯例）解析成一条路径，并把「要前置的目录」算出来（脚本形态生成转发 shim）。
 - **同一份用例在 agent shell 与 pre-commit 钩子里不是同一个环境**（#107 实测，两处都跑才算绿）：
-  夹具类用例（建目录 / source shell 脚本 / 起子进程读环境）最容易**只在一处红**。已实测的四项差异
+  夹具类用例（建目录 / source shell 脚本 / 起子进程读环境）最容易**只在一处红**。已实测的五项差异
   —— 别猜，按表对照：
 
   | 面 | agent shell | pre-commit 钩子（`.githooks/pre-commit` → `node scripts/verify-all.mjs`） |
@@ -167,12 +167,20 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   | 可用的 `bash` | PATH 上的那个（本机是 **WSL bash**：丢弃继承 env、看不见 `D:\`） | 钩子由 msys 的 `sh` 起，子进程看到的是 **msys** 语义（`/c/...`、`/tmp`≠`C:\tmp`） |
   | `cygpath` / coreutils（`mktemp`/`mkdir`） | **不在**继承 PATH 上（`command not found`） | 在（msys 的 `/usr/bin` 可达）→ 同一段脚本走**另一条分支** |
   | `ProgramFiles` 一族 | msys bash 只暴露 **`PROGRAMFILES`**（`ProgramFiles` 拼写**从不成立**） | 同左 |
+  | `node` 在 PATH 上？（决定 `.cmd` 夹具能否被 cmd.exe 起来） | **在**（继承 Windows PATH） | **看钩子是谁起的**：`git commit` 从 agent shell 起 → 继承同一 PATH（在）；**手工** `C:\msys64\usr\bin\bash.exe -lc '…'` 走 msys **非交互** PATH（§0.1：默认不带 Windows node）→ **不在**（`command -v node` 空、`node: command not found`）→ 假件里写裸 `node` 的用例在 cmd.exe 侧起不来 |
 
   **判据**：夹具**由被测环境自己的那个 bash** 建出并报出路径（`mktemp -d` + `pwd`），
   期望值与输入**同源**——这样"夹具在哪"与"脚本看到哪"按构造是同一事实，翻译几层都不进判据。
   ⚠ `path.join` 在 Windows 上按 Win32 语义给 **`\`**，而 POSIX 形夹具根（`/tmp/...`）拼出
   `\tmp\...` 会被 bash 判为不存在；Node 把 POSIX 形路径写文件时会落到**当前盘**的 `\tmp` 下，
   与 bash 的 `/tmp` **不是一处**——写夹具文件也走 bash（`cat >`）。
+
+  **`node` 这一行直接决定夹具怎么写**（#124 实测）：假 `.cmd` 里写裸
+  `node "%~dp0x.mjs" %*` 时，手工 `-lc` 下 cmd.exe 解析不到 `node`，用例读数变成
+  「installer 失败（exit 1 / 9009）」——红在**夹具自己的工具链假设**上，而不是被测行为
+  （含空格路径是否被 shell 从空格处截断）。改写成**正在跑用例的** node 绝对路径
+  （`process.execPath`）即可：判据只依赖被测对象本身，手工 `-lc` 与真钩子下结论一致
+  （#124 的 R9 就是这么修的）。
 
   **钩子导出的 git 变量：实测形态（#110，别再按直觉推）**——`git commit` 起钩子时会导出指向
   **调用方仓库**的变量；夹具若原样继承，它的 `git init` / `git config` 会**打到调用方仓上**。
