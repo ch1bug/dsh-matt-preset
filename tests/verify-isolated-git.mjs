@@ -166,6 +166,13 @@ const SPAWN_GIT = /(?:spawnSync|execFileSync|execSync)\(\s*['"`]git['"`]/
 /** **自建仓**的信号：`init` 作为 git 子命令出现在参数里（`G('init', …)` / `['init', …]` / `'init'` 直调）。
  *  这是"夹具会造出新仓"的可判形式 —— 也只有这种用例才可能把仓写到调用方身上。 */
 const CREATES_REPO = /(?:['"`]init['"`])/
+/** 走挂具的调用形态：`gitIn(...)`（挂具导出的 `git -C` 调用器）。
+ *  ⚠ **为什么需要它**（本守卫第 1 轮的实测缺口，记下）：初版只用 `SPAWN_GIT`（直接 spawn git）
+ *  来"认出夹具用例"，于是**改用挂具的文件反而掉出观测面** —— `verify-review-fixed-point.mjs`
+ *  接了挂具之后不再直接 `spawnSync('git'`，I2 就**看不见它**了（实测：文件数从 6 掉回 5）。
+ *  这是**方向错误**的盲区：越是守规矩的文件越不被检查。修法 = 把"走挂具"本身也当作**观测信号**
+ *  （`CREATES_REPO` 仍要求它真建仓，故不会把纯读调用方仓的用例卷进来）。 */
+const USES_HARNESS_CALL = /\bgitIn\s*\(/
 /** 自写的 `GIT_*` 清理：`for (... of Object.keys(env)) if (...startsWith('GIT_')) delete ...` 一族。
  *  ⚠ **声明边界（D13/D15 先例）**：这是**写法面**的锁，抓的是"代码长什么样"而不是"行为如何"。
  *  故它有两面：① 换体裁（把清理抽成函数、走 shell 变量、用 `filter`+`Object.fromEntries`）可绕 ——
@@ -179,8 +186,13 @@ const IMPORT_HARNESS = /from\s+['"]\.\/isolated-git\.mjs['"]/
 const files = readdirSync(TESTS).filter(f => f.endsWith('.mjs')).sort()
 const offenders = []
 const audit = []
-/** 读数面自检（防"扫描面失效 → 空扫描报绿"）：这三个文件**必须**被认出来，否则判据本身坏了。 */
-const MUST_MATCH = ['verify-all-entry.mjs', 'verify-precommit-hook.mjs', 'verify-restore-discipline.mjs', 'verify-batch-state.mjs']
+/** 读数面自检（防"扫描面失效 → 空扫描报绿"）：这些文件**必须**被认出来，否则判据本身坏了。
+ *  ⚠ 名单**含 `verify-review-fixed-point.mjs`**（它走挂具、不直接 spawn git）——
+ *  这正是用来钉住"接挂具 ⇒ 掉出观测面"那个盲区不回退的反向自检（见 `USES_HARNESS_CALL` 的注）。 */
+const MUST_MATCH = [
+  'verify-all-entry.mjs', 'verify-precommit-hook.mjs', 'verify-restore-discipline.mjs',
+  'verify-batch-state.mjs', 'verify-review-fixed-point.mjs', 'verify-privacy-scan.mjs',
+]
 const matched = []
 /** 剥掉注释行，只留**代码面** —— I2 与 I3c 共用（同一判据形态两处各写一份是重复；
  *  且"注释里叙述这套做法"（本文件、brief、配方头注都会提）不该被自己拦下）。 */
@@ -192,7 +204,9 @@ for (const file of files) {
                                                      // 而不是让它 import 自己（自引用无意义）
   const src = readFileSync(join(TESTS, file), 'utf8')
   const code = codeLines(src)
-  if (!SPAWN_GIT.test(code) || !CREATES_REPO.test(code)) continue
+  // 观测面 = "会碰 git" ∧ "自建仓"；碰 git 的两条路都算：**直接 spawn** 或**走挂具**（gitIn）
+  const touchesGit = SPAWN_GIT.test(code) || USES_HARNESS_CALL.test(code)
+  if (!touchesGit || !CREATES_REPO.test(code)) continue
   matched.push(file)
   const imports = IMPORT_HARNESS.test(src)
   const handrolled = HANDROLLED_CLEAN.test(code)
