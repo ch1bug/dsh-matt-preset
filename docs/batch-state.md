@@ -91,8 +91,8 @@ enforcer 是 reminder-only，**只读标记、不写文件**。
 1. **分类**：把 open 票分成 series / needs-triage / ready-for-human / standalone 四类；
 2. **同族合并**：一次会话或一次编辑就能一起关掉的票，合并成一张（不合并 = 票面越攒越多）；
 3. **剔除「已完成待关票」**：算「可开工」时把**已 DONE 但未关**的票剔掉 ——
-   `frontier` 会把它们算进可开工（B 批读数 2026-10-19：28 vs 真实 25 —— 再引用前按
-   `gh issue list --state open` 重测，读数带命令与时点）；
+   `frontier` 会把它们算进可开工（B 批读数 2026-10-19：28 vs 真实 25；重测：
+   `gh issue list --state open`）；
 4. **排批**：按 series 分组，单批 ≤ 5 票（D32）。
 
 ## 必需字段

@@ -95,9 +95,11 @@ BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
 系列处理 / 大系列"); never on by default. Single-issue work keeps the
 per-issue push rhythm.
 - TICKET ENTRY CONTRACT（票面契约 —— every ticket, batch or not）: RFA = the
-  ticket needs NO user in the loop AND has NO open decision. That TEST belongs
-  to the label side (`docs/agents/triage-labels.md`); what this contract pins is
-  the ticket BODY — five things written down before the label goes on:
+  ticket needs NO user in the loop AND has NO open decision. That TEST is the
+  label's: its definition lives in the tracker's `docs/agents/triage-labels.md`
+  (the expansion checklist and the stock re-check stay with the tracking side).
+  What this contract pins is the ticket BODY — five things written down before
+  the label goes on:
   (1) the write-domain whitelist (including "may touch a same-family file
   when the criterion requires it"), (2) the criterion's form (what the assertion
   compares against), (3) the acceptance reading (exact command + expected
@@ -169,9 +171,8 @@ per-issue push rhythm.
   only then allocate batches (cap 5 per batch). When counting "ready to start",
   DROP the tickets that are already DONE but not yet closed — a frontier that
   counts them overstates the queue (B-batch reading, 2026-10-19: 28 vs a true
-  25 — re-measure with `gh issue list --state open` before quoting the number).
-  Record the close-out in the batch state (the classification line + the merge
-  decisions) so the next session reads it instead of re-deriving it.
+  25). Record the close-out in the batch state (the classification line + the
+  merge decisions) so the next session reads it instead of re-deriving it.
 - EXPLICITLY NOT GUARDED (D15): tickets live on GitHub and the local suite
   NEVER queries the tracker. The ticket-side faces above — labels, close mode,
   conflict-zero declarations — are verified at the batch-end review, not by a

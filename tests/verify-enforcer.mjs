@@ -938,6 +938,17 @@ else bad('V28a. declaration reminder missing/does not point at the template',
 const v28b = await renderDecl()
 if (!declareText(v28b)) ok('V28b. declaration reminder is one-shot (consumed, no repeat)')
 else bad('V28b. declaration reminder repeated', v28b.slice(-200))
+// V28d (#128): the SAME reminder carries the three new batch-declaration faces —
+// asserted on the RENDERED text, not the module source (a source-only assertion
+// goes green on a dead branch or a comment; the reminder is what the model reads).
+// 第 1 轮把这条放在 verify-batch-state 的 C2g 里读源码，两轴第 2 轮都指出它更弱。
+{
+  const DECLARE_FACES = ['closing-confirmation mode', 'pre-authorization list', 'close-out record']
+  const missingDeclareFaces = DECLARE_FACES.filter(p => !v28a.includes(p))
+  if (missingDeclareFaces.length === 0)
+    ok('V28d. declaration reminder carries the #128 faces (rendered)', `${DECLARE_FACES.length} 条`)
+  else bad('V28d. declaration faces missing from the rendered reminder', `missing: ${missingDeclareFaces.join(', ')}`)
+}
 // (b) cwd WITH batch-state.md → same reminder (the file existing is not a gate).
 const declRoot2 = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-decl2-')))
 await mkdir(join(declRoot2, '.scratch'), { recursive: true })

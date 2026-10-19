@@ -126,15 +126,21 @@ function docList(label) {
 // 第 1 轮复核抓到的真缺陷：正文与 minimal 各自复制了一份黑名单，且**已经漂移**
 //（正文缺「时微调」、minimal 缺「酌情 / 时微调」），而 T3 只钉了文档↔代码。这里把
 // 另外两张脸也钉死：它们一个词都不许出现 —— 复制一份就红，逼着改单源那份。
+// 第 2 轮复核补正：文档曾声称**两张清单**都钉住，实际只钉了 BLACKLIST（假覆盖）。
+// 现在两张都钉（T3/T3b 钉文档↔代码，T9 钉正文↔单源）。
 {
+  const ALL_WORDS = [
+    ...BLACKLIST.map(([word]) => word),
+    ...PENDING_DECISION.map(([word]) => word),
+  ]
   const leakedBy = {}
   for (const [name, text] of Object.entries(MODEL_TEXTS)) {
-    const leaked = BLACKLIST.map(([word]) => word).filter(word => text.includes(word))
+    const leaked = ALL_WORDS.filter(word => text.includes(word))
     if (leaked.length > 0) leakedBy[name] = leaked
   }
   const names = Object.keys(leakedBy)
-  if (names.length === 0) ok('T9. 正文与 minimal 不复制措辞黑名单（只指向单源）', `${Object.keys(MODEL_TEXTS).length} 份文本 / ${BLACKLIST.length} 词均未出现`)
-  else bad('T9. 措辞黑名单又被复制进正文（复制即漂移）', names.map(n => `${n}: ${leakedBy[n].join('/')}`).join(' | '))
+  if (names.length === 0) ok('T9. 正文与 minimal 不复制两张清单（只指向单源）', `${Object.keys(MODEL_TEXTS).length} 份文本 / ${ALL_WORDS.length} 词均未出现`)
+  else bad('T9. 措辞清单又被复制进正文（复制即漂移）', names.map(n => `${n}: ${leakedBy[n].join('/')}`).join(' | '))
 }
 
 // ── T5: 不是"全红判据" —— 干净票面 / 非 RFA 票面必须绿 ───────────────────────
