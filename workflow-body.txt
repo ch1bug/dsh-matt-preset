@@ -99,9 +99,10 @@ BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
 系列处理 / 大系列"); never on by default. Single-issue work keeps the
 per-issue push rhythm.
 - TICKET ENTRY CONTRACT（票面契约 —— every ticket, batch or not）: RFA = the
-  ticket needs NO user in the loop AND has NO open decision. It is a checklist,
-  not a vibe — five things are pinned IN THE TICKET BODY before the label goes
-  on: (1) the write-domain whitelist (including "may touch a same-family file
+  ticket needs NO user in the loop AND has NO open decision. That TEST belongs
+  to the label side (`docs/agents/triage-labels.md`); what this contract pins is
+  the ticket BODY — five things written down before the label goes on:
+  (1) the write-domain whitelist (including "may touch a same-family file
   when the criterion requires it"), (2) the criterion's form (what the assertion
   compares against), (3) the acceptance reading (exact command + expected
   output), (4) the closing rule (which ticket(s) it closes, and who may close),
@@ -133,11 +134,16 @@ per-issue push rhythm.
     with the other members of its batch.
   One unread face → NOT RFA. Each face's disposal (resolved / decided /
   explicitly declared) is written INTO the ticket, never left in the chat.
-- No decision-pushing wording in a ticket body: 或 as an option list / 草案 /
-  可微调 / 视情况 / 酌情 / 待定 / TBD / a bare "?" hung on a decision. Each such
-  phrase IS an unread conflict face. `scripts/triage-check.mjs <body-file | ->`
-  machine-checks the unambiguous tokens; the contextual ones (或 / 建议 / ?)
-  stay a human read and are DECLARED as such in docs/agents/issue-tracker.md.
+- No decision-pushing wording in a ticket body, and no line admitting the ticket
+  still needs a human decision (that admission IS an open decision → the ticket
+  is RFH, not RFA). Each such phrase IS an unread conflict face. The unambiguous
+  token lists live in exactly TWO places — the tracker's procedure
+  (`docs/agents/issue-tracker.md`, always) and, where the repo ships one, a
+  matcher (this repo: `scripts/triage-check.mjs`; without one, the same list is
+  read by hand). This text POINTS at them and never re-enumerates: a second
+  enumeration is precisely the drift these rules exist to prevent. The
+  contextual half (a bare "?" hung on a decision, "或" as an option list, 建议
+  in the "要不要做" sense) stays a human read, declared as such in that doc.
 - BATCH DECLARATION PRE-AUTHORIZATION LIST（批宣告预授权清单）— the declaration
   is the license for autonomous execution, and it authorizes exactly four
   things:
@@ -166,9 +172,10 @@ per-issue push rhythm.
   same-family tickets that one session or one edit would close together, and
   only then allocate batches (cap 5 per batch). When counting "ready to start",
   DROP the tickets that are already DONE but not yet closed — a frontier that
-  counts them overstates the queue (measured 28 vs a true 25). Record the
-  close-out in the batch state (the classification line + the merge decisions)
-  so the next session reads it instead of re-deriving it.
+  counts them overstates the queue (B-batch reading, 2026-10-19: 28 vs a true
+  25 — re-measure with `gh issue list --state open` before quoting the number).
+  Record the close-out in the batch state (the classification line + the merge
+  decisions) so the next session reads it instead of re-deriving it.
 - EXPLICITLY NOT GUARDED (D15): tickets live on GitHub and the local suite
   NEVER queries the tracker. The ticket-side faces above — labels, close mode,
   conflict-zero declarations — are verified at the batch-end review, not by a
@@ -342,7 +349,8 @@ per-issue push rhythm.
   (the single source of truth for that shape; do not re-derive the fields
   here). Update it after every ticket; each Progress row carries the evidence
   pointer — proving command + exit code + evidence path (the test output
-  itself counts; a row missing any element is BLOCKED, not done). You must
+  itself counts; no separate artifact needed); a row missing any element is
+  BLOCKED, not done. You must
   always know you are in a batch, what is left, and where the last push
   checkpoint was.
 - Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with

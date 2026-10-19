@@ -17,9 +17,9 @@ Issues are tracked on GitHub (ch1bug/dsh-matt-preset) via the `gh` CLI. See `doc
 
 Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
-There are orthogonal labels too (`scheduled` / `P0`), and `scheduled` does not take part in the
-"exactly one state" judgment. 分诊产出还有一步**冲突归零**（四类冲突 + 三种出路 + 措辞黑名单）：
-见 `docs/agents/issue-tracker.md` 的「分诊产出前置项」——这里只留指针。
+Orthogonal labels exist too (`scheduled` / `P0`); their semantics live in `docs/agents/triage-labels.md`.
+分诊产出还有一步**冲突归零**（四类冲突 + 三种出路 + 措辞黑名单）：见
+`docs/agents/issue-tracker.md` 的「分诊产出前置项」——这里只留指针。
 
 ### Domain docs
 

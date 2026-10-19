@@ -6,22 +6,29 @@
  * 再喂**伪装输入**证明它真的会红——尤其 #128 AC7 点名的那个反例：
  * **票面含待决项（「草案，实现时可微调」）却标了 RFA**，分诊收尾清单必须红。
  *
- * 判据面三件套（与 `docs/agents/issue-tracker.md`「分诊产出前置项」逐字同源）：
+ * 判据面四件套（与 `docs/agents/issue-tracker.md`「分诊产出前置项」逐字同源）：
  *   T1 慨词黑名单（机械面）：命中即红，且点名命中的词；
- *   T2 RFA 的四类核对：缺任一类即红，缺哪类说哪类；
- *   T3 **清单只准有一份**：文档里的机械面词表与代码里的 `BLACKLIST` 必须逐词相等
- *      （brief §3.1 问句①的机械版——两侧各写一份就会在这里红）。
- * 另加 T4：**不是"全红判据"**——干净票面 / 非 RFA 票面必须绿（否则它只是恒红噪声）。
+ *   T2 RFA 的四类核对：缺任一类即红，缺哪类说哪类；T2b/T2c RFA 互斥面
+ *      （自认「要 human 决定 / 实现时再定」→ 标了 RFA 就红，非 RFA 不判）；
+ *   T3 **清单只准有一份**：文档里的两张词表与代码的 `BLACKLIST` / `PENDING_DECISION`
+ *      必须逐词相等（brief §3.1 问句①的机械版）；T9 再钉住**模型真读到的两份正文**
+ *      只指向、不复制（第 1 轮复核实测：复制的那两份已经漂移）。
+ * 另加 T5：**不是"全红判据"**——干净票面 / 非 RFA 票面必须绿（否则它只是恒红噪声）。
  */
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BLACKLIST, CONFLICT_FACES, HUMAN_JUDGED, checkTicketBody, render } from '../scripts/triage-check.mjs'
+import { BLACKLIST, CONFLICT_FACES, HUMAN_JUDGED, PENDING_DECISION, checkTicketBody, render } from '../scripts/triage-check.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = resolve(REPO, 'scripts/triage-check.mjs')
 const DOC = readFileSync(resolve(REPO, 'docs/agents/issue-tracker.md'), 'utf8').replace(/\r\n/g, '\n')
+/** 两份**模型真读到**的正文（profile 的 skeleton 与 minimal 压缩版）。 */
+const MODEL_TEXTS = {
+  'workflow-body.txt': readFileSync(resolve(REPO, 'workflow-body.txt'), 'utf8').replace(/\r\n/g, '\n'),
+  'workflow-profile-minimal.txt': readFileSync(resolve(REPO, 'workflow-profile-minimal.txt'), 'utf8').replace(/\r\n/g, '\n'),
+}
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
@@ -74,24 +81,60 @@ preset.yml（单份显示元数据）按新形态拆分或收敛。
   else bad('T2. 四类核对缺口未拦住', JSON.stringify({ pass: r.pass, missing: r.missingFaces }))
 }
 
-// ── T3: 清单只准有一份 —— 文档的机械面词表 == 代码的 BLACKLIST ────────────────
+// ── T2b: 四类核对齐备、但票面**自认**还有待决项 —— 标了 RFA 必须红 ─────────────
+// 第 1 轮 Spec 轴实测的反例：只判「四类在场」时，这份票面会绿着通过。
 {
-  // 词表在文档里跨行折行：先把「机械面」这一条 bullet 连同续行取成一块，再抽反引号里的词。
+  const selfAdmitted = CLEAN_RFA.replace('## AC', '## 待决项\n显示名用 A 还是 B —— 要 human 决定，实现时再定。\n\n## AC')
+  const asRfa = checkTicketBody({ text: selfAdmitted, rfa: true })
+  const asRfh = checkTicketBody({ text: selfAdmitted, rfa: false })
+  if (!asRfa.pass && asRfa.pending.length > 0) ok('T2b. 标 RFA 却自认还有待决项 —— 判据红并点名该句', asRfa.pending.join(' / '))
+  else bad('T2b. 自认待决项未拦住（RFA 互斥面空转）', JSON.stringify({ pass: asRfa.pass, pending: asRfa.pending }))
+  if (asRfh.pass) ok('T2c. 同一票面在非 RFA 下不判 RFA 互斥面（RFH 票写它是对的）')
+  else bad('T2c. 非 RFA 被越界要求', JSON.stringify(asRfh.findings))
+}
+
+// ── T3: 清单只准有一份 —— 文档的两张词表 == 代码的两个常量 ────────────────────
+/** 文档里某个 `- **<label>**` bullet（含续行）内反引号包着的词。 */
+function docList(label) {
   const lines = DOC.split('\n')
-  const start = lines.findIndex(t => t.includes('机械面'))
+  const start = lines.findIndex(t => t.includes(label))
+  if (start < 0) return []
   const block = []
-  for (let i = start; i >= 0 && i < lines.length; i++) {
+  for (let i = start; i < lines.length; i++) {
     if (i > start && (/^\s*[-*]\s/.test(lines[i]) || lines[i].trim() === '')) break
     block.push(lines[i])
   }
-  // 词表条目 = 纯词形（中文 / 字母），把同段里的命令路径（`scripts/triage-check.mjs`）剔掉。
-  const docWords = [...block.join('\n').matchAll(/`([^`]+)`/g)].map(m => m[1]).filter(w => /^[\u4e00-\u9fa5A-Za-z]+$/.test(w))
-  const codeWords = BLACKLIST.map(([name]) => name)
-  const same = docWords.length === codeWords.length && docWords.every(w => codeWords.includes(w))
-  if (same) ok('T3. 文档机械面词表与代码 BLACKLIST 逐词相等（清单只有一份）', codeWords.join(' / '))
-  else bad('T3. 措辞黑名单两处各写一份（已漂移）', `docs=[${docWords.join(',')}] code=[${codeWords.join(',')}]`)
+  // 词表条目 = 纯词形（中文 / 字母 / 空格）；把同段里的命令路径（`scripts/triage-check.mjs`）剔掉。
+  return [...block.join('\n').matchAll(/`([^`]+)`/g)].map(m => m[1]).filter(w => /^[\u4e00-\u9fa5A-Za-z\s]+$/.test(w))
+}
+{
+  const docMachine = docList('**机械面**')
+  const codeMachine = BLACKLIST.map(([name]) => name)
+  const sameMachine = docMachine.length === codeMachine.length && docMachine.every(w => codeMachine.includes(w))
+  if (sameMachine) ok('T3. 文档机械面词表与代码 BLACKLIST 逐词相等（清单只有一份）', codeMachine.join(' / '))
+  else bad('T3. 措辞黑名单两处各写一份（已漂移）', `docs=[${docMachine.join(',')}] code=[${codeMachine.join(',')}]`)
+  const docPending = docList('**RFA 互斥面**')
+  const codePending = PENDING_DECISION.map(([name]) => name)
+  const samePending = docPending.length === codePending.length && docPending.every(w => codePending.includes(w))
+  if (samePending) ok('T3b. 文档 RFA 互斥面词表与代码 PENDING_DECISION 逐词相等', codePending.join(' / '))
+  else bad('T3b. RFA 互斥面两处各写一份（已漂移）', `docs=[${docPending.join(',')}] code=[${codePending.join(',')}]`)
   if (HUMAN_JUDGED.length > 0 && DOC.includes('人判面')) ok('T4. 判不了的那一半被**显式声明**为人判面（不装成覆盖）', HUMAN_JUDGED.join(' / '))
   else bad('T4. 人判面声明缺失', `HUMAN_JUDGED=${HUMAN_JUDGED.length}`)
+}
+
+// ── T9: 模型真读到的两份正文**只指向、不复制** ────────────────────────────────
+// 第 1 轮复核抓到的真缺陷：正文与 minimal 各自复制了一份黑名单，且**已经漂移**
+//（正文缺「时微调」、minimal 缺「酌情 / 时微调」），而 T3 只钉了文档↔代码。这里把
+// 另外两张脸也钉死：它们一个词都不许出现 —— 复制一份就红，逼着改单源那份。
+{
+  const leakedBy = {}
+  for (const [name, text] of Object.entries(MODEL_TEXTS)) {
+    const leaked = BLACKLIST.map(([word]) => word).filter(word => text.includes(word))
+    if (leaked.length > 0) leakedBy[name] = leaked
+  }
+  const names = Object.keys(leakedBy)
+  if (names.length === 0) ok('T9. 正文与 minimal 不复制措辞黑名单（只指向单源）', `${Object.keys(MODEL_TEXTS).length} 份文本 / ${BLACKLIST.length} 词均未出现`)
+  else bad('T9. 措辞黑名单又被复制进正文（复制即漂移）', names.map(n => `${n}: ${leakedBy[n].join('/')}`).join(' | '))
 }
 
 // ── T5: 不是"全红判据" —— 干净票面 / 非 RFA 票面必须绿 ───────────────────────
@@ -136,4 +179,4 @@ preset.yml（单份显示元数据）按新形态拆分或收敛。
   else bad('T8. 渲染面与判据脱节', JSON.stringify({ green: green.slice(0, 120), red: red.slice(0, 120) }))
 }
 
-report('TRIAGE-CHECK VERIFY (T1–T8)')
+report('TRIAGE-CHECK VERIFY (T1–T9)')

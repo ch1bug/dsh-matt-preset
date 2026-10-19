@@ -256,6 +256,21 @@ if (ENFORCER_MOD !== null && ENFORCER_MOD.RETRO_TRIGGER?.push?.words?.includes('
     `push=${JSON.stringify(ENFORCER_MOD.RETRO_TRIGGER.push.words)} batchDeclare=${ENFORCER_MOD.RETRO_TRIGGER.batchDeclare.words.length} 词`)
 else bad('C2e. 触发面形状漂移', JSON.stringify(ENFORCER_MOD?.RETRO_TRIGGER ?? null))
 
+// ── C2g: 注入文案与新口径一致（#128 AC5 的守卫面）──────────────────────────
+// 正文规则要落进 reminder：不落 = 模型在最需要的那一刻看不到它。断言**源文本**里
+// 两处既有注入都带 #128 的措辞（批宣告面三件套 + 建票面回读不变量）。
+// 第 1 轮两轴复核实测：删掉这些句子，verify-enforcer 与本用例当时都不红（D10 类）。
+const INJECTION_PHRASES = [
+  ['批宣告面：关票确认方式', /closing-confirmation mode/],
+  ['批宣告面：预授权清单', /pre-authorization\s+list/],
+  ['批宣告面：收口记录', /close-out[\s\S]{0,40}?record/],
+  ['建票面：标签回读不变量', /labels back/],
+]
+const missingInjection = INJECTION_PHRASES.filter(([, re]) => !re.test(ENFORCER)).map(([n]) => n)
+if (missingInjection.length === 0)
+  ok('C2g. enforcer 注入文案带 #128 的新口径（批宣告三件套 + 建票回读）', `${INJECTION_PHRASES.length} 条`)
+else bad('C2g. 注入文案与新口径脱节', missingInjection.join(', '))
+
 // ── C3: `@@ batch-mode` 节含规则关键词 ──────────────────────────────────────
 /** 取 `@@ batch-mode` 到下一个 `@@ ` 标记之间的正文（下一个标记前不留空行）。 */
 function sectionText(text, id) {

@@ -23,6 +23,30 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 | `scheduled` | 已排入某个批次——**正交于五状态**，一张票可以同时是 `ready-for-agent` + `scheduled` |
 | `P0` | 阻断可用性，优先级高于普通前沿票（与 state 正交） |
 
+**描述与颜色统一**（`gh label` 的落点；**执行是外部动作**，改动 GitHub 标签前先报告）：
+
+| Label | 角色 | 描述（`--description`） | 颜色（`--color`） |
+| --- | --- | --- | --- |
+| `bug` | category | 缺陷 / 契约缺口 | `d73a4a` |
+| `enhancement` | category | 增强 / 新能力 | `a2eeef` |
+| `needs-triage` | state | 待分诊评估 | `d93f0b` |
+| `needs-info` | state | 等报告者补信息 | `fbca04` |
+| `ready-for-agent` | state | 可交给 AFK agent（无待决项、无 user-in-the-loop） | `0e8a16` |
+| `ready-for-human` | state | 需 human 接入（≠ 亲手写代码） | `1d76db` |
+| `wontfix` | state | 不予处理 | `6a737d` |
+| `scheduled` | 正交 | 已排入批次（不参与 state 判定） | `5319e7` |
+| `P0` | 正交 | 阻断可用性，优先于普通前沿票 | `b60205` |
+
+```sh
+# 新建（本仓尚不存在的两个正交标签）
+gh label create scheduled --description "已排入批次（正交于五状态）" --color 5319e7
+gh label create P0        --description "阻断可用性，优先于普通前沿票" --color b60205
+# 既有标签的描述 / 颜色统一（逐条照上表；改动前先报告 —— 外部动作）
+gh label edit needs-triage     --description "待分诊评估" --color d93f0b
+gh label edit ready-for-agent  --description "可交给 AFK agent（无待决项、无 user-in-the-loop）" --color 0e8a16
+gh label edit ready-for-human  --description "需 human 接入（≠ 亲手写代码）" --color 1d76db
+```
+
 **RFA 判据**（三条：无待决项 / 无 user-in-the-loop 步骤 / 验证可在无人环境完成）与
 **反向的存量复核**（现行 RFA 票逐票重判）在 **#101** ——本文件只管标签词汇映射，
 不复述那份判据清单（同一份清单只准写一份）。

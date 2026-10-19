@@ -8,10 +8,12 @@
  * 不是推诿）。**判不了的不装成判据**：这一半在 `docs/agents/issue-tracker.md` 里
  * 显式写成「人判面」，本脚本只判**无歧义**的那几个词。
  *
- * 判据面（两条，各自独立可红）：
+ * 判据面（三条，各自独立可红）：
  *   1. 措辞黑名单（机械面）：草案 / 可微调 / 时微调 / 视情况 / 酌情 / 待定 / TBD
- *   2. RFA 的「四类核对」声明（仅 --rfa 时要求）：票面必须写出四类冲突的处置，
- *      ①②③④ 逐类在场。缺任一类 → 不许打 RFA（`@`-label 是人的动作，本脚本只判
+ *   2. RFA 互斥面（仅 --rfa 时要求）：票面自认「要 human 决定 / 实现时再定」——
+ *      与 RFA 的定义（无任何待决项）直接互斥。非 RFA 票写这些是对的，故不判。
+ *   3. RFA 的「四类核对」声明（仅 --rfa 时要求）：票面必须写出四类冲突的处置，
+ *      ①②③④ 逐类在场。缺任一类 → 不许打 RFA（标签是人的动作，本脚本只判
  *      票面是否**够格**）。非 RFA 票不要求这一步。
  *
  * 用法：
@@ -42,6 +44,16 @@ export const BLACKLIST = [
 /** 显式声明「判不了、交人读」的那一半（写在这里是为了让它别悄悄变成"已覆盖"）。 */
 export const HUMAN_JUDGED = ['或（并列选项语境）', '建议（"要不要做"语境）', '挂在决策上的裸 ?']
 
+/** RFA 互斥面：票面**自认**还有待决项（"要 human 决定" / "实现时再定"）。
+ * 只在 `--rfa` 时判 —— 非 RFA（RFH）票写这些是**对的**，正是它该写的东西。
+ * 没有这一条时，一份「四类核对齐备 + 明写要 human 决定」的票面会绿着通过
+ * （第 1 轮 Spec 轴实测的反例）；而 RFA 的定义就是不待决，两者直接互斥。 */
+export const PENDING_DECISION = [
+  ['要 human 决定', /(要|需|由)\s*human\s*决定/],
+  ['human 拍板', /human\s*拍板/],
+  ['实现时再定', /实现时再(定|问)|到时再(定|问)/],
+]
+
 /** 四类冲突（#102 的 ①–④；票面里用圈号或类名写出来都算）。 */
 export const CONFLICT_FACES = [
   ['① 票面内部', /①|票面内部/],
@@ -60,9 +72,11 @@ export function checkTicketBody({ text, rfa = false }) {
   const findings = []
   const hits = BLACKLIST.filter(([, re]) => re.test(body)).map(([name]) => name)
   if (hits.length > 0) findings.push(`措辞黑名单命中：${hits.join(' / ')}（= 有一类冲突没读，推给下一会话）`)
+  const pending = rfa ? PENDING_DECISION.filter(([, re]) => re.test(body)).map(([name]) => name) : []
+  if (pending.length > 0) findings.push(`标了 RFA 却自认还有待决项：${pending.join(' / ')}（RFA 的定义就是不待决）`)
   const missingFaces = rfa ? CONFLICT_FACES.filter(([, re]) => !re.test(body)).map(([name]) => name) : []
   if (missingFaces.length > 0) findings.push(`标了 RFA 但四类核对缺：${missingFaces.join(' / ')}`)
-  return { pass: findings.length === 0, findings, missingFaces }
+  return { pass: findings.length === 0, findings, missingFaces, pending }
 }
 
 /** 结果 → 中文读数行（CLI 与夹具自检共用一份，避免"两处各写一份"）。 */
@@ -70,7 +84,7 @@ export function render({ pass, findings, missingFaces }, { rfa = false } = {}) {
   const lines = []
   if (pass) {
     lines.push(`  ✓ 措辞黑名单：无命中（机械面 ${BLACKLIST.length} 词；人判面 ${HUMAN_JUDGED.length} 项不在此判）`)
-    if (rfa) lines.push(`  ✓ RFA 四类核对：${CONFLICT_FACES.length} 类逐类在场`)
+    if (rfa) lines.push(`  ✓ RFA 面：四类核对 ${CONFLICT_FACES.length} 类逐类在场；无待决项自认（${PENDING_DECISION.length} 条）`)
   } else {
     for (const finding of findings) lines.push(`  ✗ ${finding}`)
     if (missingFaces.length > 0) {

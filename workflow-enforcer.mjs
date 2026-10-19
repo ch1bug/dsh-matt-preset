@@ -384,6 +384,12 @@ export const HOME_DELETE_TRIGGER = {
  *     batch-close nudge);
  *   - lane — which lane the ticket ran in (D38);
  *   - 后继票 — the successor the AUTO-HANDOFF nudge reads;
+ *   - 关票确认方式 / 预授权清单 / 收口记录 — the three #128 faces the declaration
+ *     reminder asks for: WHICH confirmation mode the batch runs on (a/b/c, and
+ *     the loud line when the declaration names none), WHAT the declaration
+ *     authorizes (write scope / create-only tickets / closing / one push), and
+ *     the close-out read taken BEFORE declaring (classification + same-family
+ *     merges + done-but-unclosed dropped);
  *   - `retro:` — the batch-end retro completion marker (#71).
  * Written by the AGENT (workflow-body rule), never by this plugin: the enforcer
  * is reminder-only and writes no file. */

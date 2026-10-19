@@ -289,6 +289,13 @@ else bad('V12. create nudge', v12.slice(-240))
 const v12b = await render()
 if (!v12b.includes('New ticket created')) ok('V12b. create nudge consumed after firing (no repeat)')
 else bad('V12b. create nudge consumed', v12b.slice(-160))
+// V12c (#128): the SAME nudge carries the label read-back invariant — exactly one
+// category + exactly one state. Guarded because docs/workflow-enforcer.md claims
+// it, and an unguarded sentence is deletable while every test stays green
+// (the D10 class this repo already registered).
+if (v12.includes('labels back') && v12.includes('one category') && v12.includes('one state'))
+  ok('V12c. the create nudge carries the label read-back invariant (#128)')
+else bad('V12c. read-back invariant missing from the create nudge', v12.slice(-240))
 
 // V13: the baseline carries the routine-actions whitelist — docker compose up,
 // cargo build, local commit, read-only queries are NOT external actions and

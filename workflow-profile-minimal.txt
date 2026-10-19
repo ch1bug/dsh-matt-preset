@@ -45,7 +45,9 @@ BATCH MODE — only when the human declares a batch; never on by default.
 - CONFLICT ZERO before labelling RFA: ACs consistent; the symptom re-measured
   on HEAD; the docs the ticket cites read (`git grep`) and judged still-true or
   superseded; duplicates / dependency direction / batch overlap checked. No
-  wording that pushes a decision forward (草案 / 可微调 / 视情况 / 待定 / TBD).
+  wording that pushes a decision forward, and no line admitting the ticket still
+  needs a human decision (list + matcher: `docs/agents/issue-tracker.md` /
+  `scripts/triage-check.mjs`).
 - PRE-AUTHORIZATION LIST (what a declaration licenses): the write scope; create
   tickets (never close in-batch, read the labels back — one category + one
   state); closing per the mode chosen at declaration (default: per-ticket

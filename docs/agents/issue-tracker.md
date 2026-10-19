@@ -50,8 +50,8 @@ gh issue view <n> --json labels --jq '[.labels[].name]'
 `frontier`、`gh issue list --label`、批内盘点都读不到它。本仓 #126 / #127 就是这样建出来的
 （只有 `bug`、无 state）；邻仓实测一次会话连建 4 张票**全漏 state**，一张都进不了面。
 
-`scheduled`（已排入批次）与 `P0`（阻断可用性）**正交于**五状态：`scheduled` **不参与**
-「恰一个 state」判定，`P0` 只调优先级。术语表见 `docs/agents/triage-labels.md`。
+正交标签 `scheduled` / `P0` 的存在与判定口径（含「不参与恰一个 state」）**只在**
+`docs/agents/triage-labels.md` ——本节不复述（同一份口径只准写一份）。
 
 ## 分诊产出前置项（冲突归零）
 
@@ -75,8 +75,15 @@ gh issue view <n> --json labels --jq '[.labels[].name]'
 
 - **机械面**（`scripts/triage-check.mjs` 会红）：`草案` / `可微调` / `时微调` / `视情况` /
   `酌情` / `待定` / `TBD`。
+- **RFA 互斥面**（标了 RFA 时出现即红）：`要 human 决定` / `human 拍板` / `实现时再定`
+  —— 这三句是「还有待决项」的自认，而 RFA 的定义就是不待决。非 RFA 票写它们是对的，
+  所以只在 `--rfa` 时判。
 - **人判面**（工具判不了，**如实声明**不装成守卫）：`或`（并列选项语境）、`建议`（"要不要做"
   语境）、挂在决策上的裸 `?`。
+
+**这份清单只有两处**：判据（`scripts/triage-check.mjs` 的 `BLACKLIST` / `PENDING_DECISION`）
+与本节（口径），由 `tests/verify-triage-check.mjs` 的 T3 **逐词钉住**。正文与 minimal 档位
+**只指向、不复制**——T9 断言那两份模型真读到的文本里一个词都不出现（复制一份就会红）。
 
 用法：`node scripts/triage-check.mjs <body-file | ->`（读票面正文；`--rfa` 时额外要求
 「四类核对」声明在场）。**票面在 GitHub，套件不联网核**（D15）：这个脚本由分诊会话**手动**跑，
@@ -101,7 +108,8 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
   但边仍在（看 `total_blocked_by`）。2026-10-16 曾据此把"已满足的历史边"误判成"缺边"。
 - 正文里的 `## Blocked by` 段只是叙述，会过期（#61 曾正文写 `None.` 而边是 `← #59`）。
   改阻塞关系 = 改**边**，正文顺手对齐。
-- **已 DONE 但未关的票仍算 open**：frontier 会把它们算进可开工（实测 28 vs 真实 25）。
+- **已 DONE 但未关的票仍算 open**：frontier 会把它们算进可开工（B 批读数 2026-10-19：
+  28 vs 真实 25 —— 再引用前按 `gh issue list --state open` 重测，读数带命令与时点）。
   排批前先按 `docs/batch-state.md` 的「收口记录」把它们剔掉——否则排队数字永远虚高。
 - `gh issue view <n> --json blockedBy` **读空数组（假）**：2026-10-17 实测 #57 / #58 / #59 / #60 全返回 `[]`，
   同一时刻 REST `.../dependencies/blocked_by` 有值（`#59 ← [56,57,58]`）。查边一律走上面那条 REST 命令——
