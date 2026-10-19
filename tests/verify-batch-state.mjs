@@ -43,6 +43,7 @@
  *            同时钉**文档同口径句**「票数 **> 5** 才喊」（阈值在代码与 docs 两处载体上，
  *            单边漂移在第 1 轮复核里无人守 —— D6）
  *   C9f      护栏**发出去的那一面**：读数必须在场、**入口形状只收 `{done,total}`**（裸笔数被拒）、
+ *            **读数等于本轮 `parseTickets(LIVE)` 的结果**（挡"同形状重贴标签"）、
  *            `fired == overGuardrail(done)` 自洽 —— 整块被删 / 调用点改拿笔数去喊，都在
  *            **任何活文件状态**下变红（不靠"此刻恰好 5 票"那种数据巧合）
  *
@@ -369,8 +370,8 @@ if (PERSONA_FIXTURE === null) {
 
 // ── C9: 活文件「未推送清单」机械对账（#115；**只报不阻断**）──────────────────
 // 为什么存在：#77 / #113 / #48 三次把「未推送清单」手抄错，而**批末 push 的输入**读它
-// ——取错命令会把 5 笔读成 1 笔，**恰好漏报且不报警**。（#119 起它**不再**喂护栏：
-// 护栏读**票数**，见下方 C9-guardrail —— 笔 ≠ 票，别混着比。）
+// ——取错命令会把 5 笔读成 1 笔，**恰好漏报**（C9-live 只能 ⚠ 只报不阻断，于是错数会跟着 push 走）。
+// （#119 起它**不再**喂护栏：护栏读**票数**，见下方 C9-guardrail —— 笔 ≠ 票，别混着比。）
 // C1–C8 守的全是**仓内载体**（模板/文案/正文），活文件 `.scratch/batch-state.md` 从未被对账。
 //
 // 口径（三条，照票面 #115 的 AC）：
@@ -488,7 +489,9 @@ const overGuardrail = (tickets) => tickets > 5
  *  故入口只接受 `parseTickets()` 的成功返回形状 `{ done, total }`；喂裸 number（笔数）、
  *  字符串或别的东西 → `{ status: 'bad-input' }`，调用方**响亮 ✗**。
  *  为什么不写成"宽容地取一个数"：本票的病就是**笔数被当票数用**，一个能接受裸 number 的
- *  入口等于把这个错法请回来；形状判据让"接错量纲"从**巧合**变成**构造上不可能**。 */
+ *  入口等于把这个错法请回来 —— 形状门把"**裸笔数**"这条路封死。
+ *  ⚠ 它挡不住"同形状重贴标签"（`{done: 笔数, total: 笔数}`）；那一条由 C9f 的**就地对照**
+ *  （发出去的 `done/total` 必须等于本轮 `parseTickets(LIVE)` 的结果）兜住，别把这个入口说成万能。 */
 const guardrailOf = (parsed) => {
   const wrongShape = typeof parsed?.done !== 'number' || typeof parsed?.total !== 'number'
   return wrongShape
@@ -496,8 +499,10 @@ const guardrailOf = (parsed) => {
     : { status: 'ok', done: parsed.done, total: parsed.total, fired: overGuardrail(parsed.done) }
 }
 
-/** 本轮护栏读数 —— C9f 用它守两面：读数**必须在场**、**输入形状合法**、**决策只由票数决定**。 */
+/** 本轮护栏读数 —— C9f 用它守三面：读数**必须在场**、**入口形状合法**、**数字与活文件一致**。 */
 let guardrailReading = null
+/** 本轮从活文件解析出的票数（C9f 的就地对照基线：发出去的数字必须等于它）。 */
+let liveTickets = null
 /** 未推送**笔数**（C9-live 的实测值）。**只作展示，不参与护栏比较** —— #119 的核心。 */
 let unpushed = null
 
@@ -548,6 +553,7 @@ if (LIVE === null) {
   } else {
     const READING = guardrailOf(TICKETS)
     guardrailReading = READING
+    if (READING.status === 'ok') liveTickets = TICKETS
     if (READING.status !== 'ok') {
       // 形状不对 = 有人把**笔数**或别的量喂进了护栏入口 —— 这正是本票的原始错法，必须响亮。
       bad('C9-guardrail. 票数入口的形状（只接受解析出来的 `{done,total}`，**不接受裸笔数**）',
@@ -558,8 +564,9 @@ if (LIVE === null) {
       if (READING.fired) {
         warn('C9-guardrail. 已完成票数**超 5 票护栏**',
           `已完成 ${READING.done}/${READING.total} 票 > 5 票（两侧同为**票**）—— 按 @@ batch-mode：` +
-          `**暂停并报告**：5 是批的成员上限，到第 6 票说明**超出宣告上限 / 成员表漂了**；` +
-          `请 human 裁决（按 D31 (b) 收束并请求 push 检查点，或确认这是**显式扩员**）。` +
+          `**暂停并报告**：5 是批的成员上限（D32），到第 6 票是**违规形态**（批超出宣告上限 / 成员表漂了）；` +
+          `请 human 裁决：按 D31 (b) 收束并请求 push 检查点，或**拆批 / 修正成员表**` +
+          `（"确认继续跑 6 票的批"不是合法选项——D32 的上限要 human 明确改写批宣告才动）。` +
           `未推送 ${pen}${seamNote}（笔数只作展示，**不参与**本次比较）`)
       } else {
         // 5 票是正文 D31 的暂停门，而本闸按「超过 5 票」才喊 —— 恰在 5 票时把这条边界明说出来，
@@ -656,13 +663,18 @@ if (LIVE === null) {
 } else if (guardrailReading.status !== 'ok') {
   bad('C9f. 护栏读数的输入形状非法（可能被喂了**笔数**）',
     `本轮读数 ${JSON.stringify(guardrailReading)} —— 只接受解析出来的 {done,total}`)
+} else if (liveTickets !== null && (guardrailReading.done !== liveTickets.done || guardrailReading.total !== liveTickets.total)) {
+  // 形状门挡得住"裸笔数"，挡不住"同形状重贴标签"（`{done: 笔数, total: 笔数}`）——
+  // 这一条就地对照：**发出去的数字**必须等于本轮从活文件解析出来的票数。
+  bad('C9f. 护栏读数与活文件票数不一致（数字被改写了 / 被换成了别的量）',
+    `读数 ${JSON.stringify(guardrailReading)} vs parseTickets(LIVE) ${JSON.stringify(liveTickets)}`)
 } else if (guardrailReading.fired !== overGuardrail(guardrailReading.done)) {
   bad('C9f. 护栏决策与票数不符（决策可能被接到了**笔数**上）',
     `本轮读数 ${JSON.stringify(guardrailReading)} —— fired 必须是 overGuardrail(已完成票数) 的函数`)
 } else {
-  ok('C9f. 读数在场 + **输入形状只收票数** + 决策自洽',
-    `活文件 ${guardrailReading.done}/${guardrailReading.total} 票 → fired=${guardrailReading.fired}；` +
-    `fixture：${SHAPE_CASES.map(([n]) => n).join(' / ')}；裸 number/字符串被入口拒掉`)
+  ok('C9f. 读数在场 + **输入形状只收票数** + 数字与活文件一致 + 决策自洽',
+    `活文件 ${guardrailReading.done}/${guardrailReading.total} 票 → fired=${guardrailReading.fired}` +
+    `（== parseTickets(LIVE)）；fixture：${SHAPE_CASES.map(([n]) => n).join(' / ')}；裸 number/字符串被入口拒掉`)
 }
 
 // ── C9b: 计数机制的**机械演示夹具**（#115 的非空洞硬要求 + D15 的结构性防线）────────
