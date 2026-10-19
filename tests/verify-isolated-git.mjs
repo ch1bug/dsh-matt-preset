@@ -24,7 +24,8 @@
  *        ② 不带挂具（原样继承）→ 调用方仓 `core.bare` **被写成 true**（这条必须真红才说明
  *           挂具是承重的 —— 与 R3 的三态表同一种"把机制变成可跑的事实"手法）。
  *   I2 **结构（#125 起是白名单/默认拒绝）**：扫描 `tests/*.mjs`，凡**碰 git** 的用例必须
- *      ① 走挂具（`import` 挂具），或 ② 在 `REGISTRY` 里**显式登记**（只读 / 债务）；两者都不是 ⇒ 红。
+ *      ① 走挂具（**代码面** import 挂具**且**真调用 `fixtureEnv`/`gitIn` —— 只写 import 不算），
+ *      或 ② 在 `REGISTRY` 里**显式登记**（只读 / 债务）；两者都不是 ⇒ 红。
  *      #125 换形态的理由（旧形态是"枚举自建仓写法"、只认带引号的 `init`）写在 I2 节头 ——
  *      **别退回加宽正则**（D15：自建仓的写法是开放集，正则永远差一条）。
  *   I3 **挂具自检**：`fixtureEnv()` 真的删掉了全部继承 `GIT_*`（含 `CALLER_GIT_VARS` 全表），
@@ -155,6 +156,7 @@ try {
 }
 
 // ══ I2: 结构断言 —— **默认拒绝**：碰 git ⇒ 走挂具或显式登记（#125 替换 #110 的"枚举自建仓写法"）════════
+//
 // ── 为什么换形态（D15；**后来者请先读这段，别退回加宽正则**）──────────────────────────
 // #110 立的 I2 判据是 `CREATES_REPO = /(?:['"`]init['"`])/` —— 用「`init` 作为**带引号的**
 // git 子命令出现」来认「自建仓的用例」。这个**方向**是错的（#125 的实测与替换）：
@@ -165,36 +167,47 @@ try {
 //      自建仓的写法是**开放集**（init / clone / worktree add / submodule / 将来任何一种），
 //      正则永远差一条，这是 D15 点名的无收敛军备竞赛。
 // ⇒ 新形态是**白名单/默认拒绝**：判据不再猜"用例怎么建仓"，而是要求用例**自己声明**分类：
-//   (a) 走挂具（`import { … } from './isolated-git.mjs'`）—— 默认允许，无需登记；
+//   (a) 走挂具（**代码面** import 挂具 **且** 真调用 `fixtureEnv`/`gitIn`）—— 默认允许；
 //   (b) 不碰 git（`touchesGit === false`）—— 不在观测面上；
 //   (c) 例外 —— 在 `REGISTRY` 里**逐文件显式登记**（只读调用方仓 / 已知债务）。**没有第四条路。**
 //   于是"新增一个自建仓用例但忘了挂具"默认落进「未登记」⇒ **红**。判据因此不再需要认出
-//   "建仓的写法"（开放集），只需要认出"碰没碰 git"（封闭集：见下面三个模式）。
+//   "建仓的写法"（开放集），只需要认出"碰没碰 git"（封闭集：`GIT_SPAWNERS`）。
+//
+// ── 第 1/2 轮复核堵掉的两个"一句话绕过"（记下来，别再退回）────────────────────────────
+//   · **尾注释伪装**：按行剥注释时，`spawnSync('git',['clone']) // fixtureEnv()` 会被判"走挂具"。
+//     ⇒ 改用 `codeOf()` 的**状态机**剥注释（字符串 / 模板串原样保留）。
+//   · **反引号 argv**：观测面认 `` `git` `` 而解析器只认单双引号时，``spawnSync(`git`, argv)``
+//     会从 I2b 的计数里消失 ⇒ 改用单一 `QUOTE` 常量给所有模式共用。
 //
 // ── 未覆盖面（AC6：如实写出，别让后来者以为它是全能的）────────────────────────────────
-//   ① 观测面 = **六种** `child_process` 调用器（`spawnSync` / `spawn` / `execFileSync` /
-//      `execFile` / `execSync` / `exec`）+ shell 串形态。**不覆盖**：(i) 把 git 可执行文件
-//      **动态解析**出来再 spawn（`spawnSync(join(bin,'git'))`）；(ii) **经 bash / heredoc 起的
-//      git**（`sandcastle-e2e.mjs` 的形态即此 —— 已登记为债务，I2c 逐条响亮列出）。
+//   ① 观测面 = **六种** `child_process` 调用器（`GIT_SPAWNERS`）+ shell 串形态。**不覆盖**：
+//      (i) 执行器 / 命令串**写成变量**（`execSync(cmd)` 而 `cmd = 'git clone …'`、`spawn(gitBin, …)`）
+//      —— 判据看的是**字面量**；(ii) 把 git 路径**动态解析**出来再 spawn（`spawnSync(join(bin,'git'))`）；
+//      (iii) **经 bash / heredoc 起的 git**（`sandcastle-e2e.mjs` 的形态即此 —— 已登记债务，I2c 响亮列出）。
 //   ② `REGISTRY` 是**人写的**白名单：只读登记若用到 `READ_ONLY_SUBCOMMANDS` 之外的子命令
 //      ⇒ 红（默认拒绝），必须人来扩白名单并写理由。它不会静默放过，但也不会自己发现新用法。
 //   ③ `readOnly` 只核对**字面** argv：**非字面** argv（`spawnSync('git', argv)` / `[...spread]`）
 //      记为「不可解析」⇒ 红 —— I2b 用"调用点数 − 字面数组数"算它，不靠"看上去有没有"。
-//   ④ `debt` 的票号只写在 `why` 字符串里，套件**不联网**核它是否仍 OPEN（离线套件不破坏
-//      离线性）——「票关了但债没修」这一面靠人复核，属**显式未覆盖**。
-//   ⑤ 本判据是**写法面**的结构锁（抓"代码长什么样"），不是运行时防线 —— 真正的机制防线
-//      是 I1（挂具坏了 I1b 直接红）。故以上各点一律选「响亮失败」而非「静默放过」。
-/** 观测面 = **这六种** `child_process` 调用器（同步 / 异步 / 文件三种 × `Sync` 与否）。**只此一份
- *  清单**：I2b 的字面 argv 解析器也从它派生 —— 两处各写一份会漂（Standards 轴实测抓到过：
- *  观测面只认三个 `Sync` 而解析器认六个，于是 `spawn('git', ['clone'…])` 整份判 irrelevant、
- *  **静默假绿**，正是本票病灶的下一层）。 */
-const GIT_SPAWNERS = 'spawnSync|spawn|execFileSync|execFile|execSync|exec'
-const SPAWN_GIT = new RegExp(`(?:${GIT_SPAWNERS})\\(\\s*['"\`]git['"\`]`)
-/** 同一条通路的另一种拼法：把整条命令拼成 shell 串（`execSync('git clone …')`）。
- *  ⚠ 这是**观测面**的补全（"怎么调 git"这一封闭集里的又一种写法），不是"建仓写法"的枚举 ——
- *  它认的是"怎么调 git"，不是"用 git 做什么"（后者正是本票删掉的那条错路）。
- *  仍不覆盖「动态解析 git 路径」与「经 bash/heredoc 起的 git」（见未覆盖面①）。 */
-const SPAWN_GIT_SHELL = /(?:execSync|exec)\(\s*['"`][^'"`]*\bgit\s/
+//   ④ `debt` 的票号只写在 `why` 里（I2a 核"是非空字符串且**含 `#NN`**"，但套件**不联网**核它是否
+//      仍 OPEN）——「票关了但债没修」这一面靠人复核，属**显式未覆盖**。
+//   ⑤ **文件级判定**：同一文件里既有挂具 import 又有裸 spawn 时按"走挂具"放行（`classify` 是文件级）
+//      —— 存量边界，另立票；本判据只保证"整个文件没走挂具"这一面。
+//   ⑥ `codeOf()` 剥注释但不做语法分析：`if (false) fixtureEnv()` 这类**死代码**仍算"真调用"，
+//      属显式未覆盖（要判它得上 AST，代价远高于收益）。
+//   ⑦ 本判据是**写法面**的结构锁，不是运行时防线 —— 真正的机制防线是 I1（挂具坏了 I1b 直接红）。
+//      以上各点一律选「响亮失败」而非「静默放过」。
+/** `child_process` 调用器 —— **单一来源**：下面三个模式都从这张表派生（两处各写一份会漂：
+ *  Standards 轴实测抓到过"观测面只认三个 `Sync` 而解析器认六个" ⇒ 异步调用静默绿）。 */
+const GIT_SPAWNERS = ['spawnSync', 'spawn', 'execFileSync', 'execFile', 'execSync', 'exec']
+/** 能接 shell 命令串的两种 —— **从同一张表筛**，不另写一份（第 2 轮复核的判断项）。 */
+const SHELL_SPAWNERS = GIT_SPAWNERS.filter(n => n === 'execSync' || n === 'exec')
+/** 引号集 —— **也单一来源**：观测面认反引号而解析器只认单双引号时，``spawnSync(`git`, argv)``
+ *  会从 I2b 的计数里消失（第 2 轮复核实测）。 */
+const QUOTE = `['"\`]`
+const anyOf = (list) => `(?:${list.join('|')})`
+const SPAWN_GIT = new RegExp(`${anyOf(GIT_SPAWNERS)}\\(\\s*${QUOTE}git${QUOTE}`)
+/** shell 串形态：`execSync('git clone …')`。仍不覆盖「变量化命令串」（见未覆盖面①(i)）。 */
+const SPAWN_GIT_SHELL = new RegExp(`${anyOf(SHELL_SPAWNERS)}\\(\\s*${QUOTE}[^'"\`]*\\bgit\\s`)
 /** 走挂具的调用形态：`gitIn(...)`（挂具导出的 `git -C` 调用器）。
  *  ⚠ **为什么它也算观测信号**（#110 第 1 轮实测的反向盲区）：初版只用「直接 spawn git」认用例，
  *  于是**改用挂具的文件反而掉出观测面** —— `verify-review-fixed-point.mjs` 接了挂具之后不再
@@ -203,16 +216,14 @@ const SPAWN_GIT_SHELL = /(?:execSync|exec)\(\s*['"`][^'"`]*\bgit\s/
 const USES_HARNESS_CALL = /\bgitIn\s*\(/
 const IMPORT_HARNESS = /from\s+['"]\.\/isolated-git\.mjs['"]/
 /** 挂具的**使用**信号：import 了却不用 ≠ 隔离（D11：只验 import 文本等于验措辞 —— 注释里写一行
- *  import、或 import 后从不调用，都能骗过"只认文本"的判据；Standards 轴镜像实测两种都判绿）。
- *  故必须"**代码面**真 import **且**真调用"才认作走挂具。 */
+ *  import、或 import 后从不调用，都能骗过"只认文本"的判据）。必须"**代码面**真 import **且**真调用"。 */
 const USES_FIXTURE = /\b(?:fixtureEnv|gitIn)\s*\(/
 /** 自写的 `GIT_*` 清理：`startsWith('GIT_')` 一族 —— 与登记册并行的**第二条禁忌**（走挂具的
  *  清理是唯一来源，"每处各写一份"正是 #110 的病灶）。
  *  ⚠ **声明边界（D13/D15 先例）**：这是**写法面**的锁，抓的是"代码长什么样"而不是"行为如何"。
  *  故它有两面：① 换体裁（抽函数、走 shell 变量、`filter`+`Object.fromEntries`）可绕 ——
- *  **显式声明不覆盖开放集**，真正的防线是 I1 的机制实测（挂具坏了 I1b 直接红）；
- *  ② 反过来它**可能假红**：任何用 `startsWith('GIT_')` 做别的事的源码（例如路径前缀判定）
- *  一旦出现在某个碰 git 的用例里，就会被判成"自写清理"。这个方向**宁可响亮**：
+ *  **显式声明不覆盖开放集**，真正的防线是 I1 的机制实测；② 反过来它**可能假红**：任何用
+ *  `startsWith('GIT_')` 做别的事的源码（例如路径前缀判定）会被判成"自写清理"。这个方向**宁可响亮**：
  *  它只会让人多看一眼并写一句豁免说明，不会静默放过真问题（对比 #108 R7 的同类声明）。 */
 const HANDROLLED_CLEAN = /startsWith\(\s*['"]GIT_['"]\s*\)/
 
@@ -225,14 +236,14 @@ const READ_ONLY_SUBCOMMANDS = new Set([
 ])
 
 /**
- * 例外登记册 —— **I2 的唯一放行通道**。新增一条 = 一次**显式决定**（必须写 `why`，由 I2a 校验）。
+ * 例外登记册 —— **I2 的唯一放行通道**。新增一条 = 一次**显式决定**（必须写 `why`，I2a 校验；
+ * `debt` 的 `why` 还必须含票号 `#NN`）。
  *   `readOnly` —— 只用 git **读调用方仓自己**、不建仓。断言：它的**字面** argv 子命令全在
  *                `READ_ONLY_SUBCOMMANDS` 里；核不到字面调用 / argv 不可解析 ⇒ 红（默认拒绝）。
  *                ⇒ brief 那句「登记在册的文件确实没有自建仓」**只对 readOnly 成立，且是被断言出来的**。
  *   `debt`     —— 已知**未走挂具**的债务，**显式豁免**（不是"证明它没有自建仓"）。断言：它**确实仍
  *                未走挂具**（修好后本条会红 → 逼人摘牌），并在读数里逐条响亮列出（I2c）。
- *                登记债务不是"允许"，是**记账**：让缺口可见、有票号（写在 `why` 里）、有摘牌条件，
- *                而不是像旧判据那样**假装它不存在**。
+ *                登记债务不是"允许"，是**记账**：让缺口可见、有票号（写在 `why` 里）、有摘牌条件。
  */
 const REGISTRY = {
   'verify-doc-pointers.mjs': {
@@ -252,9 +263,43 @@ const REGISTRY = {
   },
 }
 
-/** 剥掉注释行，只留**代码面** —— I2 与 I3c 共用（同一判据形态两处各写一份是重复；
- *  且"注释里叙述这套做法"（本文件、brief、配方头注都会提）不该被自己拦下）。 */
-const codeLines = (src) => src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+/**
+ * 把源码里的**注释**剥掉、**字符串与模板串原样保留** —— 这是 I2 的判据面（注释里的 `'git'` /
+ * `fixtureEnv()` 不是代码）。**必须走状态机**，不能按行正则：`//` 会出现在字符串里（URL），
+ * 按行剥会把字符串后半截的**真调用**一起剥掉（假阴性，D11 的另一个方向）；而只剥**行首**注释
+ * 又会被"行尾注释写一句 `fixtureEnv()`"骗过（第 2 轮复核的实测绕过）。
+ */
+function codeOf(src) {
+  let out = ''
+  let i = 0
+  while (i < src.length) {
+    const c = src[i]
+    const d = src[i + 1]
+    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') i++; continue }
+    if (c === '/' && d === '*') {
+      i += 2
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const q = c
+      out += c
+      i++
+      while (i < src.length) {
+        const ch = src[i]
+        out += ch
+        if (ch === '\\') { i++; if (i < src.length) { out += src[i]; i++ } continue }
+        i++
+        if (ch === q) break
+      }
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
 
 /** 观测面：这份代码**碰没碰 git**（封闭问题）。
  *  认的是"怎么调 git"（三种可识别写法），**不是**"用 git 做什么" —— 后者是开放集，正是
@@ -271,7 +316,7 @@ const touchesGit = (code) =>
  * @returns {'irrelevant'|'harness'|'registered'|'offender'}
  */
 function classify(name, src, registry = REGISTRY) {
-  const code = codeLines(src)
+  const code = codeOf(src)
   if (!touchesGit(code)) return 'irrelevant'
   // 走挂具 = **代码面** import **且**真调用（D11：只看 import 文本会被注释或死 import 骗过）
   if (IMPORT_HARNESS.test(code) && USES_FIXTURE.test(code)) return 'harness'
@@ -279,42 +324,110 @@ function classify(name, src, registry = REGISTRY) {
   return 'offender'
 }
 
-/** 登记册的**纯**一致性（可自检）：文件在不在 / 类目合不合法 / 有没有写 `why`。
- *  拆成纯函数是为了让 I2e 能对**合成**登记册断言（自检不依赖真登记册的内容）。 */
-function registryAudit(registry, fileList) {
+/** 登记册的**纯**问题集（文件在不在 / 类目合不合法 / 有没有写 `why` / debt 有没有票号）。
+ *  拆成纯函数是为了让 I2e 能用**合成**登记册钉住每条红路径（不依赖真登记册的内容）。 */
+function registryProblems(registry, fileList) {
   const names = Object.keys(registry)
+  const isStr = (v) => typeof v === 'string'
   return {
     missing: names.filter(f => !fileList.includes(f)),
     badKind: names.filter(f => !['readOnly', 'debt'].includes(registry[f].kind)),
-    // 「新增一条必须写 why」= 登记是**显式决定**：没写理由的登记拒绝入库
-    noWhy: names.filter(f => typeof registry[f].why !== 'string' || registry[f].why.trim() === ''),
+    noWhy: names.filter(f => !isStr(registry[f].why) || registry[f].why.trim() === ''),
+    debtNoTicket: names.filter(f => registry[f].kind === 'debt' && !/#\d+/.test(String(registry[f].why ?? ''))),
+  }
+}
+
+/**
+ * I2a 的判定（**纯函数**：分类器可注入 ⇒ I2e 能用合成登记册/桩分类器钉住每条红路径）。
+ * 第 2 轮复核指出"只测 helper 不测分支 ⇒ 删掉分支套件仍绿"，故把**整条判定**收进这里。
+ * @param {Record<string, {kind?: string, why?: string}>} registry
+ * @param {string[]} fileList
+ * @param {(name: string) => 'irrelevant'|'harness'|'registered'|'offender'} kindOf
+ */
+function registryReport(registry, fileList, kindOf) {
+  const names = Object.keys(registry)
+  const { missing, badKind, noWhy, debtNoTicket } = registryProblems(registry, fileList)
+  const invisible = names.filter(f => fileList.includes(f) && kindOf(f) === 'irrelevant')
+  const masked = names.filter(f => fileList.includes(f) && kindOf(f) === 'harness')
+  const problems = []
+  if (missing.length > 0) {
+    problems.push(`登记在册但文件**不存在**：${missing.join(', ')} —— 登记 ≠ 永久豁免：要么恢复文件，要么摘掉这条登记`)
+  }
+  if (invisible.length > 0) {
+    problems.push(`登记在册但判据**看不见它碰 git**：${invisible.join(', ')} —— 要么该文件的 git 用法已移除（摘牌），要么观测面失效`)
+  }
+  if (masked.length > 0) {
+    problems.push(`已走挂具却仍在登记册：${masked.join(', ')} —— 该文件已合规，摘掉这条登记`)
+  }
+  if (badKind.length > 0) {
+    problems.push(`登记类目只能是 readOnly / debt：${badKind.map(f => `${f}=${registry[f].kind}`).join(', ')}`)
+  }
+  if (noWhy.length > 0) {
+    problems.push(`缺 why：${noWhy.join(', ')} —— 补一句"为什么允许它不走挂具"`)
+  }
+  if (debtNoTicket.length > 0) {
+    problems.push(`debt 的 why 必须含票号（#NN）：${debtNoTicket.join(', ')} —— 否则"修好后摘牌"没有去处`)
+  }
+  return {
+    ok: problems.length === 0,
+    problems,
+    total: names.length,
+    readOnly: names.filter(f => registry[f].kind === 'readOnly').length,
+    debt: names.filter(f => registry[f].kind === 'debt').length,
   }
 }
 
 /** 抽**字面** git argv 的首词（子命令）：`['ls-files']` → `ls-files`；`[...a]` → 不可解析。
- *  `readOnly` 登记靠它核"确实没有自建仓"—— 只读白名单之外的任何子命令都会被判红。
- *  ⚠ **不可解析的算法**（Standards/Spec 两轴都抓到过旧版）：`调用点数 − 字面数组数`。
- *  旧版只数"看起来像字面数组"的调用点，于是 `spawnSync('git', argv)`（数组变量）**既不计数也
- *  不判红** —— 一个 readOnly 文件用字面 `ls-files` 掩护一条动态 `init` 就能过。现在不猜：
- *  有调用点却不是字面数组 ⇒ 记 `unresolved` ⇒ I2b 红（默认拒绝）。
+ *  ⚠ **不可解析的算法**（两轴都抓到过旧版）：`调用点数 − 字面数组数`。旧版只数"看起来像字面
+ *  数组"的调用点，于是 `spawnSync('git', argv)`（数组变量）**既不计数也不判红** —— 一个
+ *  readOnly 文件用字面 `ls-files` 掩护一条动态 `init` 就能过。现在不猜：有调用点却不是字面
+ *  数组 ⇒ 记 `unresolved` ⇒ I2b 红。引号集与调用器表都从**单一来源**派生（含反引号）。
  *  @returns {{found: string[], unresolved: number}} */
 function literalGitSubcommands(code) {
-  const literal = new RegExp(`(?:${GIT_SPAWNERS})\\(\\s*['"]git['"]\\s*,\\s*\\[([^\\]]*)\\]`, 'g')
-  const callStart = new RegExp(`(?:${GIT_SPAWNERS})\\(\\s*['"]git['"]\\s*,`, 'g')
+  const literal = new RegExp(`${anyOf(GIT_SPAWNERS)}\\(\\s*${QUOTE}git${QUOTE}\\s*,\\s*\\[([^\\]]*)\\]`, 'g')
+  const callStart = new RegExp(`${anyOf(GIT_SPAWNERS)}\\(\\s*${QUOTE}git${QUOTE}\\s*,`, 'g')
   const found = []
   let literals = 0
   let unresolved = 0
   for (const m of code.matchAll(literal)) {
     literals++
     const first = m[1].split(',')[0].trim()
-    const lit = /^(['"])([^'"]*)\1$/.exec(first)
-    if (lit) found.push(lit[2]); else unresolved++   // `[...spread]` / 非字面首词
+    const lit = new RegExp(`^(${QUOTE})([^'"\`]*)\\1$`).exec(first)
+    if (lit) found.push(lit[2]); else unresolved++
   }
   unresolved += [...code.matchAll(callStart)].length - literals   // 有调用点但不是字面数组
   return { found, unresolved }
 }
 
+/**
+ * I2b 的判定（**纯函数**：reader 可注入 ⇒ I2e 能用合成源码钉住"不可解析 / 不在白名单 ⇒ 红"）。
+ * @param {string[]} names readOnly 登记的文件名
+ * @param {(name: string) => string|null} read 读源码；返回 `null` 表示文件不存在（跳过，由 I2a 报）
+ */
+function readOnlyReport(names, read) {
+  const problems = []
+  const okList = []
+  for (const file of names) {
+    const src = read(file)
+    if (src === null) continue
+    const { found, unresolved } = literalGitSubcommands(codeOf(src))
+    const uniq = [...new Set(found)]
+    const outOfList = uniq.filter(s => !READ_ONLY_SUBCOMMANDS.has(s))
+    if (uniq.length === 0 && unresolved === 0) {
+      problems.push(`${file}（核不到任何**字面** git 调用 ⇒ 无法证明只读，默认拒绝）`)
+    } else if (unresolved > 0) {
+      problems.push(`${file}（${unresolved} 处 argv 不可静态解析 ⇒ 无法证明只读，默认拒绝）`)
+    } else if (outOfList.length > 0) {
+      problems.push(`${file}（子命令不在只读白名单：${outOfList.join(', ')}）`)
+    } else {
+      okList.push(`${file}: ${uniq.join('/')}`)
+    }
+  }
+  return { problems, okList }
+}
+
 const files = readdirSync(TESTS).filter(f => f.endsWith('.mjs')).sort()
+const readSrc = (f) => readFileSync(join(TESTS, f), 'utf8')
 /** 读数面自检（防"扫描面失效 → 空扫描报绿"）：这些文件**必须**被认出来，否则判据本身坏了。
  *  ⚠ 名单**含 `verify-review-fixed-point.mjs`**（它走挂具、不直接 spawn git）——
  *  正是用来钉住"接挂具 ⇒ 掉出观测面"那个盲区不回退的反向自检（见 `USES_HARNESS_CALL` 的注）。 */
@@ -325,19 +438,20 @@ const MUST_MATCH = [
 const SKIP = new Set([
   'isolated-git.mjs',        // 挂具自己不是夹具用例
   'verify-isolated-git.mjs', // 本文件是**守卫**：它自己建仓（I1/I4 夹具），且是判据的持有者 ——
-                             // 不扫自己（自引用无意义）。它的机制面由 I1/I3 自己钉、观测面由
-                             // MUST_MATCH 钉；**I2a 只迭代 REGISTRY，并不覆盖本文件**（别读错）
+                             // 不扫自己（自引用无意义）。它自己的机制面由 I1/I3 自己钉；
+                             // **I2a 只迭代 REGISTRY、MUST_MATCH 也不含它** —— 这是**显式选择**，
+                             // 不是遗漏（别读成"它被别处覆盖了"）
 ])
 const matched = []
 const audit = []
 const offenders = []
 for (const file of files) {
   if (SKIP.has(file)) continue
-  const src = readFileSync(join(TESTS, file), 'utf8')
+  const src = readSrc(file)
   const kind = classify(file, src)
   if (kind === 'irrelevant') continue
   matched.push(file)
-  const handrolled = HANDROLLED_CLEAN.test(codeLines(src))
+  const handrolled = HANDROLLED_CLEAN.test(codeOf(src))
   const tag = kind === 'harness' ? '✓挂具'
     : kind === 'offender' ? '✗未登记'
     : REGISTRY[file].kind === 'debt' ? '⤼债务' : '✓登记(只读)'
@@ -349,58 +463,24 @@ for (const file of files) {
 const registryNames = Object.keys(REGISTRY)
 const readOnlyNames = registryNames.filter(f => REGISTRY[f].kind === 'readOnly')
 const debtNames = registryNames.filter(f => REGISTRY[f].kind === 'debt')
-// 纯函数面（missing / badKind / noWhy）走 registryAudit —— 与 I2e 的自检消费同一份实现
-const { missing: registryMissing, badKind: registryBadKind, noWhy: registryNoWhy } =
-  registryAudit(REGISTRY, files)
-const registryInvisible = registryNames.filter(f => files.includes(f) && !matched.includes(f))
-const registryMasked = registryNames.filter(f => files.includes(f) &&
-  classify(f, readFileSync(join(TESTS, f), 'utf8')) === 'harness')
-const readSrc = (f) => readFileSync(join(TESTS, f), 'utf8')
-if (registryMissing.length > 0) {
-  bad('I2a. 登记册与文件一一对应（登记在册的文件被删/改名 ⇒ 响亮）',
-    `登记在册但文件**不存在**：${registryMissing.join(', ')} —— ` +
-    '登记 ≠ 永久豁免：要么恢复文件，要么摘掉这条登记（留着就是名册在说谎）')
-} else if (registryInvisible.length > 0) {
-  bad('I2a. 每条登记都落在观测面上',
-    `登记在册但判据**看不见它碰 git**：${registryInvisible.join(', ')} —— ` +
-    '要么该文件的 git 用法已移除（摘牌），要么观测面失效（扫描面坏了，不报假绿）')
-} else if (registryMasked.length > 0) {
-  bad('I2a. 登记不得与「已走挂具」并存（避免名册变成永久豁免）',
-    `已走挂具却仍在登记册：${registryMasked.join(', ')} —— 该文件已合规，摘掉这条登记`)
-} else if (registryBadKind.length > 0) {
-  bad('I2a. 登记类目只能是 readOnly / debt', registryBadKind.map(f => `${f}=${REGISTRY[f].kind}`).join(', '))
-} else if (registryNoWhy.length > 0) {
-  bad('I2a. 每条登记必须写 `why`（登记 = 显式决定，不是无理由豁免）',
-    `缺 why：${registryNoWhy.join(', ')} —— 补一句"为什么允许它不走挂具"`)
+const REGISTRY_REPORT = registryReport(REGISTRY, files, (n) => classify(n, readSrc(n)))
+if (!REGISTRY_REPORT.ok) {
+  bad('I2a. 登记册一致（文件在 / 在观测面 / 未走挂具 / 类目合法 / 有 why / debt 带票号）',
+    REGISTRY_REPORT.problems.join(' ｜ '))
 } else {
-  ok(`I2a. 登记册一致：${registryNames.length} 条登记逐条有文件、落在观测面上、且都未走挂具`,
-    `readOnly ${readOnlyNames.length} / debt ${debtNames.length} —— 删除或改名任何一条登记文件，本行即红`)
+  ok(`I2a. 登记册一致：${REGISTRY_REPORT.total} 条登记逐条有文件、落在观测面上、且都未走挂具`,
+    `readOnly ${REGISTRY_REPORT.readOnly} / debt ${REGISTRY_REPORT.debt} —— 删除或改名任何一条登记文件，本行即红`)
 }
 
 // ── I2b readOnly 登记的「确实没有自建仓」核对（只读子命令白名单，闭合集）───────────────
-const readOnlyOk = []
-const readOnlyProblems = []
-for (const file of readOnlyNames) {
-  if (!files.includes(file)) continue
-  const { found, unresolved } = literalGitSubcommands(codeLines(readSrc(file)))
-  const uniq = [...new Set(found)]
-  const outOfList = uniq.filter(s => !READ_ONLY_SUBCOMMANDS.has(s))
-  if (uniq.length === 0 && unresolved === 0) {
-    readOnlyProblems.push(`${file}（核不到任何**字面** git 调用 ⇒ 无法证明只读，默认拒绝）`)
-  } else if (unresolved > 0) {
-    readOnlyProblems.push(`${file}（${unresolved} 处 argv 不可静态解析 ⇒ 无法证明只读，默认拒绝）`)
-  } else if (outOfList.length > 0) {
-    readOnlyProblems.push(`${file}（子命令不在只读白名单：${outOfList.join(', ')}）`)
-  } else {
-    readOnlyOk.push(`${file}: ${uniq.join('/')}`)
-  }
-}
-if (readOnlyProblems.length > 0) {
-  bad('I2b. readOnly 登记的文件**确实没有自建仓**（只读子命令白名单）', readOnlyProblems.join(' ｜ '))
+const READ_ONLY_REPORT = readOnlyReport(readOnlyNames, (f) => (files.includes(f) ? readSrc(f) : null))
+if (READ_ONLY_REPORT.problems.length > 0) {
+  bad('I2b. readOnly 登记的文件**确实没有自建仓**（只读子命令白名单）',
+    READ_ONLY_REPORT.problems.join(' ｜ '))
 } else {
-  const notChecked = readOnlyNames.length - readOnlyOk.length
-  ok(`I2b. readOnly 登记的 ${readOnlyOk.length} 个文件逐条核对：字面 argv 子命令全在只读白名单内`,
-    readOnlyOk.join(' ｜ ') +
+  const notChecked = readOnlyNames.length - READ_ONLY_REPORT.okList.length
+  ok(`I2b. readOnly 登记的 ${READ_ONLY_REPORT.okList.length} 个文件逐条核对：字面 argv 子命令全在只读白名单内`,
+    READ_ONLY_REPORT.okList.join(' ｜ ') +
     (notChecked > 0 ? `（另 ${notChecked} 条登记的文件不存在、未核 —— 见 I2a）` : ''))
 }
 
@@ -429,7 +509,7 @@ if (audit.length === 0 || missingProbe.length > 0) {
 // ── I2e 判据自检（**非空洞**，AC5）────────────────────────────────────────────────
 // 把判据本身当被测对象：构造违规 / 合规输入，逐条断言 `classify()` 的裁决。
 // **合成登记册**：自检不依赖真 `REGISTRY` 的内容（登记册会变，机制不该跟着变）。
-// 若有人把判据改回"只认 `init`"，前三条立刻红 —— 判据自带回归测试。
+// 若有人把判据改回"只认 `init`"，则除"不碰 git"外全部变红 —— 判据自带回归测试。
 const SYNTH_REGISTRY = { 'synthetic-readonly.mjs': { kind: 'readOnly', why: '自检用' } }
 const SELF_CASES = [
   ['clone 自建仓、未走挂具', "spawnSync('git', ['clone', 'src', 'dst'])", 'unregistered-clone.mjs', 'offender'],
@@ -442,6 +522,9 @@ const SELF_CASES = [
   ['走挂具（代码面 import + fixtureEnv 调用）', "import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b'], { env: fixtureEnv() })", 'with-harness.mjs', 'harness'],
   ['import 只写在**注释**里（不算走挂具）', "// import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b'])", 'comment-import.mjs', 'offender'],
   ['import 了但**从不调用**（不算走挂具）', "import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b'])", 'unused-import.mjs', 'offender'],
+  ['**行尾注释**伪装 fixtureEnv()（不算走挂具）', "import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b']) // fixtureEnv()", 'trailing-comment.mjs', 'offender'],
+  ['**块注释**伪装 fixtureEnv()（不算走挂具）', "import { fixtureEnv } from './isolated-git.mjs'\nspawnSync('git', ['clone', 'a', 'b']) /* fixtureEnv() */", 'block-comment.mjs', 'offender'],
+  ['字符串里的 `//` 不吞掉同行真调用', "const u = 'http://x'; spawnSync('git', ['clone', 'a', 'b'])", 'url-string.mjs', 'offender'],
   ['不碰 git', 'const x = 1', 'no-git.mjs', 'irrelevant'],
 ]
 const selfBad = []
@@ -455,48 +538,62 @@ if (selfBad.length > 0) {
   ok(`I2e. 判据自检：${SELF_CASES.length} 条合成输入的裁决全部符合预期`,
     SELF_CASES.map(([l, , , e]) => `${l}→${e}`).join(' ｜ '))
 }
-// 纯函数面自检：I2b 的"非字面 argv ⇒ 红"与 I2a 的"必须写 why"，各用**合成**输入钉一次
-// （只对真登记册跑 I2a/I2b 的话，这两个分支在现役数据下永远不触发 = 恒真守卫）。
+// 纯函数/整条判定自检：把 I2b 与 I2a 的**消费分支**也钉住（第 2 轮复核指出"只测 helper、
+// 删掉分支套件仍绿"—— 故这里测的是 registryReport / readOnlyReport 本身的裁决，不是 helper 字段）。
 const PURE_CASES = [
   ['字面 argv 可解析', literalGitSubcommands("execFileSync('git', ['ls-files'])"),
     (r) => r.found.includes('ls-files') && r.unresolved === 0],
-  ['非字面 argv（`git\', argv`）记为不可解析', literalGitSubcommands("spawnSync('git', argv)"),
+  ['非字面 argv 记为不可解析', literalGitSubcommands("spawnSync('git', argv)"),
+    (r) => r.found.length === 0 && r.unresolved === 1],
+  ['**反引号**调用的非字面 argv 也记为不可解析', literalGitSubcommands('spawnSync(`git`, argv)'),
     (r) => r.found.length === 0 && r.unresolved === 1],
   ['spread argv 记为不可解析', literalGitSubcommands("spawnSync('git', [...a])"),
     (r) => r.unresolved === 1],
-  ['登记缺 `why` 被拒', registryAudit({ 'x.mjs': { kind: 'readOnly' } }, ['x.mjs']),
-    (r) => r.noWhy.includes('x.mjs')],
-  ['登记类目非法被拒', registryAudit({ 'x.mjs': { kind: 'nope', why: 'y' } }, ['x.mjs']),
-    (r) => r.badKind.includes('x.mjs')],
-  ['登记文件不存在被拒', registryAudit({ 'gone.mjs': { kind: 'readOnly', why: 'y' } }, []),
-    (r) => r.missing.includes('gone.mjs')],
+  ['readOnly 动态 argv ⇒ 有问题', readOnlyReport(['x.mjs'], () => "spawnSync('git', argv)"),
+    (r) => r.problems.length === 1],
+  ['readOnly 子命令不在白名单 ⇒ 有问题', readOnlyReport(['x.mjs'], () => "execFileSync('git', ['clone', 'a'])"),
+    (r) => r.problems.length === 1],
+  ['readOnly 字面只读子命令 ⇒ 通过', readOnlyReport(['x.mjs'], () => "execFileSync('git', ['ls-files'])"),
+    (r) => r.problems.length === 0 && r.okList.length === 1],
+  ['登记缺 `why` ⇒ 不 ok', registryReport({ 'x.mjs': { kind: 'readOnly' } }, ['x.mjs'], () => 'registered'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('缺 why'))],
+  ['debt 的 why 不含票号 ⇒ 不 ok', registryReport({ 'x.mjs': { kind: 'debt', why: '没有票号' } }, ['x.mjs'], () => 'registered'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('票号'))],
+  ['debt 的 why 含 #NN ⇒ ok', registryReport({ 'x.mjs': { kind: 'debt', why: '#9 跟踪' } }, ['x.mjs'], () => 'registered'),
+    (r) => r.ok === true],
+  ['登记类目非法 ⇒ 不 ok', registryReport({ 'x.mjs': { kind: 'nope', why: 'y' } }, ['x.mjs'], () => 'registered'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('类目'))],
+  ['登记文件不存在 ⇒ 不 ok', registryReport({ 'gone.mjs': { kind: 'readOnly', why: 'y' } }, [], () => 'registered'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('不存在'))],
+  ['登记已走挂具 ⇒ 不 ok（逼摘牌）', registryReport({ 'x.mjs': { kind: 'readOnly', why: 'y' } }, ['x.mjs'], () => 'harness'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('已走挂具'))],
+  ['登记看不见碰 git ⇒ 不 ok', registryReport({ 'x.mjs': { kind: 'readOnly', why: 'y' } }, ['x.mjs'], () => 'irrelevant'),
+    (r) => r.ok === false && r.problems.some(p => p.includes('看不见'))],
 ]
 const pureBad = PURE_CASES.filter(([, input, holds]) => !holds(input))
 if (pureBad.length > 0) {
   bad(`I2e·纯函数自检（${PURE_CASES.length} 条）`, pureBad.map(([l]) => l).join(' ｜ '))
 } else {
-  ok(`I2e·纯函数自检：${PURE_CASES.length} 条（字面/非字面 argv、缺 why、非法类目、文件不存在）按预期判定`,
-    '非字面 argv ⇒ 不可解析 ⇒ I2b 红；登记无 why / 类目非法 / 文件不存在 ⇒ I2a 红')
+  ok(`I2e·纯函数自检：${PURE_CASES.length} 条按预期判定`,
+    '字面/非字面（含反引号）/spread argv ⇒ 不可解析；readOnly 三态；登记册六种红路径逐条可判')
 }
-// 与**旧判据**（#110 的"只认 init"）对照：前三条输入在旧判据下**判不出 offender**（假绿面），
-// 而本票的判据能判出（上面 I2e 主体逐条断言的就是这一点）。
-// ⚠ 本行只证明"旧判据漏、新判据不漏"；它**不**证明"有人把真判据改回去会长红" ——
-// 那由 I2e 主体承担（改回只认 init ⇒ 主体 9/10 条红，实测见 `.scratch/p125-nonhollow-B.log`）。
+// 与**旧判据**（#110 的"只认 init"）对照：前五条输入在旧判据下**判不出 offender**（假绿面），
+// 而本票的判据能判出（I2e 主体逐条断言）。⚠ 本行只证明"旧判据漏、新判据不漏"；"把真判据改回去
+// 会长红"由 I2e 主体承担（改回只认 init ⇒ 除"不碰 git"外全部红；扰动读数 .scratch/p125-nonhollow-B.log，
+// 按本仓"扰动证据落 .scratch、套件内由 I2e 承担回归"的惯例）。
 const OLD_CREATES_REPO = /(?:['"`]init['"`])/
 const oldVerdict = (src) => {
-  const code = codeLines(src)
+  const code = codeOf(src)
   return SPAWN_GIT.test(code) && OLD_CREATES_REPO.test(code)
 }
 const oldMissed = SELF_CASES.slice(0, 5).filter(([, src]) => !oldVerdict(src))
 if (oldMissed.length === 5) {
   ok('I2e·对照. 五条自建仓违规（clone / worktree / shell 串 / 异步 spawn / 异步 execFile）在**旧判据**下判不出 offender',
-    '旧判据漏掉的正是这五条 —— 加宽它只是把"下一个写法"往后推一格（D15）；"改回去会红"由 I2e 主体担保')
+    '旧判据漏掉的正是这五条 —— 加宽它只是把"下一个写法"往后推一格（D15）；"改回去会长红"由 I2e 主体担保')
 } else {
   bad('I2e·对照. 旧判据对照失效',
     `旧判据只漏了 ${oldMissed.length}/5 条 —— 自检输入或旧判据形态变了，复核本节点`)
 }
-
-
 
 // ══ I3: 挂具自检 —— 守卫别守着一个坏的挂具 ═══════════════════════════════════════
 {
@@ -523,11 +620,11 @@ if (oldMissed.length === 5) {
       bad('I3b. `fixtureEnv()` 把调用方给的覆盖项也清掉了', '顺序反了 —— 先清、再合')
     }
     // ③ `gitIn` 必须**用 `-C`** 而不是 `cwd:`（本机 startup 脚本族会把 cwd 静默复位）
-    // ⚠ 判据只看**代码行**：初版在整份源码上找 `cwd:`，实测被挂具自己注释里那句
-    //   "不要用 spawn 的 `cwd:`" 判红 —— 判据读的是**措辞**而不是行为（本仓 §3.1 的形态）。
-    //   剥掉注释行再匹配，与 R7 的"剥注释行"同法。
+    // ⚠ 判据只看**代码面**（`codeOf` 剥注释）：初版在整份源码上找 `cwd:`，实测被挂具自己注释里
+    //   那句"不要用 spawn 的 `cwd:`"判红 —— 判据读的是**措辞**而不是行为（本仓 §3.1 的形态）。
+    //   剥注释再匹配，与 R7 的"剥注释"同法；`codeOf` 是同一份实现（不另写一份剥法）。
     const hSrc = readFileSync(join(TESTS, 'isolated-git.mjs'), 'utf8')
-    const hCode = codeLines(hSrc)
+    const hCode = codeOf(hSrc)
     const usesC = /'git',\s*\[\s*'-C'/.test(hCode)
     const usesCwd = /cwd\s*:/.test(hCode)
     if (usesC && !usesCwd) {
