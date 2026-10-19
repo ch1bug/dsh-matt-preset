@@ -17,6 +17,7 @@ import { homedir, tmpdir, userInfo } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { KINDS, denylistPath, denylistTokens, identityTokens, scanRepo, scanTrackerItems } from '../scripts/privacy-scan.mjs'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const results = []
@@ -24,11 +25,16 @@ const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' —
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
 const fixtures = []
-/** 造一个真 git 仓库夹具（一次提交；可选分支名/身份/消息）。 */
+/** 造一个真 git 仓库夹具（一次提交；可选分支名/身份/消息）。
+ *  ⚠ git 调用走共享挂具 `tests/isolated-git.mjs`（#110）：本函数**自建仓**，若原样继承钩子导出的
+ *  `GIT_DIR`，那句 `git init` 会打到**调用方仓**上、把共享 `.git/config` 的 `core.bare` 写成 `true`
+ *  （实测 `.scratch/p110-privacy-canary.mjs`：`false → true`；这正是 #110 票面的病）。
+ *  一律 `git -C <root>`、不用 `cwd:`（本机 startup 脚本族会把子进程 cwd 静默复位）。 */
 function fixture({ files = {}, message = 'fixture', name = 'Fixture Author', email = 'fixture@example.com', branch } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'dsh-privacy-'))
   fixtures.push(root)
-  const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' })
+  const env = fixtureEnv()
+  const git = (args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', env })
   git(['init', '-q'])
   // git 不能提交空树：没有夹具文件时放一个中性文件（只测消息/身份/ref 面）
   const entries = Object.entries(files)

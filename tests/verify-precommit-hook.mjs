@@ -30,6 +30,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
@@ -43,13 +44,19 @@ const marker = join(root, 'checker-ran.txt')
  * `GIT_INDEX_FILE` / `GIT_WORK_TREE` to hooks, so when this test runs under the
  * real pre-commit hook (verify-all does exactly that), an inherited `GIT_DIR`
  * would point the probe's `git add` / `git commit` at THIS repo. Strip every
- * `GIT_*` so the probe can only ever touch its own temp repo. */
-const cleanEnv = (extra = {}) => {
-  const env = { ...process.env, ...extra }
-  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key]
-  return env
-}
-const run = (args, extra) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: cleanEnv(extra) })
+ * `GIT_*` so the probe can only ever touch its own temp repo.
+ *
+ * ⚠ This cleanup now lives in the shared harness `tests/isolated-git.mjs` (#110):
+ * four fixtures each hand-rolled a copy and NOTHING asserted it, so a new fixture
+ * that forgot the line stayed silent until someone's `git status` broke. Measured
+ * cost of forgetting: the fixture's `git init` writes `core.bare=true` into the
+ * CALLER's shared `.git/config` (probe `.scratch/p110-canary.mjs`).
+ * The harness itself is pinned by `tests/verify-isolated-git.mjs` (I1 mechanism / I2 structural). */
+const cleanEnv = (extra = {}) => fixtureEnv(extra)
+// `git -C <dir>` rather than spawn's `cwd:` — a host `startup` script family resets
+// a child's cwd to the Windows user dir, so `cwd:` silently fails and the fixture's
+// commands land on the CALLER's repo (the same failure path #110 is about).
+const run = (args, extra) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', env: cleanEnv(extra) })
 const tail = (r) => `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().split('\n').slice(-4).join(' | ')
 
 try {

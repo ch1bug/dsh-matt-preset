@@ -55,6 +55,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -99,9 +100,10 @@ else bad('R0. 配方头注口径缺失（AC1：口径落地）', `缺: ${missing
 //      #115 实测踩过：夹具命令全打在调用方仓库上）；
 //   ④ 身份**显式给**（`-c user.name/-c user.email`），因为 GIT_CONFIG_GLOBAL 被指向空文件。
 const TMP = mkdtempSync(join(tmpdir(), 'dsh-matt-restore-'))
-/** 夹具命令：`git -C <TMP> …`（绝不 cwd:）。 */
-const env = { ...process.env, GIT_CONFIG_GLOBAL: join(TMP, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMP, '.gitconfig') }
-for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k]
+/** 夹具命令：`git -C <TMP> …`（绝不 cwd:）。
+ *  env 走共享挂具 `tests/isolated-git.mjs`（#110）：清掉全部继承 `GIT_*`，再把 git 配置面
+ *  指向夹具自己的空文件（否则夹具会读本机 `~/.gitconfig`，身份与 `core.autocrlf` 成了机器相关量）。 */
+const env = fixtureEnv({ GIT_CONFIG_GLOBAL: join(TMP, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMP, '.gitconfig') })
 const G = (...args) => spawnSync('git', ['-C', TMP, ...args], { encoding: 'utf8', env, windowsHide: true })
 const commit = (...args) => G('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', ...args)
 

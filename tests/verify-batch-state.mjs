@@ -52,6 +52,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -464,8 +465,9 @@ if (LIVE === null) {
 // 显式脱离父 git 环境（GIT_DIR 等）：否则夹具里的 `git init` 会写进调用方仓库（#110 同族教训）。
 const TMPFIX = mkdtempSync(join(tmpdir(), 'dsh-matt-c9-count-'))
 try {
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: join(TMPFIX, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMPFIX, '.gitconfig') }
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k]
+  // 清理走共享挂具 `tests/isolated-git.mjs`（#110）：把"怎么写"收敛成一处，"写没写"由
+  // `tests/verify-isolated-git.mjs` 的 I2 结构断言守住（此前 4 个夹具各手写一份、无守卫）。
+  const env = fixtureEnv({ GIT_CONFIG_GLOBAL: join(TMPFIX, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMPFIX, '.gitconfig') })
   const G = (args) => spawnSync('git', ['-C', TMPFIX, ...args], gitOpts(env))
   if (G(['init', '-q', '-b', 'main']).status !== 0) {
     bad('C9b. 夹具仓可 init', JSON.stringify(G(['init', '-q', '-b', 'main']).stdout))

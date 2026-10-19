@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
@@ -60,13 +61,12 @@ try {
     `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(ran + '.harness')}, 'ran')\n`)
   /** 夹具仓的 git 调用**不继承 `GIT_*`**：`GIT_DIR` 一类变量会把夹具的 `git init` / `git config`
    *  指到**外层仓**上（实测：带着 `GIT_DIR=<repo>/.git` 跑旧版本用例，本仓 `.git/config` 的
-   *  `core.bare` 被改成 true，且夹具的"未设置"假设失效）。 */
-  const cleanGitEnv = (extra = {}) => {
-    const env = { ...process.env }
-    for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key]
-    return { ...env, ...extra }
-  }
-  const gitIn = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: cleanGitEnv() })
+   *  `core.bare` 被改成 true，且夹具的"未设置"假设失效）。
+   *  ⚠ 这段清理**已收敛进共享挂具** `tests/isolated-git.mjs`（#110）：此前 4 个夹具各手写一份、
+   *  且没有守卫在看 —— 漏写一处全程静默，直到有人 `git status` 报错。挂具本身由
+   *  `tests/verify-isolated-git.mjs` 的 I1（机制实测）/ I2（结构断言）守住。 */
+  const cleanGitEnv = (extra = {}) => fixtureEnv(extra)
+  const gitIn = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', env: cleanGitEnv() })
   // advisory / hooks= 的可复现面：git 仓库在位、core.hooksPath 未设置
   gitIn(['init', '-q'])
 

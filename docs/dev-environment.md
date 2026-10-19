@@ -173,6 +173,25 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   ⚠ `path.join` 在 Windows 上按 Win32 语义给 **`\`**，而 POSIX 形夹具根（`/tmp/...`）拼出
   `\tmp\...` 会被 bash 判为不存在；Node 把 POSIX 形路径写文件时会落到**当前盘**的 `\tmp` 下，
   与 bash 的 `/tmp` **不是一处**——写夹具文件也走 bash（`cat >`）。
+
+  **钩子导出的 git 变量：实测形态（#110，别再按直觉推）**——`git commit` 起钩子时会导出指向
+  **调用方仓库**的变量；夹具若原样继承，它的 `git init` / `git config` 会**打到调用方仓上**。
+  在**真 linked worktree** 里实测（`GIT_*` 全量 dump）到的形态是：
+
+  | 变量 | 实测值 | 直觉误区 |
+  | --- | --- | --- |
+  | `GIT_DIR` | `<base>/.git/worktrees/<name>` | ❌ 不是 `<repo>/.git`；用后者做夹具会**测不到真形态**（本票为此白烧三轮） |
+  | `GIT_INDEX_FILE` | `<base>/.git/worktrees/<name>/index` | 同样带 worktree 专属层 |
+  | `GIT_WORK_TREE` | **unset** | 钩子里并不导出它 |
+  | `GIT_PREFIX` | 空串（在 env 里，值为空） | 存在但为空，**≠ 未设** |
+
+  **实测代价**（把清理拆掉即可复现，探针 `.scratch/p110-canary.mjs`）：夹具的 `git init` 带着外层
+  `GIT_DIR` → **共享 `.git/config` 的 `core.bare` 被写成 `true`** → 同仓的**其它检出**此后
+  `git status` 报 `fatal: this operation must be run in a work tree`。隐蔽点：`log` / `show` 仍可用，
+  只有 `status` / `add` / `commit` 报错，极易误判成"工具坏了"而不是"配置被改了"。
+  ⇒ **凡自建仓的夹具用例一律走共享挂具 `tests/isolated-git.mjs`**（`fixtureEnv()` 清掉全部继承
+  `GIT_*`、`gitIn()` 给 `git -C <dir>`），由 `tests/verify-isolated-git.mjs` 的 I1（机制实测）/
+  I2（结构断言：凡自建仓的用例必走挂具）守住。**别在用例里再手写一份清理** —— 那正是本票的病灶。
 - **探针先自检，再判被测对象**（#107）：一次诊断白烧一整轮，多半是**探针自己坏了**。
   跑之前三样各验一次，任一失败就停（**探针坏了 ≠ 被测对象坏了**）：
   ① `needle` 命中数 **> 0**（0 命中是假证据）；② 扰动后文件**真的变了**；
@@ -238,7 +257,7 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
 | 防线 | 缺席时的表现 | 口径 |
 | --- | --- | --- |
 | `core.hooksPath` 未指向 `.githooks` | 此前**完全静默** | **响亮**：`verify-all` 汇总行带 `hooks=<on\|off\|未设置>`（非 on 再加一行补救命令；git 不可用时静默不猜，不改 exit code） |
-| `SKIP_HOOKS=1` 主动绕过 | 打印 `pre-commit: SKIP_HOOKS set — 跳过 verify-all` | 已响亮 |
+| `SKIP_HOOKS=1` 主动绕过 | 打印 `pre-commit: SKIP_HOOKS set — 跳过 verify-all` | 已响亮。⚠ **它是逃生口，不是 worktree 场景的常态**：linked worktree 下钩子本应正常可用（#110 已修：夹具走共享挂具 `tests/isolated-git.mjs`，不再把 `core.bare` 写进调用方的共享仓）。若你发现自己在 worktree 里**每次**都得 `SKIP_HOOKS=1`，那是缺陷不是用法 —— 先查 §0.2 的钩子上下文差异，别把它当日常 |
 | 环境门禁变量未设 | 汇总 `SKIP` 行 + "N 项因缺环境跳过" | 已显式 |
 | 用例内 loud skip | 汇总标 `PASS*` | 已显式 |
 | `scripts/link-runtime-deps.mjs` 未跑 | `ERR_MODULE_NOT_FOUND` 硬失败 | 已响亮 + **报错指路**（#69：失败输出含 `ERR_MODULE_NOT_FOUND` 时 `verify-all` 追一行 `node scripts/link-runtime-deps.mjs`；判据 `tests/verify-all-entry.mjs` E7） |
