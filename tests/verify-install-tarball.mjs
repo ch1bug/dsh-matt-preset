@@ -13,6 +13,11 @@
  *   T4 不变量：探测根下**所有**新建文件都在 dest 内
  *
  * 用手工构造的最小 tar（不依赖宿主 tar 方言）+ gzip，直接调导出的 `extractTarball`。
+ *
+ * 为什么可以从**工作树** import（#84 之后的口径）：本文件判的是 `extractTarball` 的**算法**
+ * 语义（越界过滤），不是发布物的布局；而"工作树的这份文件 == 发布物里的那份"由
+ * `tests/verify-packaged-payload.mjs` K5（解包后逐字节比对）钉住——所以这条 import 不是
+ * "测了另一个东西"。发布物的 import 断口由那个文件的 K2–K4 判（#84 的实测症状）。
  */
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
