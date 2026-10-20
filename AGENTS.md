@@ -29,6 +29,10 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 ## Repo docs（导航指针；细节在各文件里，勿在此复述）
 
 - 决策与术语：`CONTEXT.md`（D1–D51）、`docs/adr/`
+- **会变的东西别抄当前值**：成员名单 / 当前读数 / 编号这类跨会话会变的东西，文档里写**现查命令**（或区间、
+  指针），不抄当前值 —— 抄一份就是第二份清单，它一定会腐。现查命令的正则**照抄判据的正则**（手写简化
+  版会静默漏报：#129 实测 `^ \* @slow` 比判据 `^[ \t]*\*[ \t]*@slow` 窄，标记写成 `  * @slow` 就漏掉）。
+  同理，**时长/性能读数只写区间**，单次值进证据文件（否则每修一次实现就要再改一次文档）。
 - **验证**：`node scripts/verify-all.mjs`（唯一入口；`pnpm test` 是同一脚本的别名，但 agent shell 里 pnpm 未必在 PATH 上——工具链路径见 `docs/dev-environment.md` §0.2）。首次 clone 先 `git config core.hooksPath .githooks` 启用 pre-commit 门禁——本地配置不随 clone 分发（`SKIP_HOOKS=1` 明确绕过）；汇总里的 `PASS*` 表示该用例含 loud skip，环境侧断言未验证。**分层（#129）**：直接跑 = **快集**（跳过头部标了 `@slow` 的长跑用例；pre-commit 走这一层），`--all` = 全量 —— **批末 / 推送前 / 交付前必须跑 `--all`**（本仓无 CI，全量即最终验收）；快集每次都逐行列出跳过的 slow 用例，**快集绿 ≠ 全量绿**。另有 `NORUN` 一档 = **没有退出码**（被信号杀 / watchdog 超时），读作"没跑完"，**不是**用例失败。何时该跑哪一层见 `docs/dev-environment.md` §0.2「分层」
 - **复核**：`docs/code-review-brief.md`（/code-review 两轴 brief 组装口径 + 本仓「失败长什么样 / 挑刺设限」+ 收敛纪律 + 缺陷类登记；审阅阶段读，实现阶段不必读）
 - **个人 / 本机环境串不进仓**（本仓 PUBLIC）：家目录、检出/旧布局路径、署名与邮箱一律用占位符
