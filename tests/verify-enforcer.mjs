@@ -1,10 +1,10 @@
 /**
- * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V34; the
+ * verify-enforcer.mjs — acceptance for dsh-workflow-enforcer (V1–V35; the
  * structured gate-matching block added by #79 is V18–V20, the structured
  * ticket-lifecycle nudge arming added by #82 is V21–V23, V24 pins the doc's
  * 「What it injects」+ config block against `INJECTIONS`, the push-triggered
- * retro added by #71 is V25–V31, and the home-delete reminder added by #113 is
- * V32–V34).
+ * retro added by #71 is V25–V31, the home-delete reminder added by #113 is
+ * V32–V34, and the commit-armed landing added by #121 is V35).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -1147,7 +1147,6 @@ else bad('V30b. text event armed the retro trigger', v30bBad.join(', '))
 // payload is text (doc body, commit message, issue body, --grep pattern).
 const MENTION_ONLY = [
   ['bash', { command: 'echo "git push"' }, 407],
-  ['bash', { command: 'git commit -m "note: git push 之后再 retro"' }, 408],
   ['bash', { command: 'git log --grep="git push"' }, 410],
 ]
 let v30cBad = []
@@ -1155,8 +1154,16 @@ for (const [name, args, step] of MENTION_ONLY) {
   const text = await afterCall(name, args, step)
   if (!noRetro(text)) v30cBad.push(String(args.command))
 }
-if (v30cBad.length === 0) ok('V30c. mention-only commands (echo / -m / --grep) → no retro trigger')
+if (v30cBad.length === 0) ok('V30c. mention-only commands (echo / --grep) → no retro trigger')
 else bad('V30c. mention-only command armed the retro trigger', v30cBad.join(' | '))
+// #121 口径修正: `git commit -m "…git push…"` 不再是"仅提及"——它是一条**真提交**，
+// 合法地 arm 落盘面（#121 的整个要点）；消息里的 push 是 flag 值，因此仍不得 arm
+// push 追随行、也不得聚合。V35c 从另一侧钉住「正文里的 git commit 不 arm」。
+const v30cCommit = await afterCall('bash', { command: 'git commit -m "note: git push 之后再 retro"' }, 408)
+if (v30cCommit.includes('real commit') && !v30cCommit.includes('remote CI run') && !aggregateText(v30cCommit))
+  ok('V30c3. git commit -m "…git push…" → commit landing face only (message payload adds no push follow-up / no aggregation)')
+else bad('V30c3. commit-message payload confused the trigger faces',
+  `commit landing: ${v30cCommit.includes('real commit')} | CI follow-up: ${v30cCommit.includes('remote CI run')} | aggregation: ${aggregateText(v30cCommit)}`)
 // The ticket's inline-body vector on its REAL surface: `gh issue create --body
 // "…git push…"` IS a genuine external action, so the ⚠ GATE fires — but the
 // mention inside its body must not arm the retro trigger, and must not drag in
@@ -1326,6 +1333,196 @@ if (aggregateText(v31c) && !retroText(v31c))
   ok('V31c. an UNREADABLE `.aggregated` probe does not suppress (fails open to the aggregation face)')
 else bad('V31c. unreadable .aggregated suppressed the aggregation',
   `aggregate: ${aggregateText(v31c)} | lands: ${retroText(v31c)}`)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── V35 (#121): a REAL commit ALSO arms the per-ticket 落盘 reminder. The
+// defect: both retro faces were keyed on a real push, while batch rules forbid
+// per-ticket pushes — so a session that only COMMITS never lands material and
+// the batch-end aggregation reads nothing (measured in batch A: 3 of 5 tickets
+// had zero candidates on disk). The fix arms the LANDING face from `git commit`
+// on the SAME structured core (`RETRO_TRIGGER.commit.words` + `matchesSurface`)
+// and keeps the aggregation face PUSH-ONLY: a commit cannot know the batch
+// reached its end (the `retro:` marker is written before the batch-end push).
+//
+// Consume guard (#121 Q1): one landing reminder per SESSION — once
+// `.scratch/retro/<batch>-<session id>.md` exists, later commits (including
+// `--amend`) are silently consumed. Pure EXISTENCE: `batch-state.md` is never
+// parsed, and a file belonging to a DIFFERENT session never suppresses.
+//
+// Non-vacuous red scenes: dropping the `retroCommit` arm reddens V35a/V35d;
+// widening the judgement back to a substring over the serialized call reddens
+// V35c (echo / --grep / write / edit / PTY / text event); making the guard
+// suppress on ANY file under `.scratch/retro/` reddens V35e's foreign-session
+// case; routing a commit through the push face reddens V35f (it would
+// aggregate instead of landing); leaving both arms live in one assembly
+// reddens V35g (two reminders).
+const commitRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commit-')))
+await mkdir(join(commitRoot, '.scratch', 'retro'), { recursive: true })
+const handleCommit = await ctx.agents.create({
+  sessionId: SessionId('enforcer-commit'),
+  meta: { cwd: commitRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+const agentCommit = handleCommit.agent
+const renderCommit = async () =>
+  renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(agentCommit, signal)))
+const commitCall = async (args, step, name = 'bash') => {
+  await emitSessionEvent(ctx, agentCommit.session, {
+    type: 'tool/call',
+    data: { turn: 1, step, name, arguments: JSON.stringify(args) },
+  })
+  return renderCommit()
+}
+
+// V35a: the REAL commit of the ticket's own workflow arms the landing face —
+// one-shot, carrying the same writing contract as the push face, without a ⚠
+// (a commit is routine: local, reversible, D21).
+const v35a = await commitCall({ command: 'git commit -m "fix(#121): commit 也 arm 落盘面"' }, 801)
+const v35aContract = {
+  'landing face': retroText(v35a),
+  'not aggregation': !aggregateText(v35a),
+  'no ⚠': clean(v35a),
+  'landing path': v35a.includes('.scratch/retro/<batch>-<session>.md'),
+  'candidates only': v35a.includes('CANDIDATES ONLY'),
+}
+const v35aMissing = Object.entries(v35aContract).filter(([, hit]) => !hit).map(([k]) => k)
+if (v35aMissing.length === 0)
+  ok('V35a. real git commit → per-ticket 落盘 reminder (path + candidates-only, no ⚠, not aggregation)')
+else bad('V35a. commit did not inject the landing reminder', `missing: ${v35aMissing.join(', ')} | ${v35a.slice(-280)}`)
+const v35b = await renderCommit()
+if (!retroText(v35b) && !aggregateText(v35b))
+  ok('V35b. commit-armed landing reminder consumed after firing (one assembly, no repeat)')
+else bad('V35b. commit reminder repeated', v35b.slice(-220))
+
+// V35c: the structured face — a call that only MENTIONS `git commit` in its
+// text must arm NOTHING, exactly like #71's push face. The high-value negative
+// is REAL text: `-m` messages, handoff bodies and PTY fragments are full of it.
+const V35_FALSE_POSITIVES = [
+  ['bash', { command: 'echo "git commit"' }, 'echo'],
+  ['bash', { command: 'git log --grep="git commit"' }, '--grep pattern'],
+  ['write', { file_path: 'docs/handoff.md', content: '下一步 git commit，然后落盘 retro' }, 'write body'],
+  ['edit', { file_path: 'notes.md', old_string: 'a', new_string: 'git commit 之后落盘' }, 'edit body'],
+  ['str_replace_editor', { command: 'str_replace', path: 'x.md', file_path: 'x.md', old_string: 'a', new_string: 'git commit' }, 'str_replace_editor body'],
+  ['pty_send', { id: 'p1', data: 'git commit\n', submit: true }, 'PTY fragment'],
+]
+const v35cBad = []
+for (const [i, [name, args, label]] of V35_FALSE_POSITIVES.entries()) {
+  const text = await commitCall(args, 810 + i, name)
+  if (!noRetro(text)) v35cBad.push(`${label} (${retroText(text) ? 'landing' : 'aggregation'})`)
+}
+if (v35cBad.length === 0)
+  ok('V35c. mention-only / text-layer calls (echo / --grep / write / edit / PTY) → no commit trigger', `${V35_FALSE_POSITIVES.length} cases`)
+else bad('V35c. a non-commit call armed the commit trigger', v35cBad.join(' | '))
+
+// and the text event layer: a session DISCUSSING "git commit" arms nothing.
+await emitSessionEvent(ctx, agentCommit.session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 820, message: { role: 'assistant', content: [{ type: 'text', text: '接下来 git commit，然后写 retro 落盘候选' }] } },
+})
+const v35c2 = await renderCommit()
+if (noRetro(v35c2)) ok('V35c2. discussion of "git commit" in a text event → no trigger (text layer inert)')
+else bad('V35c2. a text event armed the commit trigger', v35c2.slice(-220))
+
+// V35d: the DECLARED REACH — the structured core's wrappers / separators /
+// executed payload / argv[0] normalization apply to the commit face too (red if
+// it is a fresh loose matcher or judges only the first command of a line).
+const V35_REACH = [
+  ['bash', { command: 'cd repo && git commit -m x' }, 'command list'],
+  ['bash', { command: 'sudo git commit -m x' }, 'sudo wrapper'],
+  ['bash', { command: '/usr/bin/git commit -m x' }, 'argv[0] path'],
+  ['pwsh', { command: 'git.exe commit -m x' }, 'git.exe on pwsh'],
+  ['bash', { command: 'bash -c "git commit -m x"' }, 'executed payload'],
+]
+const v35dMisses = []
+for (const [i, [name, args, label]] of V35_REACH.entries()) {
+  const text = await commitCall(args, 830 + i, name)
+  if (!retroText(text)) v35dMisses.push(label)
+}
+if (v35dMisses.length === 0)
+  ok('V35d. declared reach: wrapper / separator / argv[0] / other shell / executed payload all arm', `${V35_REACH.length} cases`)
+else bad('V35d. declared commit reach lost', v35dMisses.join(', '))
+
+// V35e: the per-session existence guard. A file for a DIFFERENT session must
+// NOT suppress (a "any file in the dir" check would — the guard is the session
+// suffix), while this session's own landed file must.
+const foreignCandidate = join(commitRoot, '.scratch', 'retro', 'L-enforcer-other-session.md')
+await writeFile(foreignCandidate, '# foreign\n')
+const v35eForeign = await commitCall({ command: 'git commit -m "foreign file present"' }, 840)
+if (retroText(v35eForeign)) ok('V35e. a candidate file for a DIFFERENT session does not suppress the guard')
+else bad('V35e. foreign-session candidate suppressed the reminder', v35eForeign.slice(-220))
+const ownCandidate = join(commitRoot, '.scratch', 'retro', `L-${String(agentCommit.session.id)}.md`)
+await writeFile(ownCandidate, '# own\n')
+const v35eOwn = await commitCall({ command: 'git commit -m "own file present"' }, 841)
+if (!retroText(v35eOwn) && !aggregateText(v35eOwn))
+  ok('V35e2. this session already landed its candidate file → later commits are silently consumed (existence guard)')
+else bad('V35e2. own landed file did not suppress the commit reminder', v35eOwn.slice(-220))
+await rm(ownCandidate, { force: true })
+const v35eBack = await commitCall({ command: 'git commit -m "own file removed"' }, 842)
+if (retroText(v35eBack)) ok('V35e3. after the candidate file is gone the commit face arms again (guard = existence, not sticky state)')
+else bad('V35e3. guard stayed armed after the file was removed', v35eBack.slice(-220))
+await rm(foreignCandidate, { force: true })
+
+// V35f: a commit NEVER takes the batch-end aggregation face, even when
+// `.scratch/batch-state.md` already carries the `retro:` marker (only a real
+// push may aggregate — #121 Q1「聚合面一根不碰」).
+const handleCommitBE = await ctx.agents.create({
+  sessionId: SessionId('enforcer-commit-batch-end'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleCommitBE.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 850, name: 'bash', arguments: JSON.stringify({ command: 'git commit -m "batch-end commit"' }) },
+})
+const v35f = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitBE.agent, signal)))
+if (retroText(v35f) && !aggregateText(v35f))
+  ok('V35f. commit in a `retro:`-marked batch → landing only, aggregation stays push-only')
+else bad('V35f. commit took the aggregation face', `landing: ${retroText(v35f)} | aggregation: ${aggregateText(v35f)} | ${v35f.slice(-240)}`)
+
+// V35g: commit + push in the SAME assembly → exactly ONE retro reminder (the
+// push face supersedes the commit arm; leaving both live would duplicate).
+const guardRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commitpush-')))
+const handleCommitPush = await ctx.agents.create({
+  sessionId: SessionId('enforcer-commit-push'),
+  meta: { cwd: guardRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleCommitPush.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 860, name: 'bash', arguments: JSON.stringify({ command: 'git commit -m "x"' }) },
+})
+await emitSessionEvent(ctx, handleCommitPush.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 861, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v35g = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitPush.agent, signal)))
+const v35gCount = (v35g.match(/Retro candidate — file it now/g) ?? []).length
+if (v35gCount === 1 && !aggregateText(v35g))
+  ok('V35g. commit + push in one assembly → exactly one retro reminder (no duplicate)')
+else bad('V35g. duplicate retro reminder', `count: ${v35gCount} | aggregation: ${aggregateText(v35g)} | ${v35g.slice(-260)}`)
+
+// V35h: the declaration and the THREE documents that state the trigger face
+// stay aligned (D6: 只改一处必漂). The commit face must be named in the
+// enforcer doc, the batch-state trigger face and the body's `@@ batch-mode`
+// section.
+const commitDoc = {
+  enforcer: readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8'),
+  batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
+  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+}
+const commitDocMissing = []
+if (!commitDoc.enforcer.includes('git commit')) commitDocMissing.push('docs/workflow-enforcer.md')
+if (!commitDoc.batchState.includes('git commit')) commitDocMissing.push('docs/batch-state.md')
+if (!commitDoc.body.includes('git commit')) commitDocMissing.push('workflow-body.txt')
+const commitElements = RETRO_TRIGGER.commit?.words ?? []
+const missingCommitElements = commitElements.filter(s => !commitDoc.enforcer.includes(s))
+if (commitDocMissing.length === 0 && commitElements.length > 0 && missingCommitElements.length === 0)
+  ok('V35h. the commit face is documented in all three places (判定面 / 触发面 / @@ batch-mode)', `elements: ${commitElements.join(', ')}`)
+else bad('V35h. commit-face doc drift',
+  `declaration: ${commitElements.length > 0 ? 'ok' : 'MISSING'} | missing docs: ${commitDocMissing.join(', ') || '—'} | missing document elements: ${missingCommitElements.join(', ') || '—'}`)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ── V32–V34 (#113): the HOME-DELETE reminder. The third recurrence of the
@@ -1573,6 +1770,9 @@ else bad('V34c. home-delete doc/declaration drift',
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
 await handleAggErr.dispose()
+await handleCommitPush.dispose()
+await handleCommitBE.dispose()
+await handleCommit.dispose()
 await handleAbsent.dispose()
 await handleErr.dispose()
 await handleNM.dispose()
@@ -1592,6 +1792,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V34) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V35) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

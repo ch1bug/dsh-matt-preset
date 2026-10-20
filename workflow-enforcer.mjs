@@ -65,6 +65,20 @@
  * a session that merely discusses "推送/push" (a plan, a retro doc, a handoff
  * body) is inert.
  *
+ * COMMIT-TRIGGERED LANDING (#121): a REAL commit ALSO arms the per-ticket 落盘
+ * reminder — the batch rules forbid per-ticket pushes, so without this face a
+ * batch session that only commits lands NO material and the batch-end
+ * aggregation reads nothing (measured in batch A: 3 of 5 tickets had zero
+ * candidates on disk; the fourth was hand-written on request). The commit face
+ * uses the SAME structured core (`RETRO_TRIGGER.commit` = the command-position
+ * word run `git commit` over the call's declared action field), so message
+ * text, `echo`, `--grep`, doc bodies, PTY fragments and text events stay inert.
+ * It arms the LANDING face ONLY: the aggregation face remains push-only, because
+ * a commit cannot know the batch reached its end (`retro:` is written before the
+ * batch-end push). Consume adds one GUARD — pure existence, no file parsing:
+ * once `.scratch/retro/<batch>-<session id>.md` exists, later commits (including
+ * `--amend`) are silently consumed, so a session gets one landing reminder.
+ *
  * Two faces, deliberately different (not an inconsistency):
  *   - push is a TOOL event — it has a `(toolName, argv)` action surface, so it
  *     is judged there and ONLY there. The text layer is structurally excluded.
@@ -116,7 +130,7 @@
  * a repository-side guard cannot physically stop a shell command the agent is
  * about to write).
  */
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
 
@@ -201,6 +215,20 @@ const grillMode = new WeakMap()
  * at CONSUME time (see `reminderText`), because the arming hook is
  * fire-and-forget and cannot await a file read. */
 const retroPush = new WeakMap()
+
+/** Sessions whose latest call was a REAL commit (#121) — armed by the tool/call
+ * hook on the commit trigger's structured surface (`RETRO_TRIGGER.commit`),
+ * consumed by the next assemble, which then injects the per-ticket 落盘
+ * reminder.
+ *
+ * SEPARATE from `retroPush` on purpose: the consume semantics differ. A push
+ * decides its face from `.scratch/batch-state.md` (landing vs batch-end
+ * aggregation) and consumes once per push; a commit can only ever LAND, and it
+ * lands at most once per SESSION — the consume guard is an existence check for
+ * `.scratch/retro/*-<session id>.md` (no parsing, per the ticket). A commit is
+ * routine (local, reversible, D21), so this is a MATERIAL reminder, never a
+ * high-risk gate. */
+const retroCommit = new WeakMap()
 
 /** Sessions where the human has declared a batch (#71) — armed by the TEXT
  * event hook (a declaration has no tool call; see `RETRO_TRIGGER`),
@@ -307,6 +335,13 @@ const TICKET_ARMED = { close: ticketClosed, create: ticketCreated }
  *     source of truth is `docs/batch-state.md`). */
 export const RETRO_TRIGGER = {
   push: { words: ['git push'] },
+  // #121: a REAL commit arms the LANDING face only (never the aggregation —
+  // that one stays push-only; see `retroCommit`). Judged by the same structured
+  // core as every other face: a word run at the COMMAND POSITION of the call's
+  // declared action field. A commit MESSAGE is a `-m` flag VALUE, never a
+  // command position, so prose that says `git commit` stays inert — the
+  // ticket's "text layer never triggers" AC holds by construction.
+  commit: { words: ['git commit'] },
   batchDeclare: {
     words: ['攒批', '批量模式', '系列处理', '大系列', '这批攒批'],
   },
@@ -479,6 +514,26 @@ async function hasAggregatedMarker(cwd) {
   }
 }
 
+/** Whether this session has ALREADY landed a retro candidate file — pure
+ * EXISTENCE over `.scratch/retro/`, never a parse of `batch-state.md` (#121 Q1):
+ * a landed candidate is `<batch>-<session id>.md`, so the session id is the file
+ * name's tail. The `-` boundary is deliberate: `L-<session>.md` matches while a
+ * DIFFERENT session's file does not, so foreign material never suppresses this
+ * session's reminder (the guard is per session, not per directory).
+ *
+ * Fails OPEN to `false` (→ arm the reminder): an unreadable or absent directory
+ * must not silently drop the only material reminder of a commit-only session,
+ * and a repeat costs one local, confirmation-free write. */
+async function hasSessionCandidate(cwd, sessionId) {
+  if (!cwd || !sessionId) return false
+  try {
+    const entries = await readdir(join(cwd, '.scratch', 'retro'))
+    return entries.some(entry => entry === `${sessionId}.md` || entry.endsWith(`-${sessionId}.md`))
+  } catch {
+    return false
+  }
+}
+
 /** Whether a tool call is a REAL push, judged on the declared action surface —
  * the same structured core as the ⚠ gate and the ticket-lifecycle nudges. The
  * face is declared in `RETRO_TRIGGER.push.words`; a tool with no action field
@@ -489,6 +544,17 @@ function pushTriggerHit(call) {
   const surface = actionSurface(call)
   if (surface === null) return false
   return RETRO_TRIGGER.push.words.some(word => matchesSurface(word, surface))
+}
+
+/** Whether a tool call is a REAL commit (#121) — the commit face of the same
+ * structured core (`actionSurface` + `matchesSurface`) as the ⚠ gate and
+ * `pushTriggerHit`. Declared in `RETRO_TRIGGER.commit.words`; a tool with no
+ * action field (write / edit / pty_send / …) has no surface and can never arm
+ * it, and neither can any text event. */
+function commitTriggerHit(call) {
+  const surface = actionSurface(call)
+  if (surface === null) return false
+  return RETRO_TRIGGER.commit.words.some(word => matchesSurface(word, surface))
 }
 
 /** Parse a tool call's arguments (JSON string or object). */
@@ -1089,9 +1155,10 @@ export const INJECTIONS = [
   { id: 'batch-close', marker: 'AUTO-HANDOFF', config: 'batchCloseCheck' },
   { id: 'context-evidence', marker: 'context:', config: 'contextEvidence' },
   { id: 'grill-contract', marker: 'GRILL QUESTION CONTRACT', config: 'grillContract' },
-  // #71 — the push-triggered retro reminders. Two distinct sections on the same
-  // config knob: exactly one of them fires per push (marker in the file →
-  // aggregation, otherwise → 落盘), never both.
+  // #71/#121 — the retro reminders. Two distinct sections on the same config
+  // knob: exactly one of them fires per push (marker in the file → aggregation,
+  // otherwise → 落盘), never both; a real COMMIT (#121) fires only the 落盘
+  // section, at most once per session.
   { id: 'retro-push', marker: 'Retro candidate — file it now', config: 'retroTriggerCheck' },
   { id: 'retro-batch-end', marker: 'Batch-end retro aggregation', config: 'retroTriggerCheck' },
   // #71 fix — the fail-loud report for a batch-state probe that could NOT read
@@ -1211,6 +1278,10 @@ async function reminderText(agent, config, ctx, assembled) {
   }
   if (config.retroTriggerCheck !== false && retroPush.get(agent.session) === true) {
     retroPush.delete(agent.session) // consume: one retro reminder per push
+    // A commit armed in the SAME assembly is superseded by the push face: the
+    // push reminder already covers the material, so a second (landing) line
+    // would be the duplicate this consumption prevents.
+    retroCommit.delete(agent.session)
     // Which face this push gets is decided HERE, from `.scratch/batch-state.md`
     // in the agent's cwd — NOT at arm time. `session/event` is fire-and-forget
     // (the emitter never awaits a listener), so an async file read inside the
@@ -1276,6 +1347,27 @@ async function reminderText(agent, config, ctx, assembled) {
         '(idempotent), and it records CANDIDATES ONLY — landing them still goes',
         'through the human (D22/D27). In batch mode this is the per-ticket',
         '落盘 that the batch-end aggregation later reads.',
+      ].join(' '))
+    }
+  } else if (config.retroTriggerCheck !== false && retroCommit.get(agent.session) === true) {
+    // #121: a commit only ever LANDS — never aggregates — and it lands at most
+    // once per session. The guard is pure existence over
+    // `.scratch/retro/*-<session id>.md`; `batch-state.md` is NOT parsed.
+    retroCommit.delete(agent.session) // consume: one retro reminder per commit
+    if (!(await hasSessionCandidate(agentCwd(agent), String(agent.session?.id ?? '')))) {
+      parts.push([
+        'Retro candidate — file it now: this was a real commit, so run this',
+        'session\'s retro and WRITE the candidates to',
+        '`.scratch/retro/<batch>-<session>.md` (candidates by severity + evidence',
+        '— command / output — + source: session id and ticket, + why each stayed',
+        'unlanded). It is a LOCAL file: no human confirmation needed and it never',
+        'blocks the wrap-up, re-running the same session OVERWRITES the same name',
+        '(idempotent), and it records CANDIDATES ONLY — landing them still goes',
+        'through the human (D22/D27). In batch mode this is the per-ticket',
+        '落盘 the batch-end aggregation later reads. A commit arms ONLY this face —',
+        'the batch-end aggregation stays push-only — and this session gets one',
+        'reminder: once its candidate file exists, later commits stay silent (the',
+        'guard is existence-only, no batch-state parsing).',
       ].join(' '))
     }
   }
@@ -1352,6 +1444,11 @@ export function apply(ctx, config = {}) {
       // and has the agent's cwd; arm BOTH here and let the assembly pick.
       retroPush.set(session, true)
     }
+    // Commit-triggered retro landing (#121): a REAL commit arms the per-ticket
+    // 落盘 reminder. Same structured judgement as the push face (text stays
+    // inert), same synchronous-arm reason (see above), but its OWN WeakMap: a
+    // commit never takes the batch-end aggregation face — that stays push-only.
+    if (commitTriggerHit(call)) retroCommit.set(session, true)
     // Home-delete reminder (#113): a command that would recursively delete a home
     // directory arms the one-shot warning. Judged on the SAME structured core as
     // the ⚠ gate and every other face here — the combination is declared in

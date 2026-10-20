@@ -293,20 +293,23 @@ per-issue push rhythm.
   missing any is BLOCKED, not done —
   this adds evidence, it does NOT relax the CI confirmation (DONE and
   the batch-end gate keep their full force).
-- PUSH-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
+- PUSH/COMMIT-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
   richest retro material is the batch itself: many tickets, many
   sessions, usually rework and handoff loss. Two obligations, keyed on a
-  REAL push:
-  - PER-TICKET PUSH → WRITE CANDIDATES TO DISK: on a real push, run this
-    session's retro at once and write the candidates to
-    .scratch/retro/<batch>-<session>.md — content = candidates (ordered
-    by severity) + evidence (command / output) + source (session id /
+  REAL push or a REAL commit (a commit arms the LANDING face only):
+  - PER-TICKET PUSH OR COMMIT → WRITE CANDIDATES TO DISK: on a real push
+    or a real commit, run this session's retro at once and write the
+    candidates to .scratch/retro/<batch>-<session>.md — content = candidates
+    (ordered by severity) + evidence (command / output) + source (session id /
     ticket number) + why it was not landed. CANDIDATES ONLY, never
     land them (landing is still the human's call, D22/D27). Writing a
     local candidate file is NOT an external action (D21 covers push /
     closing / creating issues), so it is CONFIRMATION-FREE and
     NON-BLOCKING: keep going, never stop the wrap to ask. Re-running in
-    the same session overwrites the same file (idempotent).
+    the same session overwrites the same file (idempotent). A COMMIT arm
+    is per-session: once .scratch/retro/*-<session id>.md exists, later
+    commits (including --amend) stay silent — pure existence, no
+    batch-state parsing.
   - BATCH-END PUSH → RUN THIS SESSION'S RETRO FIRST, THEN AGGREGATE: read
     every landed file of the same batch, DEDUPE AND MERGE (the same
     problem recurring across sessions is merged with a COUNT — that
@@ -328,17 +331,22 @@ per-issue push rhythm.
     (不静默丢素材). Both markers are written by YOU (this rule); the
     enforcer only READS them and writes no file. The batch-state shape is
     .scratch/batch-state.md per docs/batch-state.md.
-  - TRIGGER FACE — A REAL PUSH CALL ONLY (宁严勿宽): the trigger is the
-    (toolName, argv) pair — the tool layer plus the command layer of a
-    shell tool, judged at the COMMAND POSITION (`git push`). Words in a
+  - TRIGGER FACE — A REAL PUSH OR COMMIT CALL (宁严勿宽): the trigger
+    is the (toolName, argv) pair — the tool layer plus the command layer
+    of a shell tool, judged at the COMMAND POSITION (`git push` = landing
+    or aggregation; `git commit` = LANDING ONLY — it never aggregates,
+    and it is per-session: once the candidate file exists, later commits
+    are silently consumed by pure existence, no batch-state parsing).
+    This is what lets a batch ticket that never pushes leave material on
+    disk (#121). Words in a
     session, in thinking, or in a document NEVER trigger it: merely
-    writing or discussing "推送 / push" — a plan, a retro doc, a handoff
-    body (this repo's handoffs are full of it) — must not trigger
-    anything. Indirect pushes (inside a script) and PTY fragment writes
-    do NOT trigger either; they are DECLARED NOT COVERED, and a false
-    trigger costs more than a missed one (a wasted retro run plus junk
-    candidates polluting the batch-end aggregation), so the face stays
-    narrow and never grows a keyword fallback.
+    writing or discussing "推送 / push / git commit" — a plan, a retro
+    doc, a handoff body (this repo's handoffs are full of it) — must not
+    trigger anything. Indirect pushes (inside a script) and PTY fragment
+    writes do NOT trigger either; they are DECLARED NOT COVERED, and a
+    false trigger costs more than a missed one (a wasted retro run plus
+    junk candidates polluting the batch-end aggregation), so the face
+    stays narrow and never grows a keyword fallback.
   - FALLBACK — NEVER DROP MATERIAL SILENTLY: the injection rides the next
     prompt assembly, so a push that is a session's LAST action can lose
     its reminder, and indirect / PTY pushes are outside the trigger face

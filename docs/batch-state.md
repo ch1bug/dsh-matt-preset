@@ -202,8 +202,12 @@ enforcer 是 reminder-only，**只读标记、不写文件**。
 
 ## 触发面（正文与 enforcer 共用的口径）
 
-**只有真的 push 调用**触发 retro——判定输入恒为 `(toolName, argv)`（工具层 + 命令层）。
-会话 / 思考 / 文档里出现「推送 / push」**字词**一律**不触发**（本仓 handoff 正文即反例）。
+**真的 push 调用**触发 retro——判定输入恒为 `(toolName, argv)`（工具层 + 命令层）。
+**真的 commit 调用**（`git commit`，同一结构化核、同一个 `matchesSurface`）也 arm **落盘面**
+（#121）：批内不 push 的票靠它留下素材。它**只 arm 落盘**、不碰聚合面（聚合仍只由真 push 驱动），
+且同一会话只提醒一次——`.scratch/retro/` 下已有以本会话 id 结尾的候选文件即静默消费（纯存在性，
+**不解析**本文件）。会话 / 思考 / 文档里出现「推送 / push / git commit」**字词**一律**不触发**
+（本仓 handoff 正文即反例）。
 间接 push（经脚本）与 PTY 分片写入**一律不触发**，交事实探测兜底（**宁严勿宽**：误触发白跑一次
 retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字口径见 `docs/workflow-enforcer.md`。
 
