@@ -15,7 +15,7 @@
  * 单起一行 ` * @slow <一句 why + 实测读数>`。本文件**不保存**名单 —— 名单会漂，标记不会
  * （新增慢用例的人在自己的文件里写下它，判据当场生效）。快集里逐行打印 `SLOW`，另有汇总
  * 计数 `N 项 slow 未跑（--all 补全）`：**默认跳过必须响亮**（D47），不静默。
- * 判据只扫**头部块注释**（文件开头那段，直到它的闭合符）：正文里出现 `@slow` 这个词不算标记。
+ * 判据只扫**头部注释区**（文件开头那串注释与空行，到第一行代码为止；shebang 与 `//` 行注释同样算头部）：正文里出现 `@slow` 这个词不算标记。
  *
  * 用法：node scripts/verify-all.mjs                 # 快集（默认；pre-commit 用的就是它）
  *       node scripts/verify-all.mjs --all           # 全量（连 @slow 一起跑）
@@ -23,6 +23,9 @@
  *       （等价别名：pnpm test / npm test —— 走默认快集）
  * 未知参数**响亮失败**（exit 2）：`--al` 这种拼错若被静默忽略，读数是"快集全绿"，而你以为
  * 跑的是全量 —— 这是最难发现的假绿，故不猜。
+ * `--timeout` 为什么存在：外部 300s 截断会**整套**丢日志（只剩标题行）；装了 watchdog 至少能读出
+ * "哪一项没跑完 + 什么信号"。它也是本仓唯一能在套件内**产出 `NORUN` 读数**的开关（`NORUN` 的
+ * 判据若非空洞，就得有个能造出"没有退出码"的东西 —— 见 `tests/verify-all-entry.mjs` E12）。
  *
  * 读数分档（行首 `label`）与退出码：
  *   PASS   用例 exit 0，且没有 loud skip
@@ -104,15 +107,26 @@ const OPT_IN = new Map([
   ['sandcastle-e2e.mjs', { flag: 'DSH_MATT_E2E', why: 'sandcastle 三命令 e2e（需 podman）' }],
 ])
 
-/** 用例的**头部块注释**（文件开头那段，直到它的闭合符）。没有块注释 ⇒ 空串（不参与 slow 判定）。 */
-const leadingComment = (file) => {
-  const src = readFileSync(join(REPO, 'tests', file), 'utf8')
-  const end = src.indexOf('*/')
-  return end === -1 ? '' : src.slice(0, end)
+/** 头部注释区 = 文件**开头那串注释与空行**（shebang / `//` / `/** … 星号斜杠` 都算），**到第一行有效代码为止**。
+ *  ⚠ 别退回 `src.indexOf('闭合符')`（复核实测的放宽形态）：那样"没有头部块注释、正文里却有块注释"的
+ *  用例会把**正文**扫进判据面 —— 正文里一行 `* @slow` 就让一个快用例被**静默跳过**（真没跑 →
+ *  假绿）。本仓现网就有两个不以块注释起头的用例（`sandcastle-e2e.mjs` 带 shebang、
+ *  `workflow-enforcer-grill-contract.mjs` 以 `//` 起头），它们的正文注释绝不能参与判定。 */
+const headerRegion = (file) => {
+  const lines = readFileSync(join(REPO, 'tests', file), 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)
+  const head = []
+  for (const line of lines) {
+    if (/^\s*$/.test(line) || /^\s*(\/\/|\/\*|\*|\*\/)/.test(line) || /^#!/.test(line)) {
+      head.push(line)
+      continue
+    }
+    break
+  }
+  return head.join('\n')
 }
-/** `@slow` 标记 = 头部块注释里**以 `* @slow` 起头**的一行。正文里出现这个词不算标记
- *  （判据自检在 `tests/verify-all-entry.mjs` E13 的反向：把 `'@slow'` 写进用例正文 →
- *  默认跑**必须仍然执行它**，否则"谁引用了这个词谁就被跳过"）。 */
+/** `@slow` 标记 = 头部注释区里**以 `* @slow` 起头**的一行。正文（代码之后）里出现这个词不算标记
+ *  （判据自检在 `tests/verify-all-entry.mjs` E13：字符串形态与"代码之后的块注释"形态各一条，
+ *  两者在快集里都**必须仍然被执行**，否则"谁提到这个词谁就被跳过"）。 */
 const SLOW_MARKER = /^[ \t]*\*[ \t]*@slow\b/m
 
 const files = readdirSync(join(REPO, 'tests'))
@@ -127,7 +141,7 @@ for (const file of files) {
     continue
   }
   // 快集：slow 组跳过，但**响亮**（行 + 汇总计数），不静默
-  if (!runFull && SLOW_MARKER.test(leadingComment(file))) {
+  if (!runFull && SLOW_MARKER.test(headerRegion(file))) {
     rows.push({ file, status: 'SLOW', ms: 0, detail: 'slow 用例（文件头 @slow）—— 快集跳过，全量: --all' })
     continue
   }

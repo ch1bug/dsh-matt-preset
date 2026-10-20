@@ -20,14 +20,16 @@
  *      把 git 藏掉——确定性，不依赖机器上 git 装在哪）
  *   E9 **非 git 仓库**（`git config` 退出 128）同样不猜 —— 别把"没仓库"说成"钩子未设置"
  *   ── 分层（#129，E10–E14 起；夹具另起一个根，免得挪动 E1 的 4 行计数）──────────────
- *   E10 默认层 = 快集：头部块注释里标了 ` * @slow …` 的用例逐行 `SLOW`、**真没被执行**
+ *   E10 默认层 = 快集：头部注释区里标了 ` * @slow …` 的用例逐行 `SLOW`、**真没被执行**
  *      （留痕文件为证）、汇总带 `N 项 slow 未跑（--all 补全）`、头部写明层
  *   E11 `--all` **真跑**它（留痕在 + 该行 PASS）—— 同一条用例在两个层里给出相反行为，
  *      这条就是票面 AC「把快集用例临时挪进 slow 组 → 两层行为相反」的机械形态
  *   E12 `status === null`（被信号杀掉 / watchdog 超时）单列 `NORUN`，汇总 `INCOMPLETE` + exit 2，
  *      **不混进 FAILED** —— `exit=null` 是"没跑完"，不是"断言不过"
- *   E13 反向自检：正文里出现 `@slow` 这个词 **≠** 标记（该用例默认跑仍被执行），
- *      否则判据会随"谁引用了这个词"而漂
+ *   E13 反向自检：判据面**只到第一行代码为止**，正文里怎么提 `@slow` 都不算标记。两条伪装输入
+ *      各钉一面：① 字符串常量 `'@slow'`；② **代码之后的块注释**里有一行 `* @slow …`
+ *      —— ② 是第 1 轮复核打出来的真实放宽面（定稿前取"第一个闭合符之前"，会把正文扫进来 ⇒
+ *      静默跳过 ⇒ 假绿；①单独存在时对锚定式判据是恒过的，钉不住这个放宽）
  *   E14 未知开关 / 坏值 → exit 2 + 用法行，且**一个用例都没跑**（拼错的 `--al` 不能被静默
  *      当成默认快集：那会让读数变成"快集全绿"而你以为跑了全量）
  *
@@ -219,16 +221,21 @@ try {
     await writeFile(join(layerRoot, 'tests', 'hang.mjs'),
       '/**\n * hang.mjs — fixture（#129 watchdog 用）\n * @slow fixture：挂住 60s，只有 --timeout 能让它结束\n */\n' +
       'setTimeout(() => {}, 60000)\n')
-    // 反向自检（E13）：正文里有 '@slow' 这个词，但头部**不是**标记 —— 它必须照常执行
+    // 反向自检（E13）两条：判据面**只到第一行代码为止**，正文怎么提都不该降级
+    //   ① 字符串形态：正文里有一个值是 '@slow' 的常量
     await writeFile(join(layerRoot, 'tests', 'mentions.mjs'),
       `import { writeFileSync } from 'node:fs'\nconst word = '@slow'\nwriteFileSync(${JSON.stringify(mark('ran-mentions.txt'))}, word)\nconsole.log('✓ mentions fixture')\n`)
+    //   ② **块注释形态**（复核实测出来的真实放宽面）：没有头部块注释，代码之后才有一个块注释、
+    //      里面正好有一行 ` * @slow …`。定稿前的实现取 `src.indexOf(闭合符)` ⇒ 会把这段正文
+    //      扫进判据面、把本用例**静默跳过**（真没跑 = 假绿）。头部注释区必须是"到第一行代码为止"。
+    await writeFile(join(layerRoot, 'tests', 'body-marker.mjs'),
+      `import { writeFileSync } from 'node:fs'\n/*\n * 正文注释（在代码之后，不是头部）\n * @slow 这一行在正文块注释里，不是标记\n */\nwriteFileSync(${JSON.stringify(mark('ran-body-marker.txt'))}, 'ran')\nconsole.log('✓ body-marker fixture')\n`)
 
     const runL = (args, extra = {}) => {
       const r = spawnSync(process.execPath, [join(layerRoot, 'scripts', 'verify-all.mjs'), ...args],
         { cwd: layerRoot, encoding: 'utf8', env: envFor(extra) })
       return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
     }
-    const ROW_RE = /^\s+(PASS\*?|FAIL|NORUN|SKIP|SLOW)\s/
 
     // E10：默认层 = 快集 —— @slow 用例逐行 SLOW，且**真没被执行**（留痕为证）+ 汇总计数 + 头部写明层
     const fastRun = runL([])
@@ -262,13 +269,22 @@ try {
         `status=${allRun.status} | ${norunRow.trim()} | 汇总: ${(allRun.out.split('\n').filter(l => /INCOMPLETE|FAILED/.test(l))[0] ?? '(无)').trim()}`)
     }
 
-    // E13：反向自检 —— 判据只认头部块注释里的标记行；正文出现这个词**不**降级成 slow
-    if (/^\s+PASS\s+mentions\.mjs/m.test(fastRun.out) && existsSync(mark('ran-mentions.txt'))
-      && !/^\s+SLOW\s+mentions\.mjs/m.test(fastRun.out)) {
-      ok('E13. 反向自检：正文里的 `@slow` 字样 ≠ 标记（该用例默认跑**仍被执行**）')
+    // E13：反向自检 —— 判据面**只到第一行代码为止**；正文怎么提都不该降级成 slow。
+    // 两条伪装输入各钉一面：① 字符串常量；② **代码之后的块注释**（定稿前那条实现会在这条上静默假绿）。
+    const e13Cases = [
+      ['mentions.mjs', 'ran-mentions.txt', '字符串常量'],
+      ['body-marker.mjs', 'ran-body-marker.txt', '代码之后的块注释'],
+    ]
+    const e13Bad = e13Cases.filter(([file, marker]) => !(
+      new RegExp(`^\\s+PASS\\s+${file.replace('.', '\\.')}`, 'm').test(fastRun.out)
+      && existsSync(mark(marker))
+      && !new RegExp(`^\\s+SLOW\\s+${file.replace('.', '\\.')}`, 'm').test(fastRun.out)))
+    if (e13Bad.length === 0) {
+      ok('E13. 反向自检：正文里的 `@slow` 字样 ≠ 标记（两条伪装输入 —— 字符串常量 / 代码之后的块注释 —— 默认跑**都仍被执行**）')
     } else {
-      bad('E13. 正文提到 `@slow` 就被跳过了（判据过宽：会随"谁引用这个词"而漂）',
-        `ran=${existsSync(mark('ran-mentions.txt'))} | ${(fastRun.out.split('\n').find(l => l.includes('mentions.mjs')) ?? '(无该行)').trim()}`)
+      bad('E13. 正文提到 `@slow` 就被跳过了（判据面越过了"第一行代码"，会随"谁提到这个词"而漂）',
+        e13Bad.map(([file, marker]) => `${file}: ran=${existsSync(mark(marker))} | ` +
+          `${(fastRun.out.split('\n').find(l => l.includes(file)) ?? '(无该行)').trim()}`).join(' ｜ '))
     }
 
     // E14：拼错的开关不能被静默忽略（否则读数是"快集全绿"而你以为跑了全量）；坏值同理

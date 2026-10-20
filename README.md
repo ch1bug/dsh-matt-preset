@@ -63,6 +63,7 @@ git config core.hooksPath .githooks    # 首次 clone 一次：启用 .githooks/
 node scripts/link-runtime-deps.mjs    # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
 node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 pnpm 在 PATH 上）；默认层 = 快集
 node scripts/verify-all.mjs --all     # 全量：连头部标了 @slow 的长跑用例一起跑（批末 / 推送前 / 交付前）
+node scripts/verify-all.mjs --timeout=600000   # opt-in：给每项装 watchdog（没跑完的那项读作 NORUN，不混进 FAILED）
 ```
 
 `verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / NORUN / SKIP / SLOW，末尾如实汇总：
