@@ -9,11 +9,14 @@ RUN apt-get update \
 RUN userdel -r node 2>/dev/null || true; groupdel node 2>/dev/null || true; \
     groupadd -g 1000 agent && useradd -m -u 1000 -g 1000 -s /bin/bash agent
 
-# DSH CLI —— 钉版本，**单一事实源 = 本包 package.json 的 version**（去掉 `-r<N>` 后缀即宿主锚：
-# 0.2.1-rc.2-r1 → 0.2.1-rc.2；口径见 docs/dev-environment.md §2 与 ADR-0008）。
-# tests/verify-sandcastle-pins.mjs 机械校验本行与它逐字一致 —— 漂移即红，别在此手改版本。
-# 宿主重锚（package.json 升版本）后重建镜像：podman build --no-cache -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle
-RUN npm i -g @deepseek-ai/dsh@0.2.1-rc.2
+# DSH CLI —— 版本经 ARG 注入。**单一事实源 = 本仓 package.json 的 version**
+# （去 `-r<N>` 后缀即宿主锚：0.2.1-rc.2-r1 → 0.2.1-rc.2；口径见 docs/dev-environment.md §2 / ADR-0008）。
+# 默认值必须等于派生锚 —— tests/verify-sandcastle-pins.mjs P1 钉住（**重锚时忘了改这里会红**，
+# 而不是安静地装旧版本）。要覆盖版本，用构建包装器 sandcastle/templates/build-image.sh
+# （它用 scripts/runtime-anchor.mjs 的同一条派生规则注入 --build-arg），或显式
+# `podman build --build-arg DSH_VERSION=<官方版本> …`。
+ARG DSH_VERSION=0.2.1-rc.2
+RUN npm i -g @deepseek-ai/dsh@${DSH_VERSION}
 
 # —— Rust 项目在此追加工具链（按需取消注释）——
 # RUN apt-get update && apt-get install -y --no-install-recommends \

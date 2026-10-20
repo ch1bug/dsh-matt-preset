@@ -10,13 +10,19 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 
 ## 项目接入（一次性）
 
-1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / dsh.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——lib.ts 与模板同目录、相对导入 `./lib.ts`，别漏拷）
+1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / **build-image.sh** / **complete-check.sh** /
+   dsh.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——lib.ts 与模板同目录、
+   相对导入 `./lib.ts`，别漏拷）
 2. `npm i -D @ai-hero/sandcastle@0.12.0 tsx` —— **钉版本**（0.x API 周级变动）
 3. `npm i ./ch1bug-sandcastle-dsh-<ver>.tgz` —— DSH provider 包（#18 正式化：
    dshHeadless / patchAgentDefaultModelCmd / 沙箱接入件；`dsh.ts` 与 run-ticket
-   均从该包导入。发布后可直接 `npm i @ch1bug/sandcastle-dsh`；版本锚定见包内 docs/RELEASE.md）
-4. 构建镜像：`podman build -f .sandcastle/Dockerfile -t localhost/<repo>:dsh .sandcastle`
-   （Rust 项目把 Dockerfile 里 rustup 注释段打开）
+   均从该包导入。发布后可直接 `npm i @ch1bug/sandcastle-dsh`；版本锚定见包内 docs/RELEASE.md）。
+   ⚠ 该包目前**不可获取**（npm 404 / 上游仓不在），见下文「已知边界」与 #146。
+4. 构建镜像：`bash .sandcastle/build-image.sh --image localhost/<repo>:dsh .sandcastle`
+   （包装器从 `package.json` 派生锚注入 `--build-arg DSH_VERSION`；**消费者树**里没有本仓
+   `scripts/` 时它会响亮失败并要你显式给版本——那就用
+   `podman build --build-arg DSH_VERSION=<宿主锚> -f .sandcastle/Dockerfile -t …`；
+   Rust 项目把 Dockerfile 里 rustup 注释段打开）
 5. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
    （enforcer 默认清单已含这两条；项目文件存在时默认清单被替换，需显式带上）
 6. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
@@ -34,9 +40,17 @@ bash .sandcastle/complete-check.sh --image localhost/<repo>:dsh
 
 它做三件事：**复用现有** podman machine（**绝不** init/set/stop/rm，也不停不删别人的容器与镜像
 ——machine 是共享 WSL VM，内有别的项目数据）、按需建镜像（`--no-build` 可禁）、在容器内跑一轮
-headless 并断言收尾契约。同时把「Dockerfile 钉的版本」与「镜像里真装的版本」比一次，
-陈旧镜像会在这里红，而不是在夜批里红。宿主 `$DSH_HOME` **只读**挂入，只拷
-`.credentials.yaml`（有 `settings.yaml` 一并带上）。
+headless 并断言收尾契约。**前后各取一次快照**（容器名集合 + machine 列表）并比对——「没碰别人的
+容器」因此是可判读数，不是脚本自述。宿主 `$DSH_HOME` **只读**挂入，只拷 `.credentials.yaml`
+（有 `settings.yaml` 一并带上）。
+
+**绿的证明力（别把它读成"模型会写 COMPLETE"）**：默认任务随机出两个因数（如 `37 × 24`），要求
+模型把**乘积**写进行首行、收尾行才写 `<promise>COMPLETE</promise>`；断言同时要求「乘积在场」+
+「标记在场」——prompt 回显只能拿到因数，拿不到乘积，所以这条绿证明的是**真跑了一轮 turn**
+而不是复述指令。用 `--task` 自定义任务时该证伪自动失效，脚本会响亮声明只断言 COMPLETE 契约。
+
+版本核对也比一道：`build-image.sh --print-version` 给出派生锚，与容器内 `dsh --version` **精确**
+比对（陈旧镜像会在这里红，而不是在夜批里红）。
 
 常用开关：`--network host|podman`（默认 host，见下「已知边界」）、`--user 1000:1000`（默认，
 对齐镜像里的 agent；rootful machine 下 `--userns=keep-id` 与 host 网络冲突）、
@@ -48,17 +62,27 @@ headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_K
 文件拷贝是 run-ticket 的现行形态，env 是本机实测可靠的一条。
 
 退出码：`0` 通过 / `2` 环境前置不满足（podman、machine 未起、镜像缺失、凭据缺失）/
-`3` 镜像构建失败 / `4` 运行失败或未观测到 COMPLETE / `5` 镜像内 dsh 版本 ≠ 钉版。
+`3` 镜像构建失败 / `4` 运行失败、未观测到 COMPLETE、乘积不在场、或**前后快照不一致** /
+`5` 镜像内 dsh 版本 ≠ 派生锚 / `64` 用法错（未知参数、Dockerfile 路径不存在）。
 
-### 钉版策略：DSH 版本只认一处（#34 第 3 项）
+### 钉版策略：DSH 版本只认一处（#34 第 3 项，Q2 拍定口径）
 
-`templates/Dockerfile` 里 `npm i -g @deepseek-ai/dsh@<ver>` 的版本**单一事实源是本包
-`package.json` 的 `version`**（去掉 `-r<N>` 后缀即宿主锚：`0.2.1-rc.2-r1` → `0.2.1-rc.2`；
-口径见 [docs/dev-environment.md](../docs/dev-environment.md) §2 与 ADR-0008）。
-Dockerfile 必须写死字面量（镜像构建期读不到本仓的 package.json），因此由
-`tests/verify-sandcastle-pins.mjs` 机械校验两处逐字一致——**别在 Dockerfile 里手改版本**：
-重锚只改 `package.json` 的 `version`，再 `podman build --no-cache` 重建镜像。
-`complete-check.sh` 补第二道：比对「Dockerfile 写的」与「镜像里真装的」。
+`templates/Dockerfile` 用 **`ARG DSH_VERSION=<默认值>`** 接版本，安装行是
+`npm i -g @deepseek-ai/dsh@${DSH_VERSION}`。**单一事实源 = 本包 `package.json` 的 `version`**
+（去掉 `-r<N>` 后缀即宿主锚：`0.2.1-rc.2-r1` → `0.2.1-rc.2`；口径见
+[docs/dev-environment.md](../docs/dev-environment.md) §2 与 ADR-0008）。派生规则的**唯一实现**是
+`scripts/runtime-anchor.mjs`（`build-image.sh`、`tests/verify-runtime-anchor.mjs`、
+`tests/verify-sandcastle-pins.mjs` 都消费它，不再各写一份正则）。
+
+- 正常路径：`bash build-image.sh` —— 包装器用同一条派生规则注入 `--build-arg DSH_VERSION`，
+  你**不用手填版本**。
+- `Dockerfile` 仍带默认值，因为模板必须能**裸 `podman build`**（消费者树里没有本仓 `scripts/`）。
+- **漂移断言**：`tests/verify-sandcastle-pins.mjs` P1 钉住「ARG 默认值 == 派生锚」、P1b 钉住
+  「安装行真的消费该 ARG」、P2 钉住「Dockerfile 里没有别的版本字面量」；P3–P6 把 README /
+  [docs/dev-environment.md](../docs/dev-environment.md) §2 §3.1 / [docs/RELEASE.md](../docs/RELEASE.md)
+  的承载副本一起钉住。
+- ⇒ **重锚（升 `package.json` 的 `version`）时，Dockerfile 的 ARG 默认值也要一起改**——
+  忘了它，套件会红并点名两值（这正是断言的作用：把"安静的旧版本"换成红灯）。
 
 ## Y 车道流程（yolo）
 
@@ -158,8 +182,11 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - `PrintCommand` = `{ command, stdin }`，command 是完整 shell 串；DSH headless 不读 stdin
 - 官方 node 镜像已占 uid 1000（node 用户）——Dockerfile 里先删后建 agent 用户
 - **TUN 代理（fake-IP）宿主出网**：容器**自有 netns** 里 DNS 拿到 `198.18.x` fake-IP、TCP 全超时，
-  而 VM netns 正常 —— 构建与冒烟都要 `--network host`（`complete-check.sh` 默认即 host；无代理
-  宿主可 `--network podman` 用默认隔离网络）。2026-10-20 实测（apt 与 npm 两条都验证）
+  而 VM netns 正常 —— 构建与冒烟都要 `--network host`（`build-image.sh` / `complete-check.sh`
+  默认即 host；无代理宿主可 `--network podman` 用默认隔离网络）。2026-10-20 实测（apt 与 npm 两条都验证）
+- **rootful machine + `--userns=keep-id` + `--network host` 三者不可同用**：实测报
+  `crun: mount sysfs … Operation not permitted`（三态对照：只换掉 keep-id 即恢复）——
+  冒烟脚本因此用 `--user 1000:1000` 拿 worker 身份，rootless/rootful 两种 machine 都成立
 - **DSH provider 包缺口（#146）**：`@ch1bug/sandcastle-dsh` 目前**不可获取**（npm 404、上游仓已不在），
   而 `dsh.ts` / `run-ticket.mts` 是薄引用它 —— `audit-ticket.mts` 之外的模板会
   `ERR_MODULE_NOT_FOUND`。本仓 `sandcastle-e2e` 因此全红（opt-in 掩盖至今），修法待 #146 拍板

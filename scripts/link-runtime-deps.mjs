@@ -14,7 +14,8 @@
  * **#88 起两处守卫**（D47：防线缺席必须响亮）：
  *   1. **判指向**——链已存在但指向别处（含悬空）时**重指**并打印 `↻`，不再打 `= 已存在` 蒙混
  *      （旧版只判存在，于是重锚后测试静默打在旧包上 → `verify-all` 假绿）；
- *   2. **锚点核对**——用本仓 `package.json` 的 version 推出宿主锚（`0.2.1-rc.2-r1` → `0.2.1-rc.2`），
+ *   2. **锚点核对**——用本仓 `package.json` 的 version 推出宿主锚（`0.2.1-rc.2-r1` → `0.2.1-rc.2`，
+ *      派生规则唯一实现见 `scripts/runtime-anchor.mjs`），
  *      与该运行时 `@deepseek-ai/dsh-llm` 的版本比对；不一致即**响亮失败（exit 1）**。
  *
  * 用法：
@@ -28,6 +29,7 @@ import { existsSync, mkdirSync, symlinkSync, lstatSync, readdirSync, readFileSyn
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
+import { anchorOfPackage } from './runtime-anchor.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
@@ -214,15 +216,10 @@ const linkPackageTable = (table, toTable, dangling) => {
   console.log(`  ✓ ${toTable}：新建 ${created} · 重指 ${repointed} · 已对 ${kept}（共 ${table.size}；悬空跳过 ${dangling.length}）`)
 }
 
-/** 本仓 package.json 声明的宿主锚（`<official>-r<N>` / `<official>-a<N>` → `<official>`）。 */
+/** 本仓 package.json 声明的宿主锚（`<official>-r<N>` / `<official>-a<N>` → `<official>`）。
+ *  派生规则**唯一实现**在 `scripts/runtime-anchor.mjs`（#34：此处不再手抄一份正则）。 */
 function declaredAnchor() {
-  try {
-    const version = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).version
-    const m = /^(.+)-[ra]\d+$/.exec(String(version))
-    return m === null ? undefined : m[1]
-  } catch {
-    return undefined
-  }
+  return anchorOfPackage(REPO)
 }
 
 /** 该包表里 `dsh-llm` 的版本；缺失/读不到即 undefined。 */

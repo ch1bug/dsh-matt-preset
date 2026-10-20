@@ -16,6 +16,9 @@
 import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// 派生规则（`0.2.1-rc.1-r1` → `0.2.1-rc.1`）的**唯一实现**在 scripts/runtime-anchor.mjs ——
+// #34 起此处不再手抄一份正则（手抄的副本是漂移的种子，D4/D6）。
+import { anchorOf } from '../scripts/runtime-anchor.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
 const TABLE = join(REPO, 'tests', 'node_modules', '@deepseek-ai')
@@ -25,11 +28,7 @@ const results = []
 const ok = (n, d = '') => results.push('  ✓ ' + n + (d ? ' — ' + d : ''))
 const bad = (n, d = '') => results.push('  ✗ ' + n + (d ? ' — ' + d : ''))
 
-/** `0.2.1-rc.1-r1` → `0.2.1-rc.1`（与 link-runtime-deps.mjs 的 declaredAnchor 同一口径）。 */
-const anchorOf = (version) => {
-  const m = /^(.+)-[ra]\d+$/.exec(String(version))
-  return m === null ? undefined : m[1]
-}
+/** `0.2.1-rc.1-r1` → `0.2.1-rc.1`；实现见文件头 import 的 runtime-anchor.mjs。 */
 
 /** 读某个包表的 package.json 版本；读不到返回 undefined。 */
 const versionOf = (table, name) => {
