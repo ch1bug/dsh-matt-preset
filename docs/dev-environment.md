@@ -257,6 +257,39 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   `tests/verify-payload-manifest.mjs` 的 P9（反向：不落 store）/ P10（正向：命中的文件真落
   store）——#67 已修、方向同此：无 dsh 时 4 条 profile-link 断言响亮跳过（`SKIP (loud)`），store 侧照跑。
 
+### 分层：快集 / `--all` 全量（#129）
+
+**何时该跑哪一层** —— 判据就一句话：**这次读数能不能承受被截断**。全量单跑实测到过 273.5s
+（B 批 #125 会话），贴着外部运行器 300s 的上限；被截断的那次日志只剩标题行，"没跑起来"被读成
+"跑了且失败"（就是上面「探针先自检」第 ③ 条那个现场）。
+
+| 层 | 命令 | 何时跑 | 本机实测（2026-10-20） |
+| --- | --- | --- | --- |
+| 快集（默认） | `node scripts/verify-all.mjs` | 每次**提交**（pre-commit 走这一层）、迭代中反复跑 | **83.6s**（43/47：2 项 slow 未跑 + 2 项缺环境） |
+| 全量 | `node scripts/verify-all.mjs --all` | **批末 / 推送前 / 交付前**（本仓无 CI，全量即最终验收） | **192.1s**（45/47：同两项缺环境） |
+
+同一台机器、同一棵树上的分层前后：**192.1s → 83.6s**（约 2.3×）；省下的大头是
+`verify-isolated-git.mjs`（89.4s，占全量近一半）。
+
+- **哪一项属于 slow，由用例自己在文件头声明**：头部块注释里单起一行 `* @slow <一句 why + 实测读数>`。
+  入口**不保存名单**（名单会漂，标记不会）。快集里逐行 `SLOW` + 汇总 `N 项 slow 未跑（--all 补全）`
+  —— **默认跳过也响亮**（D47，口径同 loud skip）。判据只扫头部块注释：正文里出现 `@slow` 这个词
+  **不算**标记（`tests/verify-all-entry.mjs` E13 是它的反向自检）。
+- **当前 slow 组**（两项）：`verify-isolated-git.mjs`（≈85s —— I4 在真 linked worktree 里真提交，
+  钩子把入口**再唤起一遍**，耗时几乎全在这一层）、`verify-tmp-hygiene.mjs`（≈15s —— `CASES`
+  逐条起子进程 + 扫沙箱，磁盘密集）。
+- **显式例外（别当遗漏，也别顺手扩大）**：`verify-privacy-scan.mjs`（≈13s）也超 10s 阈值，但它是
+  `AGENTS.md` 明文的**提交期内容门禁**（个人 / 本机串不进仓）⇒ **留在快集**。分层砍的是
+  "自指重跑 / 大范围磁盘扫描"那类耗时，**不是内容门禁**。
+- **读数分档**：`PASS` / `PASS*`（含 loud skip）/ `FAIL`（**exit≠0** —— 唯一一种"跑了且断言不过"）
+  / `NORUN`（**没有退出码**：被信号杀或 watchdog 超时 —— 读作"没跑完"，**不是**用例失败）/
+  `SKIP`（环境门禁未开）/ `SLOW`（快集跳过）。退出码：`0` 全绿、`1` 有 `FAIL`、`2` 用法错或
+  "没有 `FAIL` 但有 `NORUN`"（读数不成立 ⇒ 不能算绿）。
+- `--timeout=<ms>`（opt-in，默认不设）：给每项装 watchdog。外部 300s 截断会**整套**丢日志，
+  有了它至少能读出"哪一项没跑完、是什么信号"。
+- 拼错的开关（`--al`）**硬失败**（exit 2）。静默回落到快集会让读数变成"快集全绿"，
+  而你以为跑的是全量 —— 那是最难发现的一种假绿。
+
 ## 0.3 防线缺席必须响亮（D47）
 
 **规则**：防线缺席时 —— 要么失败、要么打印一行说明；**静默通过视为缺陷**。依据：#55 收尾后 human 指出
@@ -275,6 +308,8 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
 | `SKIP_HOOKS=1` 主动绕过 | 打印 `pre-commit: SKIP_HOOKS set — 跳过 verify-all` | 已响亮。⚠ **它是逃生口，不是 worktree 场景的常态**：linked worktree 下钩子本应正常可用（#110 已修：夹具走共享挂具 `tests/isolated-git.mjs`，不再把 `core.bare` 写进调用方的共享仓）。若你发现自己在 worktree 里**每次**都得 `SKIP_HOOKS=1`，那是缺陷不是用法 —— 先查 §0.2 的钩子上下文差异，别把它当日常 |
 | 环境门禁变量未设 | 汇总 `SKIP` 行 + "N 项因缺环境跳过" | 已显式 |
 | 用例内 loud skip | 汇总标 `PASS*` | 已显式 |
+| 快集跳过了 slow 用例（#129 分层） | 逐行 `SLOW` + 汇总 `N 项 slow 未跑（--all 补全）` | 已显式 —— **快集绿 ≠ 全量绿**：批末 / 推送前 / 交付前跑 `--all`（判据 `tests/verify-all-entry.mjs` E10–E14） |
+| 用例**没有退出码**（被信号杀 / watchdog 超时） | 单列 `NORUN` + 汇总 `INCOMPLETE`（exit 2） | 已显式 —— `exit=null` 读作"没跑完"，**不混进 `FAILED`**（同上 E12） |
 | `scripts/link-runtime-deps.mjs` 未跑 | `ERR_MODULE_NOT_FOUND` 硬失败 | 已响亮 + **报错指路**（#69：失败输出含 `ERR_MODULE_NOT_FOUND` 时 `verify-all` 追一行 `node scripts/link-runtime-deps.mjs`；判据 `tests/verify-all-entry.mjs` E7） |
 | `package.json files` 条目零展开 | 此前**完全静默**（payload 少发货） | 已立 #66 并修 |
 

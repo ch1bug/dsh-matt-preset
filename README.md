@@ -61,11 +61,14 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 ```bash
 git config core.hooksPath .githooks    # 首次 clone 一次：启用 .githooks/pre-commit 提交前门禁（本地配置，不随 clone 分发）
 node scripts/link-runtime-deps.mjs    # 首次/换机：把测试依赖链到已装 dsh 运行时（幂等）
-node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 pnpm 在 PATH 上）
+node scripts/verify-all.mjs           # 唯一检查入口（== pnpm test，若 pnpm 在 PATH 上）；默认层 = 快集
+node scripts/verify-all.mjs --all     # 全量：连头部标了 @slow 的长跑用例一起跑（批末 / 推送前 / 交付前）
 ```
 
-`verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / SKIP，末尾如实汇总：
-**`PASS*` = 该用例含 loud skip，其环境侧断言未验证**（绿不等于全验过）。
+`verify-all` 枚举 `tests/*.mjs`、逐项报 PASS / PASS* / FAIL / NORUN / SKIP / SLOW，末尾如实汇总：
+**`PASS*` = 该用例含 loud skip，其环境侧断言未验证**（绿不等于全验过）。**分层**：直接跑 =
+**快集**（跳过标了 `@slow` 的长跑用例，pre-commit 走这一层），`--all` = 全量 ——
+**快集绿 ≠ 全量绿**；两种读数、何时跑哪一层见 `docs/dev-environment.md` §0.2「分层」（#129）。
 汇总行尾带 `hooks=<on|off|未设置>`（提交前门禁是**每 clone 一次**的本地配置，缺席必须响亮；
 非 on 时另给一行补救命令；git 不可用或非 git 仓库时不带该段，且不改 exit code，见
 [dev-environment §0.3](docs/dev-environment.md#03-防线缺席必须响亮d47)）。

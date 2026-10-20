@@ -1,7 +1,9 @@
 #!/bin/sh
 # .githooks/pre-commit —— 本仓无 CI（ADR-0004 的边界见 ADR-0013），本地套件即唯一验收通道；
 # 提交前跑它。四项：① 分支形态（detached HEAD 拒绝）② index/工作树不脱节
-# ③ staged 的 tests/* 新增行里不留实验标记 ④ verify-all 全套（含 privacy 验收）。
+# ③ staged 的 tests/* 新增行里不留实验标记 ④ verify-all 的**默认层（快集）**（#129 分层：
+#    @slow 长跑用例不在这一层 —— 全量 `--all` 留到批末 / 推送前 / 交付前；privacy 验收仍在本层，
+#    它被显式留在快集，见 scripts/verify-all.mjs 头注「分层」）。
 # 启用（每个 clone 一次）：git config core.hooksPath .githooks
 # 绕过（明确知道自己在跳什么时）：SKIP_HOOKS=1 git commit …
 [ -n "$SKIP_HOOKS" ] && { echo "pre-commit: SKIP_HOOKS set — 跳过 verify-all"; exit 0; }
