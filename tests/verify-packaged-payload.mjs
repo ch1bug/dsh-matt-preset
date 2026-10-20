@@ -35,16 +35,20 @@
  * import、`import()` 各要一条，宽一次还能再绕一层（§8 D13：用正则追写法必输）。resolver
  * 见到的就是**真的**载入图 —— 入口 `await import()` 一次，等于让 Node 自己把断口找出来。
  *
- * 种子面 = `bin` 声明 + 发布面里**根级**的 `.mjs`（今天 5 个：4 个 root 插件模块 + CLI）。
- * 目录条目（`skills` / `lang-packs` / `sandcastle` / `lib`）下的模块**不单独作种子**——它们
- * 只在**被 import 到**时才算数，而那正是判据关心的方向；把未被 import 的文件也拉进来只会
- * 制造无关的红。这不是为 #84 扩大范围：不变量本身是"发布面里任何相对 import 都必须也在
- * 发布面里"，只验 CLI 等于让插件侧的同族断口没人看。
+ * 种子面 = `bin` 声明 + 离线模型里**每一个 `.mjs` 路径**（这里规则是"路径以 `.mjs` 结尾"，
+ * 不是"根级"）：目录条目（`skills` / `lang-packs` / `sandcastle` / `lib`）由 `payloadOf` 原样
+ * 返回、不展开，所以今天恰好是 5 个根级模块（4 个 root 插件 + CLI）；若将来 `files` 里出现
+ * 深路径或通配，种子会随之增加 —— 那也是对的：凡是**被显式列进发布面**的模块都可能带着
+ * 自己的相对 import，都该被走到。目录下的模块**不单独作种子**，只在**被 import 到**时进闭包，
+ * 而那正是判据关心的方向（把没人 import 的文件也拉进来只会制造无关的红）。
+ * 这不是为 #84 扩大范围：不变量本身是"发布面里任何相对 import 都必须也在发布面里"，
+ * 只验 CLI 等于让插件侧的同族断口没人看。
  *
  * 显式声明**不覆盖**（D13 纪律：与其留一条看着在守、其实不覆盖的锁，不如写明边界）：
- *   · `.mts`（`sandcastle/templates/*`）—— TS 源，Node 不直接执行；
+ *   · `.mts`（`sandcastle/templates/*`）—— TS 源，Node 不直接执行（那里**有**懒加载相对
+ *     import，如 `run-ticket.mts` 的 `await import('./dsh.ts')`，正因不在覆盖内才要写明）；
  *   · 函数体内的懒加载 `await import()` —— 本用例只 `import` 入口、不执行里面的分支
- *     （今天仓库里 0 处懒加载相对 import）；
+ *     （发布面的 `.mjs` 里今天 0 处懒加载相对 import）；
  *   · `createRequire(...)('./x.mjs')` 这类 CJS 相对解析 —— 不走 ESM 的 resolve 钩子
  *     （今天只有裸包 `require('yaml')`，属 `dependencies` 面，不在 `files` 判据内）。
  *
@@ -55,9 +59,11 @@
  * 写三条显式路径会让离线模型（K2）与真实发布面**差一条**，将来谁把 `bundle-patch.mjs` 接进
  * 发布面就是**假红**。所以这里选"清单 = 现实"：一条 `lib`，K6 的单向对齐（模型 ⊆ tarball）
  * 也就不会被"npm 多发"绊住（多发方向不由本仓选择，见下）。
- * 代价要写明：`files` 在本仓是**双职**（`bin/install.mjs` 逐条 `cp` 进 store），所以安装副本
- * 因此多出 `lib/` 的 **4 个**文件（含仓内构建面的 `bundle-patch.mjs`，约 18KB）——无消费者，
- * 但无害；它的消费者仍是 `scripts/regen-bundle.mjs` 与用例。
+ * 代价要写明：`files` 在本仓是**双职**（`bin/install.mjs` 逐条 `cp` 进 store），所以相对
+ * 修复前（`f16e541`，store 里一个 lib 文件都没有）安装副本多出 **4 个**文件 —— 其中 3 个是
+ * CLI 载入期必需的（`payload` / `runtime-probe` / `safe-target`），第 4 个 `bundle-patch.mjs`
+ * （18,810 B）是"npm 整目录发"带进来的副产物：它无消费者、无害，消费者仍是
+ * `scripts/regen-bundle.mjs` 与用例。（相对第 1 轮那三条显式条目，本轮只多这 1 个。）
  *
  * 环境边界：npm 缺席（Node 发行版一般自带；也可能只有 corepack）→ 打包层四条
  * `SKIP (loud)`（`scripts/verify-all.mjs` 记 PASS*），**不静默当通过**；离线层照跑。
@@ -152,18 +158,28 @@ if (!hookAvailable) {
   bad('K1–K2. 载入图闭包（本机 Node 无 module.registerHooks）',
     `node ${process.version}: 无法取真实 import 图 —— 离线层未验证（不是通过）`)
 } else {
-  // ── K1: 机制自检（临时夹具：传递依赖必须被走到、内置必须被排除） ─────────────
+  // ── K1: 机制自检（临时夹具：传递依赖必须被走到；`node:` 内置与 `node_modules` 裸包必须
+  // 被排除）。裸包这一支不是装饰：闭包的 node_modules 排除**在记录处**做，而真树里
+  // `node_modules/yaml` 是指向仓外的 junction（realpath 天然在仓外），所以只有让夹具自带一个
+  // **实体的** `node_modules/<pkg>` 才能证伪那行排除 —— 删掉它，K1 必红（#84 第 2 轮复核
+  // 指出"该修法无法被任何断言证伪"，这里补上自检）。
   const fx = await mkdtemp(join(tmpdir(), 'dsh-closure-fx-'))
   process.on('exit', () => { try { rmSync(fx, { recursive: true, force: true }) } catch { /* already gone */ } })
   try {
     await mkdir(join(fx, 'nested'), { recursive: true })
-    await writeFile(join(fx, 'entry.mjs'), "import './dep.mjs'\nimport './nested/deep.mjs'\nimport { readFileSync } from 'node:fs'\nexport const entry = typeof readFileSync\n")
+    await mkdir(join(fx, 'node_modules', 'fakepkg'), { recursive: true })
+    await writeFile(join(fx, 'node_modules', 'fakepkg', 'package.json'),
+      JSON.stringify({ name: 'fakepkg', version: '1.0.0', main: 'index.mjs', type: 'module' }))
+    await writeFile(join(fx, 'node_modules', 'fakepkg', 'index.mjs'), 'export const fake = 1\n')
+    await writeFile(join(fx, 'entry.mjs'),
+      "import './dep.mjs'\nimport './nested/deep.mjs'\nimport 'fakepkg'\nimport { readFileSync } from 'node:fs'\nexport const entry = typeof readFileSync\n")
     await writeFile(join(fx, 'dep.mjs'), 'export const dep = 1\n')
     await writeFile(join(fx, 'nested', 'deep.mjs'), "import '../dep.mjs'\nexport const deep = 2\n")
     const fxClosure = (await closureOf(fx, 'entry.mjs')).sort()
     const expectedFixture = ['dep.mjs', 'entry.mjs', 'nested/deep.mjs']
     if (JSON.stringify(fxClosure) === JSON.stringify(expectedFixture)) {
-      ok('K1. 闭包器有效：走到传递依赖、排除 node: 内置（夹具自检）', fxClosure.join(', '))
+      ok('K1. 闭包器有效：走到传递依赖，排除 node: 内置与实体 node_modules 裸包（夹具自检）',
+        fxClosure.join(', '))
     } else {
       bad('K1. 闭包器自检失败（此时 K2 的"绿"没有意义）',
         `got ${JSON.stringify(fxClosure)} expected ${JSON.stringify(expectedFixture)}`)
@@ -229,9 +245,16 @@ if (!hookAvailable) {
         const pkgDir = await extractTarball(join(work, info.filename), join(work, 'unpack'))
         const cli = spawnSync(process.execPath, [join(pkgDir, 'bin', 'install.mjs'), '--version'], { encoding: 'utf8' })
         const version = (cli.stdout ?? '').trim()
-        // 红时的诊断要**点名断口**（`Cannot find module '<abs>' …` 那行），只贴栈头没有价值：
-        // 第一版贴的是 stderr 第 2–3 行（`throw new ERR_MODULE_NOT_FOUND(`），复核指出它读不出缺失模块。
-        const errLine = (cli.stderr ?? '').split(/\r?\n/u).find((line) => /ERR_[A-Z_]+|Cannot find module/u.test(line))
+        // 红时的诊断要**点名断口**（`Cannot find module '<abs>' …` 那行），只贴栈头没有价值。
+        // 取法有次序（第 2 轮复核判为硬违规后定的）：① 含 `Cannot find module` 的行——那是
+        // **点出缺失模块**的唯一一行；② 以 `*Error` 开头的行（YAMLParseError 一类没有
+        // "Cannot find module" 的失败）；③ 兜底贴前两行非空 stderr（否则非 ERR 类失败的诊断
+        // 会退化成空串，比原来更差）。**不要**先匹配 `ERR_[A-Z_]+`：Node 的栈头
+        // `throw new ERR_MODULE_NOT_FOUND(` 会先命中它，而那行不含模块名——第 1 版的错就在这。
+        const stderrLines = (cli.stderr ?? '').split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
+        const errLine = stderrLines.find((line) => /Cannot find (?:module|package)/u.test(line))
+          ?? stderrLines.find((line) => /^[\w$.]*Error\b/u.test(line))
+          ?? stderrLines.slice(0, 2).join(' ')
         if (cli.status === 0 && version === PKG.version) {
           ok('K4. 解包后的 CLI 能跑（`bin/install.mjs --version`）', `exit 0，输出 ${version}`)
         } else {
