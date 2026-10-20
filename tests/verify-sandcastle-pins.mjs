@@ -19,8 +19,22 @@
  * P3 README 写明机制（ARG / 构建包装器 / 守卫指针），且本身不含旧版本字面量
  * P4 docs/dev-environment.md **§2 段落内**：`本仓 `<version>`` 与「当前锚」行都等于事实源
  *    （限定在 §2 内提取：全文首个 `本仓 `…`` 可能是别处的散文，那是 D13 的形态）
- * P5 docs/RELEASE.md 的锚点表：`latest（跟 RC）` 行与 `打包产物` 行都等于事实源
+ * P5 docs/RELEASE.md：锚点表（`latest（跟 RC）` 行、`打包产物` 行）+「当前 <锚>」那句
  * P6 docs/dev-environment.md 的两处 `--version` 期望值 == 派生锚
+ * P7 docs/dev-environment.md §3 的源码部署命令（`git fetch … tag dsh-v<锚>` /
+ *    `git checkout tags/dsh-v<锚>`）== 派生锚 —— 这是"照做就会装错版本"的承载面
+ *
+ * **显式不覆盖（declare not covered，D13/D15 口径）**：**叙述性历史锚不钉** ——
+ *   `docs/dev-environment.md` §2 的「上一锚 / 上二锚」行与 §2/§3.1 的升级史叙述
+ *   （`gh release view dsh-v…`、「已于 … 前移至 dsh-v…」），以及 `docs/RELEASE.md` 的
+ *   next 通道举例（`dsh-v0.2.1-alpha.1-a1`）。它们**按设计**保留旧锚（通道史），
+ *   钉住只会把"刻意记录"判成漂移。本守卫只钉**当前锚的承载面** = 上面的 P1–P7；
+ *   这条边界是有意的，不是遗漏。
+ *
+ * **口径修正（票面 vs 实测，D9）**：票面 #34 写「npm 包内已升 `0.2.0-rc.2`」**不成立** ——
+ *   实测 `package.json` 是 `0.2.1-rc.2-r1`（宿主锚 `0.2.1-rc.2`）；`0.2.0-rc.2` 属更早的
+ *   版本线（`0.2.0-rc.2-r1`，见 docs/dev-environment.md §2 的「上二锚」）。本票的比对基准
+ *   一律走**当前派生锚**，不要照票面的数字比对。
  *
  * 不做的事：不联网核对 npm 上该版本是否存在（离线可跑；发布面由 `podman build` 与
  * complete-check.sh 的镜像内版本断言负责）。
@@ -50,10 +64,13 @@ const declaredAnchor = anchorOf(pkgVersion)
 const VERSION_RE = /\b\d+\.\d+\.\d+-(?:rc|alpha|beta)\.\d+(?:-[ra]\d+)?\b/g
 
 // ── P0: 比较器非空洞 ────────────────────────────────────────────────────────
-const HISTORIC_DRIFT = ['0.1.1-rc.2-r1', '0.2.0-rc.2-r1']
-const outputs = HISTORIC_DRIFT.map(anchorOf)
+// 两个**历史 preset 版本**（不是"本仓曾用锚"）：0.1.1-rc.2-r1 = 模板 Dockerfile 曾经的旧钉版；
+// 0.2.0-rc.2-r1 = 更早的 preset 版本线（docs/dev-environment.md §2「上二锚」）。它们只用来
+// 证明比较器能区分，不代表当前锚曾等于它们。
+const HISTORIC_VERSIONS = ['0.1.1-rc.2-r1', '0.2.0-rc.2-r1']
+const outputs = HISTORIC_VERSIONS.map(anchorOf)
 if (declaredAnchor !== undefined && outputs.every((a) => a !== undefined && a !== declaredAnchor)) {
-  ok('P0. anchor comparator is non-vacuous', `${HISTORIC_DRIFT.join(' / ')} 都不等于 ${declaredAnchor}`)
+  ok('P0. anchor comparator is non-vacuous', `${HISTORIC_VERSIONS.join(' / ')} 都不等于 ${declaredAnchor}`)
 } else {
   bad('P0. anchor comparator degenerate', `declared=${declaredAnchor ?? '?'} historic=${outputs.join(' / ')} —— P1 会永远绿`)
 }
@@ -141,8 +158,12 @@ if (release === undefined) {
   }
   if (tgzRow === undefined) problems.push('找不到「打包产物」行')
   else if (!tgzRow.includes(`dsh-matt-preset-${pkgVersion}.tgz`)) problems.push(`打包产物行缺 dsh-matt-preset-${pkgVersion}.tgz`)
-  if (problems.length === 0) ok('P5. RELEASE.md anchor table matches the source of truth')
-  else bad('P5. RELEASE.md 锚点表漂移', problems.join('；'))
+  // P5b：「`<official>` 对齐 DSH 运行时版本（当前 <锚>）」这一句 —— 照它做就会拿错版本。
+  const currentInProse = /对齐 DSH 运行时版本（当前 ([\w.\-]+)）/.exec(release)?.[1]
+  if (currentInProse === undefined) problems.push('找不到「对齐 DSH 运行时版本（当前 …）」句（结构变了？）')
+  else if (currentInProse !== declaredAnchor) problems.push(`该句写的是 ${currentInProse}，期望 ${declaredAnchor ?? '?'}`)
+  if (problems.length === 0) ok('P5. RELEASE.md anchor table + 「当前 …」句 match the source of truth')
+  else bad('P5. RELEASE.md 锚点漂移', problems.join('；'))
 }
 
 // ── P6: dev-environment 的 --version 期望 ──────────────────────────────────
@@ -158,6 +179,23 @@ if (devenv !== undefined) {
     bad(
       'P6. dev-environment 的 --version 期望与派生锚不一致（或结构变了）',
       `读到 ${expected.map((v) => v ?? '未找到').join(' / ')}；期望 ${declaredAnchor ?? '?'}`,
+    )
+  }
+}
+
+// ── P7: dev-environment §3 的源码部署命令 == 派生锚 ────────────────────────
+// 照 §3 的三行做就会装一套运行时：tag 写错 = 装错版本。叙述性历史锚不在此列（见头注 declare）。
+if (devenv !== undefined) {
+  const sec3 = devenv.split(/^## /m).find((s) => s.startsWith('3. '))
+  const fetchTag = /git fetch --depth 1 origin tag (dsh-v[\w.\-]+)/.exec(sec3 ?? '')?.[1]
+  const checkoutTag = /git checkout tags\/(dsh-v[\w.\-]+)/.exec(sec3 ?? '')?.[1]
+  const want = `dsh-v${declaredAnchor ?? '?'}`
+  if (fetchTag === want && checkoutTag === want) {
+    ok('P7. dev-environment §3 clone 命令的 tag == 派生锚', want)
+  } else {
+    bad(
+      'P7. dev-environment §3 的克隆 tag 与派生锚不一致（或结构变了）',
+      `fetch=${fetchTag ?? '未找到'} checkout=${checkoutTag ?? '未找到'}；期望 ${want}`,
     )
   }
 }

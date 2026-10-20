@@ -40,21 +40,31 @@ bash .sandcastle/complete-check.sh --image localhost/<repo>:dsh
 
 它做三件事：**复用现有** podman machine（**绝不** init/set/stop/rm，也不停不删别人的容器与镜像
 ——machine 是共享 WSL VM，内有别的项目数据）、按需建镜像（`--no-build` 可禁）、在容器内跑一轮
-headless 并断言收尾契约。**前后各取一次快照**（容器名集合 + machine 列表）并比对——「没碰别人的
-容器」因此是可判读数，不是脚本自述。宿主 `$DSH_HOME` **只读**挂入，只拷 `.credentials.yaml`
-（有 `settings.yaml` 一并带上）。
+headless 并断言收尾契约。**前后各取一次快照做定向比对**：machine 列表必须不变、冒烟前在场的容器
+必须**全部仍在**、自己的容器必须已消失——「没碰别人的容器」因此是可判读数，不是脚本自述。
+边界如实说：它证明「我们没删/没停别人的东西」，**不证明「别人没动」**；窗口内他人**新建**的容器
+不计入，但若有人正在启停容器，仍可能误报（宁可报、不静默）。宿主 `$DSH_HOME` **只读**挂入，
+只拷 `.credentials.yaml`（有 `settings.yaml` 一并带上）。
 
-**绿的证明力（别把它读成"模型会写 COMPLETE"）**：默认任务随机出两个因数（如 `37 × 24`），要求
-模型把**乘积**写进行首行、收尾行才写 `<promise>COMPLETE</promise>`；断言同时要求「乘积在场」+
-「标记在场」——prompt 回显只能拿到因数，拿不到乘积，所以这条绿证明的是**真跑了一轮 turn**
-而不是复述指令。用 `--task` 自定义任务时该证伪自动失效，脚本会响亮声明只断言 COMPLETE 契约。
+**绿的证明力（别把它读成"模型会写 COMPLETE"）**：默认任务随机出两个三位数因数，要求模型把
+**乘积**写进输出、并给出 `<promise>COMPLETE</promise>`；断言同时要求「乘积在场」+「标记在场」——
+prompt 回显只能拿到因数，拿不到乘积，所以这条绿证明的是**真跑了一轮 turn** 而不是复述指令。
+（**不校验位置**：乘积出现在输出里即可；乘积取五到六位数，降低与 token/耗时等数字撞车的概率。）
+用 `--task` 自定义任务时该证伪自动失效，脚本会响亮声明只断言 COMPLETE 契约。
 
 版本核对也比一道：`build-image.sh --print-version` 给出派生锚，与容器内 `dsh --version` **精确**
-比对（陈旧镜像会在这里红，而不是在夜批里红）。
+比对（陈旧镜像会在这里红，而不是在夜批里红）。⚠ 镜像**存在即复用**：换版本后要 `podman rmi`
+或换 `--image` tag 才会重建。
 
 常用开关：`--network host|podman`（默认 host，见下「已知边界」）、`--user 1000:1000`（默认，
 对齐镜像里的 agent；rootful machine 下 `--userns=keep-id` 与 host 网络冲突）、
-`--env KEY[=VALUE]`（可重复，只写 KEY 时从启动环境取值）。
+`--env KEY[=VALUE]`（可重复，只写 KEY 时从启动环境取值）、`--expect-version <锚>`（消费者树拿不到
+派生锚时用它补版本核对）。
+
+**消费者树（把 `templates/` 拷进项目 `.sandcastle/`）**：那里没有本仓 `scripts/runtime-anchor.mjs`，
+`build-image.sh` 会**响亮失败（exit 3）**并给出显式用法；`complete-check.sh` 见到这个失败会**回退**
+为「用 Dockerfile 的 ARG 默认值直接 `podman build`」，所以冒烟仍可用——只是版本核对要你显式给
+`--expect-version <宿主锚>`（否则只打印实读版本、不判等）。
 
 **凭据这一格的实测（2026-10-20）**：容器里**只拷 `.credentials.yaml` 不够** —— 新引导的
 headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_KEY` 从启动环境
@@ -62,8 +72,13 @@ headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_K
 文件拷贝是 run-ticket 的现行形态，env 是本机实测可靠的一条。
 
 退出码：`0` 通过 / `2` 环境前置不满足（podman、machine 未起、镜像缺失、凭据缺失）/
-`3` 镜像构建失败 / `4` 运行失败、未观测到 COMPLETE、乘积不在场、或**前后快照不一致** /
-`5` 镜像内 dsh 版本 ≠ 派生锚 / `64` 用法错（未知参数、Dockerfile 路径不存在）。
+`3` 镜像构建失败 / `4` 运行失败、未观测到 COMPLETE、乘积不在场、或**快照定向判据不成立** /
+`5` 镜像内 dsh 版本 ≠ 期望值 / `64` 用法错（未知参数、Dockerfile 路径不存在）。
+
+`build-image.sh` 自己的退出码：`0` 成功 / `3` 派生锚拿不到（消费者树、`package.json` 形态不符）/
+`4` 构建失败 / `64` 用法错。`--` 之后可透传额外 `podman build` 参数，但若在那里写
+`--build-arg DSH_VERSION=<别的版本>`，包装器会**显式宣告覆盖**（公告行与末尾汇报都用实际生效值）
+—— 那是给探针/临时验证的口子，常规构建别用。
 
 ### 钉版策略：DSH 版本只认一处（#34 第 3 项，Q2 拍定口径）
 

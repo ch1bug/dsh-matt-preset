@@ -6,17 +6,20 @@
 #   ② 容器内 `dsh --profile headless "<task>"` 能**真的跑完一轮**并给出
 #      `<promise>COMPLETE</promise>` —— 即 run-ticket 的 worker 形态在镜像里活着。
 #
-# ② 的**非空洞**设计（重要）：任务文本里刻意**不含**被判字符串以外的答案，而是随机出两个因数、
-#   要求模型把**乘积**写进行首行，收尾行才是 completion 标记。断言同时要求「乘积出现」+
-#   「标记出现」⇒ 把 prompt 回显 / 模型复述指令统统排除掉（只回显 prompt 拿不到乘积）。
+# ② 的**非空洞**设计（重要）：任务文本里只给两个随机因数，要求模型把**乘积**写进输出，收尾才是
+#   completion 标记。断言同时要求「乘积出现」+「标记出现」⇒ 把 prompt 回显 / 模型复述指令统统排除
+#   （只回显 prompt 拿不到乘积）。**不校验位置**（整段输出里出现即可）；因数取三位数，乘积落在
+#   五到六位数，降低与 harness 自身数字（token 计数/耗时/行号）撞车的概率。
 #   用 `--task` 自定义任务时该证伪自动失效，脚本会**响亮声明**它只断言 COMPLETE 契约。
 #
 # 硬约束（票面 AC②，违反即事故）：**只用现成的 podman machine**。
 #   - 本脚本绝不 `podman machine init/set/stop/rm`，绝不 `podman system prune`，
 #     绝不停/删别人的容器或镜像（本机 machine 是共享 WSL VM，内有另一项目数据库）。
 #   - 自己的容器用带 PID 的唯一名 + `--rm`，跑完即消失；
-#   - **前后各取一次快照**（容器名集合 + machine 列表），不一致即红 —— 让「没碰别人的东西」
-#     成为一个**可判**的读数，而不是脚本的一句自述。
+#   - **前后各取一次快照**（容器名集合 + machine 列表）做**定向**比对：machine 列表必须不变、
+#     冒烟前在场的容器必须**全部仍在**、自己的容器必须已消失。它证明「我们没删/没停别人的东西」，
+#     不证明「别人没动」；窗口内他人**新建**的容器不计入。共享 machine 上若有人正在启停容器，
+#     仍可能误报 —— 宁可报、不静默（这条边界是有意的，别读成"完全无误判"）。
 #   - machine 没起时**只报告**，不代劳启动（启动是宿主侧决定）。
 #
 # 用法：
@@ -30,6 +33,7 @@
 #     --dsh-home <dir>    宿主 DSH_HOME（默认 $DSH_HOME，缺省 $HOME/.dsh）
 #     --network <mode>    构建与运行共用的 podman 网络模式（默认 host，见下）
 #     --user <uid:gid>    容器内执行身份（默认 1000:1000，对齐 Dockerfile 里的 agent）
+#     --expect-version <v> 版本期望值（消费者树拿不到派生锚时用它补版本核对；本仓内默认取派生锚）
 #     --env KEY[=VALUE]   透传一个环境变量进容器（可重复；只写 KEY 时从启动环境取值）
 #     -h | --help
 #
@@ -61,16 +65,22 @@ TIMEOUT=600
 DSH_HOME_HOST="${DSH_HOME:-$HOME/.dsh}"
 NETWORK="host"
 USER_SPEC="1000:1000"
+EXPECT_VERSION=""
 ENV_ARGS=()
 
-# 默认任务：随机因数 → 乘积（证伪 prompt 回显）+ completion 标记（worker 契约）
-A=$(( (RANDOM % 80) + 12 ))
-B=$(( (RANDOM % 80) + 12 ))
+# 默认任务：随机因数 → 乘积（证伪 prompt 回显）+ completion 标记（worker 契约）。
+# 因数取三位数：乘积落在五到六位数，降低与 harness 自身数字（token/耗时/行号）撞车的概率。
+A=$(( (RANDOM % 800) + 100 ))
+B=$(( (RANDOM % 800) + 100 ))
 EXPECT=$(( A * B ))
 TASK="只回复两行：第一行只写算式 ${A} × ${B} 的结果（一个数字，不要别的内容），第二行写 <promise>COMPLETE</promise>"
 
 say() { printf '%s\n' "$*"; }
-die() { printf '✗ %s\n' "$*" >&2; exit "${2:-2}"; }
+# 消息取 $1、退出码取 $2（**必须显式传**）：用 `$*` 会把退出码拼进正文，默认值又会变成死码。
+die() {
+  printf '✗ %s\n' "$1" >&2
+  exit "${2:?die 需要显式退出码}"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -83,6 +93,7 @@ while [ $# -gt 0 ]; do
     --dsh-home) DSH_HOME_HOST="${2:?--dsh-home 需要值}"; shift 2 ;;
     --network) NETWORK="${2:?--network 需要值}"; shift 2 ;;
     --user) USER_SPEC="${2:?--user 需要值}"; shift 2 ;;
+    --expect-version) EXPECT_VERSION="${2:?--expect-version 需要值}"; shift 2 ;;
     --env) ENV_ARGS+=(-e "${2:?--env 需要值}"); shift 2 ;;
     -h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "未知参数：$1（--help 看用法）" 64 ;;
@@ -90,11 +101,11 @@ while [ $# -gt 0 ]; do
 done
 
 [ -f "$DOCKERFILE" ] || die "Dockerfile 不存在：$DOCKERFILE" 64
-[ -d "$DSH_HOME_HOST" ] || die "宿主 DSH_HOME 不是目录：$DSH_HOME_HOST"
+[ -d "$DSH_HOME_HOST" ] || die "宿主 DSH_HOME 不是目录：$DSH_HOME_HOST" 2
 if [ -f "$DSH_HOME_HOST/.credentials.yaml" ]; then
   say "✓ 凭据文件：$DSH_HOME_HOST/.credentials.yaml（只读挂入，容器内拷进 ~/.dsh）"
 else
-  [ -n "${DEEPSEEK_API_KEY:-}" ] || die "既无 $DSH_HOME_HOST/.credentials.yaml，启动环境也没有 DEEPSEEK_API_KEY —— 容器内 headless 无凭据"
+  [ -n "${DEEPSEEK_API_KEY:-}" ] || die "既无 $DSH_HOME_HOST/.credentials.yaml，启动环境也没有 DEEPSEEK_API_KEY —— 容器内 headless 无凭据" 2
 fi
 # 环境变量通道（实测比文件拷贝可靠，见头注）：启动环境有 DEEPSEEK_API_KEY 就透传
 if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
@@ -102,34 +113,36 @@ if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
   say "✓ 凭据：透传启动环境的 DEEPSEEK_API_KEY（长度 ${#DEEPSEEK_API_KEY}）"
 fi
 
-command -v podman >/dev/null 2>&1 || die "podman 不在 PATH 上"
+command -v podman >/dev/null 2>&1 || die "podman 不在 PATH 上" 2
 
-# ── 快照（前后各一次）：让「没碰别人的容器/machine」成为可判读数 ──────────────
-snapshot() {
-  podman ps -a --format '{{.Names}}' 2>/dev/null | sort
-  podman machine list --format '{{.Name}}|{{.Running}}' 2>/dev/null | sort
-}
-BEFORE_SNAPSHOT="$(snapshot)"
-BEFORE_CONTAINERS="$(printf '%s\n' "$BEFORE_SNAPSHOT" | grep -vc '|' || true)"
+# ── 快照（前后各一次）：让「没碰别人的容器/machine」成为**定向**可判读数 ──────
+before_containers() { podman ps -a --format '{{.Names}}' 2>/dev/null | sort; }
+machine_list() { podman machine list --format '{{.Name}}|{{.Running}}' 2>/dev/null | sort; }
+BEFORE_CONTAINERS="$(before_containers)"
+BEFORE_MACHINES="$(machine_list)"
+BEFORE_CONTAINER_COUNT="$(printf '%s' "$BEFORE_CONTAINERS" | grep -c . || true)"
 
 # ── ① machine 形态：只读探测，绝不改动 ──────────────────────────────────────
-MACHINES="$(podman machine list --format '{{.Name}}|{{.Running}}' 2>&1)" || die "podman machine list 失败：$MACHINES"
+MACHINES="$(podman machine list --format '{{.Name}}|{{.Running}}' 2>&1)" || die "podman machine list 失败：$MACHINES" 2
 RUNNING="$(printf '%s\n' "$MACHINES" | awk -F'|' '$2 == "true" { print $1; exit }')"
 if [ -z "$RUNNING" ]; then
   die "没有正在运行的 podman machine（读到的：$(printf '%s' "$MACHINES" | tr '\n' ' '))。
   本脚本**不创建/不启动/不重建** machine（票面 AC②：不得触碰共享 WSL 容器）。
-  需要 machine 时由宿主侧自行决定：podman machine start <name>"
+  需要 machine 时由宿主侧自行决定：podman machine start <name>" 2
 fi
 say "✓ podman machine：$RUNNING（复用现有实例，未做任何变更）"
-say "✓ 现有容器：${BEFORE_CONTAINERS} 个（本次冒烟自己的容器跑完即 --rm 消失）"
+say "✓ 现有容器：${BEFORE_CONTAINER_COUNT} 个（本次冒烟自己的容器跑完即 --rm 消失）"
 
-# ── ② 派生锚（版本核对用；消费者树拿不到就响亮跳过，不猜）──────────────────
+# ── ② 派生锚（版本核对用；消费者树拿不到就响亮跳过，或用 --expect-version 显式给）──
 PINNED=""
 if [ -f "$SCRIPT_DIR/build-image.sh" ] && PINNED="$(bash "$SCRIPT_DIR/build-image.sh" --print-version 2>/dev/null)"; then
   say "✓ 派生锚（build-image.sh --print-version，规则唯一实现 scripts/runtime-anchor.mjs）：$PINNED"
+elif [ -n "$EXPECT_VERSION" ]; then
+  PINNED="$EXPECT_VERSION"
+  say "✓ 版本期望值（--expect-version）：$PINNED"
 else
   PINNED=""
-  say "! 拿不到派生锚（消费者树？）—— 跳过「镜像内版本 == 派生锚」的核对；版本请用 --build-arg DSH_VERSION 自行对齐"
+  say "! 拿不到派生锚（消费者树？）—— 跳过「镜像内版本 == 期望」的核对；可传 --expect-version <锚> 补上"
 fi
 
 BUILD_CONTEXT="${CONTEXT:-$(cd -- "$(dirname -- "$DOCKERFILE")" && pwd)}"
@@ -139,13 +152,20 @@ if podman image exists "$IMAGE"; then
   say "✓ 复用镜像：$IMAGE"
 else
   if [ "$NO_BUILD" = "1" ]; then
-    die "镜像不存在且指定了 --no-build：$IMAGE"
+    die "镜像不存在且指定了 --no-build：$IMAGE" 2
   fi
-  [ -f "$SCRIPT_DIR/build-image.sh" ] || die "缺构建包装器 build-image.sh，无法在注入派生锚的前提下建镜像" 3
   START_TS=$SECONDS
-  bash "$SCRIPT_DIR/build-image.sh" --image "$IMAGE" --dockerfile "$DOCKERFILE" --context "$BUILD_CONTEXT" --network "$NETWORK" \
-    || die "镜像构建失败" 3
-  say "✓ 镜像构建完成（$((SECONDS - START_TS))s）"
+  if [ -f "$SCRIPT_DIR/build-image.sh" ] \
+     && bash "$SCRIPT_DIR/build-image.sh" --image "$IMAGE" --dockerfile "$DOCKERFILE" --context "$BUILD_CONTEXT" --network "$NETWORK"; then
+    say "✓ 镜像构建完成（$((SECONDS - START_TS))s）"
+  else
+    # 消费者树（没有本仓 scripts/runtime-anchor.mjs）拿不到派生锚 → 回退为「用 Dockerfile 的
+    # ARG 默认值直接构建」：这样冒烟在消费者项目里仍然可用；版本核对请配 --expect-version。
+    say "! 构建包装器不可用（消费者树 / 派生锚拿不到）—— 回退为用 Dockerfile 的 ARG 默认值直接构建"
+    say "! 版本核对请传 --expect-version <宿主锚>，或显式 podman build --build-arg DSH_VERSION=<锚>"
+    podman build --network "$NETWORK" -f "$DOCKERFILE" -t "$IMAGE" "$BUILD_CONTEXT" || die "镜像构建失败" 3
+    say "✓ 镜像构建完成（$((SECONDS - START_TS))s，用 Dockerfile 默认 ARG）"
+  fi
 fi
 
 # ── ④ 容器内跑 headless，断言乘积 + COMPLETE ───────────────────────────────
@@ -182,23 +202,40 @@ printf '%s\n' "$OUT" | tail -n 40
 
 [ "$RC" -eq 0 ] || die "容器运行失败（exit $RC，${ELAPSED}s）；上方为输出尾部" 4
 
-# ── ⑤ 快照复核：别人的容器与 machine 状态必须一字未动 ───────────────────────
-AFTER_SNAPSHOT="$(snapshot)"
-if [ "$BEFORE_SNAPSHOT" = "$AFTER_SNAPSHOT" ]; then
-  say "✓ 容器/machine 快照前后一致（${BEFORE_CONTAINERS} 个容器，未触碰任何别人的实例）"
+# ── ⑤ 快照复核（定向）：machine 列表不变 + 冒烟前的容器全部仍在 + 自己的容器已消失 ──
+# 只证「我们没删/没停别人的东西」，不证「别人没动」；窗口内他人新建的容器不计入。
+AFTER_CONTAINERS="$(before_containers)"
+AFTER_MACHINES="$(machine_list)"
+SNAPSHOT_PROBLEMS=""
+[ "$BEFORE_MACHINES" = "$AFTER_MACHINES" ] || SNAPSHOT_PROBLEMS="${SNAPSHOT_PROBLEMS}
+- machine 列表变了：前=$(printf '%s' "$BEFORE_MACHINES" | tr '\n' ' ') 后=$(printf '%s' "$AFTER_MACHINES" | tr '\n' ' ')"
+if printf '%s\n' "$AFTER_CONTAINERS" | grep -qx "$CONTAINER"; then
+  SNAPSHOT_PROBLEMS="${SNAPSHOT_PROBLEMS}
+- 本次冒烟的容器没有消失：$CONTAINER"
+fi
+while IFS= read -r name; do
+  [ -n "$name" ] || continue
+  printf '%s\n' "$AFTER_CONTAINERS" | grep -qx "$name" || SNAPSHOT_PROBLEMS="${SNAPSHOT_PROBLEMS}
+- 冒烟前存在的容器不见了：$name"
+done <<EOF3
+$BEFORE_CONTAINERS
+EOF3
+if [ -z "$SNAPSHOT_PROBLEMS" ]; then
+  say "✓ 快照（定向）：machine 未变；冒烟前 ${BEFORE_CONTAINER_COUNT} 个容器全部仍在；本次容器已 --rm 消失"
 else
-  printf '%s\n' "冒烟前：" "$BEFORE_SNAPSHOT" "冒烟后：" "$AFTER_SNAPSHOT" >&2
-  die "容器/machine 快照在本次冒烟前后发生了变化（上面是 diff 的两侧）" 4
+  printf '%s\n' "$SNAPSHOT_PROBLEMS" >&2
+  die "容器/machine 快照在本次冒烟前后发生了变化（见上）—— 我们不该动别人的容器；若确系他人并发操作，重跑一次" 4
 fi
 
-# ── ⑥ 版本核对（有派生锚才做；精确相等，不用前缀通配）──────────────────────
+# ── ⑥ 版本核对（有期望值才做；精确相等，不用前缀通配）──────────────────────
 GOT="$(printf '%s\n' "$OUT" | sed -n 's/^dsh-version: *//p' | head -n 1 | tr -d '[:space:]')"
 if [ -z "$PINNED" ]; then
-  say "! 镜像内 dsh 版本：${GOT:-未读到}（无派生锚，未核对）"
+  say "! 镜像内 dsh 版本：${GOT:-未读到}（无期望值，未核对）"
 elif [ "$GOT" = "$PINNED" ]; then
-  say "✓ 镜像内 dsh 版本 == 派生锚：$GOT"
+  say "✓ 镜像内 dsh 版本 == 期望：$GOT"
 else
-  die "镜像内 dsh 版本与派生锚不一致：容器=$GOT 锚=$PINNED —— 镜像陈旧？先重建（去掉 --no-build 或 podman rmi 后重走）" 5
+  # 换镜像不会被自动重建：镜像存在即复用，必须显式 podman rmi（或换 --image tag）。
+  die "镜像内 dsh 版本与期望不一致：容器=$GOT 期望=$PINNED —— 镜像陈旧？先 podman rmi $IMAGE 再重跑（或换 --image tag）" 5
 fi
 
 # ── ⑦ 断言：乘积在场（证伪回显）+ COMPLETE 契约 ────────────────────────────

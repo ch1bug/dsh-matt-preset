@@ -25,7 +25,7 @@
 #     --print-version      只打印派生锚（不建镜像）
 #     -h | --help
 #
-# 退出码：0=成功  2=用法错  3=派生锚拿不到（消费者树 / package.json 形态不符）  4=构建失败
+# 退出码：0=成功  3=派生锚拿不到（消费者树 / package.json 形态不符）  4=构建失败  64=用法错
 set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -37,7 +37,11 @@ PRINT_VERSION=0
 EXTRA_ARGS=()
 
 say() { printf '%s\n' "$*"; }
-die() { printf '✗ %s\n' "$*" >&2; exit "${2:-2}"; }
+# 消息取 $1、退出码取 $2（**必须显式传**）：早前用 `$*` 会把退出码拼进正文、默认值 2 又无人用（死码）。
+die() {
+  printf '✗ %s\n' "$1" >&2
+  exit "$2"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -68,7 +72,22 @@ esac
 [ -f "$DOCKERFILE" ] || die "Dockerfile 不存在：$DOCKERFILE" 64
 BUILD_CONTEXT="${CONTEXT:-$(cd -- "$(dirname -- "$DOCKERFILE")" && pwd)}"
 
-say "… podman build --build-arg DSH_VERSION=$DSH_VERSION（image=$IMAGE，context=$BUILD_CONTEXT，network=$NETWORK）"
+# ── `--` 透传里若出现 DSH_VERSION，派生锚会被**静默覆盖**（实测踩过：公告行照打派生锚、镜像里
+#    却是另一个版本 → 日志与产物不一致、单一事实源被悄悄绕过）。这里显式识别并宣告，末尾汇报
+#    用**实际生效值**；探针/临时验证照常可用。 ─────────────────────────────────────────────
+EFFECTIVE_VERSION="$DSH_VERSION"
+for a in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
+  case "$a" in
+    DSH_VERSION=*) EFFECTIVE_VERSION="${a#DSH_VERSION=}" ;;
+    --build-arg=DSH_VERSION=*) EFFECTIVE_VERSION="${a#--build-arg=DSH_VERSION=}" ;;
+  esac
+done
+if [ "$EFFECTIVE_VERSION" != "$DSH_VERSION" ]; then
+  say "! EXTRA_ARGS 覆盖了派生锚：实际 --build-arg DSH_VERSION=$EFFECTIVE_VERSION（派生锚 $DSH_VERSION）"
+  say "! ↑ 仅供探针/临时验证；常规构建不要覆盖，重锚请改 package.json 的 version（+ Dockerfile 的 ARG 默认值）"
+fi
+
+say "… podman build --build-arg DSH_VERSION=$EFFECTIVE_VERSION（image=$IMAGE，context=$BUILD_CONTEXT，network=$NETWORK）"
 podman build --network "$NETWORK" --build-arg DSH_VERSION="$DSH_VERSION" \
   ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} -f "$DOCKERFILE" -t "$IMAGE" "$BUILD_CONTEXT" || die "镜像构建失败" 4
-say "✓ 镜像：$IMAGE（dsh $DSH_VERSION）"
+say "✓ 镜像：$IMAGE（dsh $EFFECTIVE_VERSION）"
