@@ -1160,10 +1160,10 @@ else bad('V30c. mention-only command armed the retro trigger', v30cBad.join(' | 
 // 合法地 arm 落盘面（#121 的整个要点）；消息里的 push 是 flag 值，因此仍不得 arm
 // push 追随行、也不得聚合。V35c 从另一侧钉住「正文里的 git commit 不 arm」。
 const v30cCommit = await afterCall('bash', { command: 'git commit -m "note: git push 之后再 retro"' }, 408)
-if (v30cCommit.includes('real commit') && !v30cCommit.includes('remote CI run') && !aggregateText(v30cCommit))
-  ok('V30c3. git commit -m "…git push…" → commit landing face only (message payload adds no push follow-up / no aggregation)')
+if (v30cCommit.includes('real commit') && !aggregateText(v30cCommit))
+  ok('V30c3. git commit -m "…git push…" → commit landing face only (message payload adds no aggregation)')
 else bad('V30c3. commit-message payload confused the trigger faces',
-  `commit landing: ${v30cCommit.includes('real commit')} | CI follow-up: ${v30cCommit.includes('remote CI run')} | aggregation: ${aggregateText(v30cCommit)}`)
+  `commit landing: ${v30cCommit.includes('real commit')} | aggregation: ${aggregateText(v30cCommit)}`)
 // The ticket's inline-body vector on its REAL surface: `gh issue create --body
 // "…git push…"` IS a genuine external action, so the ⚠ GATE fires — but the
 // mention inside its body must not arm the retro trigger, and must not drag in
@@ -1349,13 +1349,14 @@ else bad('V31c. unreadable .aggregated suppressed the aggregation',
 // `--amend`) are silently consumed. Pure EXISTENCE: `batch-state.md` is never
 // parsed, and a file belonging to a DIFFERENT session never suppresses.
 //
-// Non-vacuous red scenes: dropping the `retroCommit` arm reddens V35a/V35d;
+// Non-vacuous red scenes (each measured through DSH_MATT_ENFORCER copies, see
+// .scratch/verify121/): dropping the `retroCommit` arm reddens V35a/V35d;
 // widening the judgement back to a substring over the serialized call reddens
-// V35c (echo / --grep / write / edit / PTY / text event); making the guard
-// suppress on ANY file under `.scratch/retro/` reddens V35e's foreign-session
-// case; routing a commit through the push face reddens V35f (it would
-// aggregate instead of landing); leaving both arms live in one assembly
-// reddens V35g (two reminders).
+// V35c (echo / --grep / write / edit / PTY); making the guard suppress on ANY
+// file under `.scratch/retro/` reddens V35e (foreign file) and V35f (the
+// `.aggregated` dotfile sits in the same dir); matching only the FULL session id
+// reddens V35e4 (real landed names carry the 8-hex short token); swallowing the
+// commit arm in a push assembly reddens V35g's second assemble.
 const commitRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commit-')))
 await mkdir(join(commitRoot, '.scratch', 'retro'), { recursive: true })
 const handleCommit = await ctx.agents.create({
@@ -1443,6 +1444,24 @@ if (v35dMisses.length === 0)
   ok('V35d. declared reach: wrapper / separator / argv[0] / other shell / executed payload all arm', `${V35_REACH.length} cases`)
 else bad('V35d. declared commit reach lost', v35dMisses.join(', '))
 
+// V35d2: the DECLARED not-covered forms stay inert. The shared core judges
+// argv[0]/argv[1]-style command positions only (#79's declared limit), so an
+// option between `git` and the subcommand does not arm. Pinned, not assumed:
+// if the core widens, this reddens and the docs' declared boundary must move
+// with it (清 declared-not-covered 与实现同批).
+const V35_DECLARED_UNCOVERED = [
+  ['bash', { command: 'git -C repo commit -m x' }, '-C option before the subcommand'],
+  ['bash', { command: 'git -c user.name=a commit -m x' }, '-c option before the subcommand'],
+]
+const v35d2Bad = []
+for (const [i, [name, args, label]] of V35_DECLARED_UNCOVERED.entries()) {
+  const text = await commitCall(args, 836 + i, name)
+  if (!noRetro(text)) v35d2Bad.push(label)
+}
+if (v35d2Bad.length === 0)
+  ok('V35d2. option-laden commit positions stay UNCOVERED (declared limit of the shared core; fact probe backstops)')
+else bad('V35d2. a declared-uncovered form armed the commit face', v35d2Bad.join(' | '))
+
 // V35e: the per-session existence guard. A file for a DIFFERENT session must
 // NOT suppress (a "any file in the dir" check would — the guard is the session
 // suffix), while this session's own landed file must.
@@ -1462,6 +1481,39 @@ const v35eBack = await commitCall({ command: 'git commit -m "own file removed"' 
 if (retroText(v35eBack)) ok('V35e3. after the candidate file is gone the commit face arms again (guard = existence, not sticky state)')
 else bad('V35e3. guard stayed armed after the file was removed', v35eBack.slice(-220))
 await rm(foreignCandidate, { force: true })
+
+// V35e4/V35e5: the guard must match the SHORT session token this repo actually
+// writes (the 8-hex `session-` segment), not only the full DSH id. Measured on
+// the real tree: the full id (`dsh-matt-preset-ptc-session-aa850a1f-…`) matched
+// 0 of the landed candidate files, so a full-id-only guard would make
+// "once per session" true in the docs and false in behaviour.
+const tokenRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commit-token-')))
+await mkdir(join(tokenRoot, '.scratch', 'retro'), { recursive: true })
+const REAL_SESSION_ID = 'dsh-matt-preset-ptc-session-aa850a1f-17f3-441b-97bd-3bdae3bf254c'
+const handleCommitToken = await ctx.agents.create({
+  sessionId: SessionId(REAL_SESSION_ID),
+  meta: { cwd: tokenRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+const tokenCall = async (args, step) => {
+  await emitSessionEvent(ctx, handleCommitToken.agent.session, {
+    type: 'tool/call',
+    data: { turn: 1, step, name: 'bash', arguments: JSON.stringify(args) },
+  })
+  return renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitToken.agent, signal)))
+}
+const v35e4a = await tokenCall({ command: 'git commit -m "real id shape"' }, 843)
+await writeFile(join(tokenRoot, '.scratch', 'retro', 'L-session-deadbeef.md'), '# foreign token\n')
+const v35e4b = await tokenCall({ command: 'git commit -m "foreign short token present"' }, 844)
+if (retroText(v35e4a) && retroText(v35e4b))
+  ok('V35e4. full DSH id arms; a FOREIGN short token does not suppress (guard is the session token, not any file)')
+else bad('V35e4. short-token guard misread a foreign file', `no file: ${retroText(v35e4a)} | foreign token: ${retroText(v35e4b)}`)
+await writeFile(join(tokenRoot, '.scratch', 'retro', 'L-session-aa850a1f.md'), '# own short token\n')
+const v35e5 = await tokenCall({ command: 'git commit -m "own short token present"' }, 845)
+if (!retroText(v35e5) && !aggregateText(v35e5))
+  ok('V35e5. the session\'s own 8-hex short-token file suppresses later commits (the repo\'s real landed naming)')
+else bad('V35e5. own short-token file did not suppress', v35e5.slice(-220))
 
 // V35f: a commit NEVER takes the batch-end aggregation face, even when
 // `.scratch/batch-state.md` already carries the `retro:` marker (only a real
@@ -1500,29 +1552,54 @@ await emitSessionEvent(ctx, handleCommitPush.agent.session, {
 })
 const v35g = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitPush.agent, signal)))
 const v35gCount = (v35g.match(/Retro candidate — file it now/g) ?? []).length
-if (v35gCount === 1 && !aggregateText(v35g))
-  ok('V35g. commit + push in one assembly → exactly one retro reminder (no duplicate)')
-else bad('V35g. duplicate retro reminder', `count: ${v35gCount} | aggregation: ${aggregateText(v35g)} | ${v35g.slice(-260)}`)
+const v35gNext = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitPush.agent, signal)))
+if (v35gCount === 1 && !aggregateText(v35g)
+  && v35gNext.includes('real commit') && !aggregateText(v35gNext)) {
+  ok('V35g. commit + push in one assembly → one push reminder, then the commit landing on the next (arm not swallowed)')
+} else bad('V35g. commit arm swallowed or duplicated',
+  `first: count ${v35gCount} | aggregation ${aggregateText(v35g)} | next: commit ${v35gNext.includes('real commit')} | aggregation ${aggregateText(v35gNext)}`)
 
-// V35h: the declaration and the THREE documents that state the trigger face
-// stay aligned (D6: 只改一处必漂). The commit face must be named in the
-// enforcer doc, the batch-state trigger face and the body's `@@ batch-mode`
-// section.
+// V35h: the declaration and every carrier that states the trigger face stay
+// aligned (D6: 只改一处必漂). The commit face must be named in the enforcer doc,
+// the batch-state trigger face, the body's `@@ batch-mode` section AND the
+// decision record (CONTEXT D49 + ADR-0002) — the docs-lie class (D3) is a real
+// regression the first review found. The CONTRACT itself (landing-only,
+// per-session guard) must be written down too: merely mentioning the command
+// is not the decision.
 const commitDoc = {
   enforcer: readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8'),
   batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
   body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+  context: readFileSync(new URL('../CONTEXT.md', import.meta.url), 'utf8'),
+  adr: readFileSync(new URL('../docs/adr/0002-batch-mode.md', import.meta.url), 'utf8'),
 }
 const commitDocMissing = []
-if (!commitDoc.enforcer.includes('git commit')) commitDocMissing.push('docs/workflow-enforcer.md')
-if (!commitDoc.batchState.includes('git commit')) commitDocMissing.push('docs/batch-state.md')
-if (!commitDoc.body.includes('git commit')) commitDocMissing.push('workflow-body.txt')
+for (const [key, label] of [
+  ['enforcer', 'docs/workflow-enforcer.md'],
+  ['batchState', 'docs/batch-state.md'],
+  ['body', 'workflow-body.txt'],
+  ['context', 'CONTEXT.md D49'],
+  ['adr', 'docs/adr/0002-batch-mode.md'],
+]) {
+  if (!commitDoc[key].includes('git commit')) commitDocMissing.push(label)
+}
+const commitDocContract = {
+  'body: git commit = LANDING ONLY': /git commit` = LANDING ONLY/.test(commitDoc.body),
+  'body: commit arm is per-session': /per-session/.test(commitDoc.body),
+  'batch-state: 只 arm 落盘': /只 arm 落盘/.test(commitDoc.batchState),
+  'batch-state: 同一会话只提醒一次': /同一会话只提醒一次/.test(commitDoc.batchState),
+  'enforcer doc: 只 arm 落盘面': /只 arm 落盘面/.test(commitDoc.enforcer),
+  'enforcer doc: 纯存在性 guard': /纯存在性/.test(commitDoc.enforcer),
+  'CONTEXT D49: #121 extension': /#121/.test(commitDoc.context),
+  'ADR-0002: commit face': /commit/.test(commitDoc.adr),
+}
+const commitDocContractMissing = Object.entries(commitDocContract).filter(([, hit]) => !hit).map(([k]) => k)
 const commitElements = RETRO_TRIGGER.commit?.words ?? []
 const missingCommitElements = commitElements.filter(s => !commitDoc.enforcer.includes(s))
-if (commitDocMissing.length === 0 && commitElements.length > 0 && missingCommitElements.length === 0)
-  ok('V35h. the commit face is documented in all three places (判定面 / 触发面 / @@ batch-mode)', `elements: ${commitElements.join(', ')}`)
+if (commitDocMissing.length === 0 && commitDocContractMissing.length === 0 && commitElements.length > 0 && missingCommitElements.length === 0)
+  ok('V35h. commit face documented in all five carriers + the landing-only/per-session contract is written down', `elements: ${commitElements.join(', ')}`)
 else bad('V35h. commit-face doc drift',
-  `declaration: ${commitElements.length > 0 ? 'ok' : 'MISSING'} | missing docs: ${commitDocMissing.join(', ') || '—'} | missing document elements: ${missingCommitElements.join(', ') || '—'}`)
+  `declaration: ${commitElements.length > 0 ? 'ok' : 'MISSING'} | missing docs: ${commitDocMissing.join(', ') || '—'} | missing contract: ${commitDocContractMissing.join(', ') || '—'} | missing elements: ${missingCommitElements.join(', ') || '—'}`)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ── V32–V34 (#113): the HOME-DELETE reminder. The third recurrence of the
@@ -1770,6 +1847,7 @@ else bad('V34c. home-delete doc/declaration drift',
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
 await handleAggErr.dispose()
+await handleCommitToken.dispose()
 await handleCommitPush.dispose()
 await handleCommitBE.dispose()
 await handleCommit.dispose()

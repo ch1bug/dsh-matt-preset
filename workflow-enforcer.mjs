@@ -76,8 +76,14 @@
  * It arms the LANDING face ONLY: the aggregation face remains push-only, because
  * a commit cannot know the batch reached its end (`retro:` is written before the
  * batch-end push). Consume adds one GUARD — pure existence, no file parsing:
- * once `.scratch/retro/<batch>-<session id>.md` exists, later commits (including
- * `--amend`) are silently consumed, so a session gets one landing reminder.
+ * once `.scratch/retro/<batch>-<session token>.md` exists, later commits
+ * (including `--amend`) are silently consumed, so a session gets one landing
+ * reminder per session. The token is the 8-hex `session-` segment of the DSH id
+ * (`sessionTokenOf`), which is the shape the repo's landed candidates actually
+ * use — matching only the full id would make the once-per-session promise true
+ * in the docs and false in behaviour. If a push arms in the same assembly, the
+ * push face consumes first and this arm fires on the next one (not swallowed:
+ * the batch-end aggregation text does not carry the WRITE instruction).
  *
  * Two faces, deliberately different (not an inconsistency):
  *   - push is a TOOL event — it has a `(toolName, argv)` action surface, so it
@@ -225,7 +231,11 @@ const retroPush = new WeakMap()
  * decides its face from `.scratch/batch-state.md` (landing vs batch-end
  * aggregation) and consumes once per push; a commit can only ever LAND, and it
  * lands at most once per SESSION — the consume guard is an existence check for
- * `.scratch/retro/*-<session id>.md` (no parsing, per the ticket). A commit is
+ * `.scratch/retro/*-<session token>.md` (no parsing, per the ticket). When a
+ * push arms in the SAME assembly, the push face consumes first and this arm is
+ * deliberately left alone: it fires on the NEXT assembly. Swallowing it would
+ * drop material, because the batch-end aggregation text does NOT carry the
+ * "WRITE the candidates" instruction (only the landing face does). A commit is
  * routine (local, reversible, D21), so this is a MATERIAL reminder, never a
  * high-risk gate. */
 const retroCommit = new WeakMap()
@@ -341,6 +351,12 @@ export const RETRO_TRIGGER = {
   // declared action field. A commit MESSAGE is a `-m` flag VALUE, never a
   // command position, so prose that says `git commit` stays inert — the
   // ticket's "text layer never triggers" AC holds by construction.
+  //
+  // DECLARED BOUNDARIES (the shared core's, same as `git push`): the word run
+  // also matches `git commit --dry-run` / `--help` — the cost is one local,
+  // confirmation-free reminder, and narrowing by flag would be a new matcher;
+  // option-laden command positions (`git -C <dir> commit`, `git -c k=v commit`)
+  // stay UNCOVERED (#79's declared limit), left to the fact probe.
   commit: { words: ['git commit'] },
   batchDeclare: {
     words: ['攒批', '批量模式', '系列处理', '大系列', '这批攒批'],
@@ -514,47 +530,61 @@ async function hasAggregatedMarker(cwd) {
   }
 }
 
+/** The SHORT session token this repo's artifacts use — the 8-hex segment right
+ * after `session-` in a DSH session id (the Q2=C convention:
+ * `.scratch/sessions/<ticket>-<session id first 8>.md`; every landed
+ * `.scratch/retro/*-session-<8hex>.md` file carries the same shape). MEASURED on
+ * the real tree: the full id (`dsh-matt-preset-ptc-session-aa850a1f-…`) matches
+ * 0 of the landed candidate files, while the short token matches them — matching
+ * only the full id would make "one reminder per session" true in the docs and
+ * false in behaviour. An id without that shape falls back to the full id, so
+ * other id formats still work. */
+function sessionTokenOf(sessionId) {
+  const id = String(sessionId ?? '')
+  const short = /session-([0-9a-f]{8})(?:-|$)/i.exec(id)
+  return short ? short[1].toLowerCase() : id
+}
+
 /** Whether this session has ALREADY landed a retro candidate file — pure
  * EXISTENCE over `.scratch/retro/`, never a parse of `batch-state.md` (#121 Q1):
- * a landed candidate is `<batch>-<session id>.md`, so the session id is the file
- * name's tail. The `-` boundary is deliberate: `L-<session>.md` matches while a
+ * a landed candidate is `<batch>-<session token>.md` (see `sessionTokenOf`).
+ * The `-` boundary is deliberate: `L-session-<token>.md` matches while a
  * DIFFERENT session's file does not, so foreign material never suppresses this
- * session's reminder (the guard is per session, not per directory).
+ * session's reminder (the guard is per session, not per directory). Both the
+ * short token and the full id are accepted as the tail, so either honest
+ * spelling of the contract's `<session>` suppresses.
  *
  * Fails OPEN to `false` (→ arm the reminder): an unreadable or absent directory
  * must not silently drop the only material reminder of a commit-only session,
  * and a repeat costs one local, confirmation-free write. */
 async function hasSessionCandidate(cwd, sessionId) {
-  if (!cwd || !sessionId) return false
+  const id = String(sessionId ?? '')
+  if (!cwd || id === '') return false
+  const token = sessionTokenOf(id)
+  const fullId = id.toLowerCase()
   try {
     const entries = await readdir(join(cwd, '.scratch', 'retro'))
-    return entries.some(entry => entry === `${sessionId}.md` || entry.endsWith(`-${sessionId}.md`))
+    return entries.some(entry => {
+      const name = entry.toLowerCase()
+      return name.endsWith(`-${token}.md`)
+        || (token !== fullId && name.endsWith(`-${fullId}.md`))
+    })
   } catch {
     return false
   }
 }
 
-/** Whether a tool call is a REAL push, judged on the declared action surface —
- * the same structured core as the ⚠ gate and the ticket-lifecycle nudges. The
- * face is declared in `RETRO_TRIGGER.push.words`; a tool with no action field
- * (write / edit / pty_send / …) has no surface and can never arm it. This is
- * deliberately the SAME judgement the ⚠ line's push follow-ups use — one
- * declaration, so the retro trigger and the gate cannot disagree. */
-function pushTriggerHit(call) {
+/** Whether a tool call hits one of the retro trigger faces, judged on the
+ * declared action surface — the same structured core as the ⚠ gate and the
+ * ticket-lifecycle nudges. The faces are declared in `RETRO_TRIGGER[face].words`
+ * (`push` / `commit`); a tool with no action field (write / edit / pty_send / …)
+ * has no surface and can never arm either. For `push` this is deliberately the
+ * SAME judgement the ⚠ line's push follow-ups use — one declaration, so the
+ * retro trigger and the gate cannot disagree. */
+function triggerHit(face, call) {
   const surface = actionSurface(call)
   if (surface === null) return false
-  return RETRO_TRIGGER.push.words.some(word => matchesSurface(word, surface))
-}
-
-/** Whether a tool call is a REAL commit (#121) — the commit face of the same
- * structured core (`actionSurface` + `matchesSurface`) as the ⚠ gate and
- * `pushTriggerHit`. Declared in `RETRO_TRIGGER.commit.words`; a tool with no
- * action field (write / edit / pty_send / …) has no surface and can never arm
- * it, and neither can any text event. */
-function commitTriggerHit(call) {
-  const surface = actionSurface(call)
-  if (surface === null) return false
-  return RETRO_TRIGGER.commit.words.some(word => matchesSurface(word, surface))
+  return RETRO_TRIGGER[face].words.some(word => matchesSurface(word, surface))
 }
 
 /** Parse a tool call's arguments (JSON string or object). */
@@ -1278,10 +1308,6 @@ async function reminderText(agent, config, ctx, assembled) {
   }
   if (config.retroTriggerCheck !== false && retroPush.get(agent.session) === true) {
     retroPush.delete(agent.session) // consume: one retro reminder per push
-    // A commit armed in the SAME assembly is superseded by the push face: the
-    // push reminder already covers the material, so a second (landing) line
-    // would be the duplicate this consumption prevents.
-    retroCommit.delete(agent.session)
     // Which face this push gets is decided HERE, from `.scratch/batch-state.md`
     // in the agent's cwd — NOT at arm time. `session/event` is fire-and-forget
     // (the emitter never awaits a listener), so an async file read inside the
@@ -1434,7 +1460,7 @@ export function apply(ctx, config = {}) {
     // missing reminder. The cwd is REQUIRED for that read: without one there is
     // no file to look at, so the marker cannot be claimed (an undefined cwd must
     // never read as "marker present").
-    if (pushTriggerHit(call)) {
+    if (triggerHit('push', call)) {
       // `session/event` is a fire-and-forget notification: the emitter does NOT
       // await an async listener, so the WeakMap must be written SYNCHRONOUSLY,
       // before this callback returns — a read awaited inside the hook lands
@@ -1448,7 +1474,7 @@ export function apply(ctx, config = {}) {
     // 落盘 reminder. Same structured judgement as the push face (text stays
     // inert), same synchronous-arm reason (see above), but its OWN WeakMap: a
     // commit never takes the batch-end aggregation face — that stays push-only.
-    if (commitTriggerHit(call)) retroCommit.set(session, true)
+    if (triggerHit('commit', call)) retroCommit.set(session, true)
     // Home-delete reminder (#113): a command that would recursively delete a home
     // directory arms the one-shot warning. Judged on the SAME structured core as
     // the ⚠ gate and every other face here — the combination is declared in
