@@ -186,7 +186,7 @@ enforcer 是 reminder-only，**只读标记、不写文件**。
 
 - **位置与命名**：`.scratch/retro/<batch>-<session>.md`——一批一目录前缀、一会话一文件，
   同批可枚举、跨会话可读。`<session>` = 会话 id 的**短形**（`session-` 后 8 位 hex，
-  与 `.scratch/sessions/<票>-<会话id前8>.md` 同约定）——enforcer 的「每会话一次」guard
+  **不是**整个 id 的前 8 位——那是 `dsh-matt`）——enforcer 的「每会话一次」guard
   按这个短形（及完整 id）做**存在性**判定。
 - **内容**：候选（按严重度排序）+ **证据（命令 / 输出）** + 来源（**会话 id / 票号**）
   + 未落地原因。**只写候选、不落地**——落地仍需 human 拍板（D22 / D27）。

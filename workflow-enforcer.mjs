@@ -531,14 +531,14 @@ async function hasAggregatedMarker(cwd) {
 }
 
 /** The SHORT session token this repo's artifacts use — the 8-hex segment right
- * after `session-` in a DSH session id (the Q2=C convention:
- * `.scratch/sessions/<ticket>-<session id first 8>.md`; every landed
- * `.scratch/retro/*-session-<8hex>.md` file carries the same shape). MEASURED on
- * the real tree: the full id (`dsh-matt-preset-ptc-session-aa850a1f-…`) matches
- * 0 of the landed candidate files, while the short token matches them — matching
- * only the full id would make "one reminder per session" true in the docs and
- * false in behaviour. An id without that shape falls back to the full id, so
- * other id formats still work. */
+ * after `session-` in a DSH session id (NOT the first 8 characters of the id:
+ * those are `dsh-matt`). MEASURED on the real tree: the landed candidates that
+ * carry a session token use this segment (`A-107-session-1277a4c5.md`), while
+ * matching the FULL id suppressed 0 of them — full-id-only matching would make
+ * "one reminder per session" true in the docs and false in behaviour. (Some
+ * hand-written candidates use other labels, e.g. `session-batch-end`; they
+ * simply never suppress, which is the safe direction.) An id without that shape
+ * falls back to the full id, so other id formats still work. */
 function sessionTokenOf(sessionId) {
   const id = String(sessionId ?? '')
   const short = /session-([0-9a-f]{8})(?:-|$)/i.exec(id)
@@ -1451,7 +1451,7 @@ export function apply(ctx, config = {}) {
     // Push-triggered retro (#71): a REAL push arms the per-ticket 落盘 reminder,
     // or the batch-end 聚合 reminder when `.scratch/batch-state.md` already
     // carries the `retro:` marker. Judged on the SAME structured surface as the
-    // ⚠ gate (`pushTriggerHit` → `matchesSurface('git push', …)`), never on the
+    // ⚠ gate (`triggerHit('push', …)` → `matchesSurface('git push', …)`), never on the
     // serialized call: a document body, an `echo` or an inline `--body` that
     // mentions the push stays inert, and so does every tool without a declared
     // action field (write / edit / pty_send / …). The marker is read HERE (the

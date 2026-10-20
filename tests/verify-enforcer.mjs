@@ -1355,8 +1355,8 @@ else bad('V31c. unreadable .aggregated suppressed the aggregation',
 // V35c (echo / --grep / write / edit / PTY); making the guard suppress on ANY
 // file under `.scratch/retro/` reddens V35e (foreign file) and V35f (the
 // `.aggregated` dotfile sits in the same dir); matching only the FULL session id
-// reddens V35e4 (real landed names carry the 8-hex short token); swallowing the
-// commit arm in a push assembly reddens V35g's second assemble.
+// reddens V35e5 (the short-token file stops suppressing); swallowing the commit
+// arm in a push assembly reddens V35g's second assemble (and V35g2's next one).
 const commitRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commit-')))
 await mkdir(join(commitRoot, '.scratch', 'retro'), { recursive: true })
 const handleCommit = await ctx.agents.create({
@@ -1484,12 +1484,15 @@ await rm(foreignCandidate, { force: true })
 
 // V35e4/V35e5: the guard must match the SHORT session token this repo actually
 // writes (the 8-hex `session-` segment), not only the full DSH id. Measured on
-// the real tree: the full id (`dsh-matt-preset-ptc-session-aa850a1f-…`) matched
-// 0 of the landed candidate files, so a full-id-only guard would make
-// "once per session" true in the docs and false in behaviour.
+// the real tree: full-id matching suppressed 0 of the landed candidate files,
+// so a full-id-only guard would make "once per session" true in the docs and
+// false in behaviour.
 const tokenRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commit-token-')))
 await mkdir(join(tokenRoot, '.scratch', 'retro'), { recursive: true })
-const REAL_SESSION_ID = 'dsh-matt-preset-ptc-session-aa850a1f-17f3-441b-97bd-3bdae3bf254c'
+// Synthetic id with the SHAPE the repo uses (`session-<8hex>-…`), not a real
+// local session id: the test needs the shape, and the real-tree measurement is
+// recorded in the comment above.
+const REAL_SESSION_ID = 'dsh-matt-preset-ptc-session-8f3a2b1c-1111-4222-8333-444455556666'
 const handleCommitToken = await ctx.agents.create({
   sessionId: SessionId(REAL_SESSION_ID),
   meta: { cwd: tokenRoot },
@@ -1509,7 +1512,7 @@ const v35e4b = await tokenCall({ command: 'git commit -m "foreign short token pr
 if (retroText(v35e4a) && retroText(v35e4b))
   ok('V35e4. full DSH id arms; a FOREIGN short token does not suppress (guard is the session token, not any file)')
 else bad('V35e4. short-token guard misread a foreign file', `no file: ${retroText(v35e4a)} | foreign token: ${retroText(v35e4b)}`)
-await writeFile(join(tokenRoot, '.scratch', 'retro', 'L-session-aa850a1f.md'), '# own short token\n')
+await writeFile(join(tokenRoot, '.scratch', 'retro', 'L-session-8f3a2b1c.md'), '# own short token\n')
 const v35e5 = await tokenCall({ command: 'git commit -m "own short token present"' }, 845)
 if (!retroText(v35e5) && !aggregateText(v35e5))
   ok('V35e5. the session\'s own 8-hex short-token file suppresses later commits (the repo\'s real landed naming)')
@@ -1533,8 +1536,10 @@ if (retroText(v35f) && !aggregateText(v35f))
   ok('V35f. commit in a `retro:`-marked batch → landing only, aggregation stays push-only')
 else bad('V35f. commit took the aggregation face', `landing: ${retroText(v35f)} | aggregation: ${aggregateText(v35f)} | ${v35f.slice(-240)}`)
 
-// V35g: commit + push in the SAME assembly → exactly ONE retro reminder (the
-// push face supersedes the commit arm; leaving both live would duplicate).
+// V35g: commit + push in the SAME assembly → the push face fires ONCE, and the
+// commit arm is NOT swallowed: it fires on the NEXT assembly. Swallowing it
+// (re-adding `retroCommit.delete` to the push consume) reddens the second
+// assertion below — measured in .scratch/verify121/r1-perturb-swallow-red.txt.
 const guardRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commitpush-')))
 const handleCommitPush = await ctx.agents.create({
   sessionId: SessionId('enforcer-commit-push'),
@@ -1558,6 +1563,35 @@ if (v35gCount === 1 && !aggregateText(v35g)
   ok('V35g. commit + push in one assembly → one push reminder, then the commit landing on the next (arm not swallowed)')
 } else bad('V35g. commit arm swallowed or duplicated',
   `first: count ${v35gCount} | aggregation ${aggregateText(v35g)} | next: commit ${v35gNext.includes('real commit')} | aggregation ${aggregateText(v35gNext)}`)
+
+// V35g2: the case the swallow fix exists for — a commit + a BATCH-END push in
+// the SAME assembly. The push face presents the aggregation, whose text does
+// NOT carry "WRITE the candidates"; the commit landing must therefore still
+// arrive on the NEXT assembly. A separate root with the `retro:` marker (and no
+// `.aggregated`) is what selects the aggregation face.
+const batchPushRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-commitpush-be-')))
+await mkdir(join(batchPushRoot, '.scratch', 'retro'), { recursive: true })
+await writeFile(join(batchPushRoot, '.scratch', 'batch-state.md'), '# Batch state\n\n- retro: done @ deadbee\n')
+const handleCommitPushBE = await ctx.agents.create({
+  sessionId: SessionId('enforcer-commit-push-be'),
+  meta: { cwd: batchPushRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleCommitPushBE.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 862, name: 'bash', arguments: JSON.stringify({ command: 'git commit -m "batch-end commit"' }) },
+})
+await emitSessionEvent(ctx, handleCommitPushBE.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 863, name: 'bash', arguments: JSON.stringify({ command: 'git push origin main' }) },
+})
+const v35g2 = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitPushBE.agent, signal)))
+const v35g2Next = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleCommitPushBE.agent, signal)))
+if (aggregateText(v35g2) && !retroText(v35g2) && v35g2Next.includes('real commit') && !aggregateText(v35g2Next))
+  ok('V35g2. commit + batch-end push → aggregation first, commit landing next (material not swallowed)')
+else bad('V35g2. batch-end push swallowed the commit arm',
+  `first: aggregate ${aggregateText(v35g2)} | landing ${retroText(v35g2)} | next: commit ${v35g2Next.includes('real commit')} | aggregate ${aggregateText(v35g2Next)}`)
 
 // V35h: the declaration and every carrier that states the trigger face stay
 // aligned (D6: 只改一处必漂). The commit face must be named in the enforcer doc,
@@ -1585,13 +1619,15 @@ for (const [key, label] of [
 }
 const commitDocContract = {
   'body: git commit = LANDING ONLY': /git commit` = LANDING ONLY/.test(commitDoc.body),
-  'body: commit arm is per-session': /per-session/.test(commitDoc.body),
+  'body: COMMIT arm is per-session': /COMMIT arm\s+is per-session/.test(commitDoc.body),
   'batch-state: 只 arm 落盘': /只 arm 落盘/.test(commitDoc.batchState),
   'batch-state: 同一会话只提醒一次': /同一会话只提醒一次/.test(commitDoc.batchState),
   'enforcer doc: 只 arm 落盘面': /只 arm 落盘面/.test(commitDoc.enforcer),
   'enforcer doc: 纯存在性 guard': /纯存在性/.test(commitDoc.enforcer),
-  'CONTEXT D49: #121 extension': /#121/.test(commitDoc.context),
-  'ADR-0002: commit face': /commit/.test(commitDoc.adr),
+  'CONTEXT D49: #121 + landing-only': /#121/.test(commitDoc.context) && /也 arm \*\*落盘面\*\*/.test(commitDoc.context),
+  'CONTEXT D49: per-session guard': /每会话一次/.test(commitDoc.context),
+  'ADR-0002: commit lands only': /仅每票落盘/.test(commitDoc.adr),
+  'ADR-0002: per-session guard': /每会话一次/.test(commitDoc.adr),
 }
 const commitDocContractMissing = Object.entries(commitDocContract).filter(([, hit]) => !hit).map(([k]) => k)
 const commitElements = RETRO_TRIGGER.commit?.words ?? []
@@ -1848,6 +1884,7 @@ else bad('V34c. home-delete doc/declaration drift',
 await handleBE3.dispose()
 await handleAggErr.dispose()
 await handleCommitToken.dispose()
+await handleCommitPushBE.dispose()
 await handleCommitPush.dispose()
 await handleCommitBE.dispose()
 await handleCommit.dispose()

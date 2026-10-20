@@ -299,14 +299,14 @@ per-issue push rhythm.
     candidates to .scratch/retro/<batch>-<session>.md — content = candidates
     (ordered by severity) + evidence (command / output) + source (session id /
     ticket number) + why it was not landed. `<session>` is the session id's
-    SHORT form — the 8-hex segment after `session-`, the same token
-    .scratch/sessions/ uses. CANDIDATES ONLY, never
+    SHORT form — the 8-hex segment after `session-` (NOT the id's first 8,
+    which would be `dsh-matt`). CANDIDATES ONLY, never
     land them (landing is still the human's call, D22/D27). Writing a
     local candidate file is NOT an external action (D21 covers push /
     closing / creating issues), so it is CONFIRMATION-FREE and
     NON-BLOCKING: keep going, never stop the wrap to ask. Re-running in
     the same session overwrites the same file (idempotent). A COMMIT arm
-    is per-session: once .scratch/retro/*-<session id>.md exists, later
+    is per-session: once .scratch/retro/*-<session token>.md exists, later
     commits (including --amend) stay silent — pure existence, no
     batch-state parsing.
   - BATCH-END PUSH → RUN THIS SESSION'S RETRO FIRST, THEN AGGREGATE: read
@@ -342,8 +342,8 @@ per-issue push rhythm.
     writing or discussing "推送 / push / git commit" — a plan, a retro
     doc, a handoff body (this repo's handoffs are full of it) — must not
     trigger anything. Indirect pushes (inside a script), option-laden commit
-    positions (git -C <dir> commit) and PTY fragment writes do NOT trigger
-    either; they are DECLARED NOT COVERED, and a
+    positions (git -C <dir> commit, git -c k=v commit) and PTY fragment
+    writes do NOT trigger either; they are DECLARED NOT COVERED, and a
     false trigger costs more than a missed one (a wasted retro run plus
     junk candidates polluting the batch-end aggregation), so the face
     stays narrow and never grows a keyword fallback.
