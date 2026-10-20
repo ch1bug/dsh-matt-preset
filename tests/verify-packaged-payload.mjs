@@ -35,15 +35,29 @@
  * import、`import()` 各要一条，宽一次还能再绕一层（§8 D13：用正则追写法必输）。resolver
  * 见到的就是**真的**载入图 —— 入口 `await import()` 一次，等于让 Node 自己把断口找出来。
  *
- * 种子面 = `bin` 声明 + 发布面里所有 `.mjs`（四个 root 插件模块 + CLI）。这不是为 #84 扩大
- * 范围：不变量本身是"发布面里任何相对 import 都必须也在发布面里"，只验 CLI 等于让插件
- * 侧的同族断口没人看。`.mts`（`sandcastle/templates/*`）不在种子面：它们是 TS 源，Node 不
- * 直接执行，**显式声明不覆盖**（同一 D13 纪律：与其留一条看着在守、其实不覆盖的锁，不如
- * 写明边界）。
+ * 种子面 = `bin` 声明 + 发布面里**根级**的 `.mjs`（今天 5 个：4 个 root 插件模块 + CLI）。
+ * 目录条目（`skills` / `lang-packs` / `sandcastle` / `lib`）下的模块**不单独作种子**——它们
+ * 只在**被 import 到**时才算数，而那正是判据关心的方向；把未被 import 的文件也拉进来只会
+ * 制造无关的红。这不是为 #84 扩大范围：不变量本身是"发布面里任何相对 import 都必须也在
+ * 发布面里"，只验 CLI 等于让插件侧的同族断口没人看。
  *
- * `files` 里刻意**没有** `lib/bundle-patch.mjs`：它的消费者是 `scripts/regen-bundle.mjs`
- * 与用例（仓内构建面），发布物不 import 它。所以判据不是"`lib/` 全发"，而是"**发布面
- * import 到的必须发**"——正是 K2/K3 判的那条（谁把它接进发布面，谁的红灯就亮）。
+ * 显式声明**不覆盖**（D13 纪律：与其留一条看着在守、其实不覆盖的锁，不如写明边界）：
+ *   · `.mts`（`sandcastle/templates/*`）—— TS 源，Node 不直接执行；
+ *   · 函数体内的懒加载 `await import()` —— 本用例只 `import` 入口、不执行里面的分支
+ *     （今天仓库里 0 处懒加载相对 import）；
+ *   · `createRequire(...)('./x.mjs')` 这类 CJS 相对解析 —— 不走 ESM 的 resolve 钩子
+ *     （今天只有裸包 `require('yaml')`，属 `dependencies` 面，不在 `files` 判据内）。
+ *
+ * `files` 为什么用**一条目录条目 `lib`** 而不是三条显式文件（#84 第 1 轮复核抓到的实测）：
+ * npm 11 的 packlist 在"根 `*.mjs` + 一条深路径 `lib/x.mjs`"同时存在时，会把**整个 `lib/`
+ * 的 `.mjs` 都带上**（实测：三条显式条目下 tarball 里仍有 4 个 lib 文件，含 `bundle-patch.mjs`）。
+ * 也就是说三种写法**发的东西一样**（都是整个 `lib/`），差别只在清单是否说了实话：
+ * 写三条显式路径会让离线模型（K2）与真实发布面**差一条**，将来谁把 `bundle-patch.mjs` 接进
+ * 发布面就是**假红**。所以这里选"清单 = 现实"：一条 `lib`，K6 的单向对齐（模型 ⊆ tarball）
+ * 也就不会被"npm 多发"绊住（多发方向不由本仓选择，见下）。
+ * 代价要写明：`files` 在本仓是**双职**（`bin/install.mjs` 逐条 `cp` 进 store），所以安装副本
+ * 因此多出 `lib/` 的 **4 个**文件（含仓内构建面的 `bundle-patch.mjs`，约 18KB）——无消费者，
+ * 但无害；它的消费者仍是 `scripts/regen-bundle.mjs` 与用例。
  *
  * 环境边界：npm 缺席（Node 发行版一般自带；也可能只有 corepack）→ 打包层四条
  * `SKIP (loud)`（`scripts/verify-all.mjs` 记 PASS*），**不静默当通过**；离线层照跑。
@@ -81,8 +95,17 @@ if (hookAvailable) {
   registerHooks({
     resolve(specifier, context, nextResolve) {
       const resolved = nextResolve(specifier, context)
-      // 只记包内文件边：`node:` 内置与裸包（node_modules）不是 `files` 白名单的问题面。
-      if (context.parentURL !== undefined && typeof resolved?.url === 'string' && resolved.url.startsWith('file:')) {
+      // 只记**包内源码**边：`node:` 内置与裸包（node_modules）不是 `files` 白名单的问题面
+      // （裸包由 package.json `dependencies` 负责，发布面之外）。
+      // ⚠ node_modules 必须在**这里**排除，不能只靠 `closureOf` 的 `anchored` 前缀：
+      // 本仓 `node_modules/yaml` 是指向仓外的 junction，realpath 天然在仓外，于是真树看着
+      // 干净；而在 `node_modules` 是实体目录的环境里（fresh `npm install` / `git archive`
+      // 镜像），上百个 `yaml/**` 会混进闭包 → K2/K3/K5 齐红，把环境布局误报成发布面缺陷
+      // （#84 第 1 轮复核实测约 90 个文件）。
+      const isPackageSource = typeof resolved?.url === 'string'
+        && resolved.url.startsWith('file:')
+        && !resolved.url.includes('/node_modules/')
+      if (context.parentURL !== undefined && isPackageSource) {
         if (!edges.has(context.parentURL)) edges.set(context.parentURL, new Set())
         edges.get(context.parentURL).add(resolved.url)
       }
@@ -206,11 +229,14 @@ if (!hookAvailable) {
         const pkgDir = await extractTarball(join(work, info.filename), join(work, 'unpack'))
         const cli = spawnSync(process.execPath, [join(pkgDir, 'bin', 'install.mjs'), '--version'], { encoding: 'utf8' })
         const version = (cli.stdout ?? '').trim()
+        // 红时的诊断要**点名断口**（`Cannot find module '<abs>' …` 那行），只贴栈头没有价值：
+        // 第一版贴的是 stderr 第 2–3 行（`throw new ERR_MODULE_NOT_FOUND(`），复核指出它读不出缺失模块。
+        const errLine = (cli.stderr ?? '').split(/\r?\n/u).find((line) => /ERR_[A-Z_]+|Cannot find module/u.test(line))
         if (cli.status === 0 && version === PKG.version) {
           ok('K4. 解包后的 CLI 能跑（`bin/install.mjs --version`）', `exit 0，输出 ${version}`)
         } else {
           bad('K4. 解包后的 CLI 跑不起来',
-            `exit=${cli.status} stdout=${JSON.stringify(version)} stderr=${(cli.stderr ?? '').trim().split('\n').filter(Boolean).slice(1, 3).join(' ')}`)
+            `exit=${cli.status} stdout=${JSON.stringify(version)} stderr=${JSON.stringify((errLine ?? '').trim())}`)
         }
 
         // K5: 打包保真 —— 解包出来的闭包文件与工作树逐字节相同
@@ -229,6 +255,9 @@ if (!hookAvailable) {
         }
 
         // K6: 离线模型 ⊆ 真实 tarball（模型不撒谎，K2 才不是空锁）
+        // 方向是**单向**的：只判"模型说发了的是否真发了"。反方向（npm 比清单多发）不在本判据内
+        // —— 那是 npm packlist 的语义，不是本仓能选择的东西；能做的只是让清单别与它打架
+        // （所以 `files` 用目录条目 `lib`，见头注）。
         const overClaimed = [...modeled].filter((p) => !coveredBySet(packedSet, p))
         if (overClaimed.length === 0) {
           ok('K6. 离线建模的发布面每一项都真的在 tarball 里（模型对齐）', `${modeled.size} 项`)
