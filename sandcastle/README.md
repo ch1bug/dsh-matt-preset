@@ -23,6 +23,43 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
    缺省用模板内置的 ponytail 阶梯（ vendored 自 [ponytail](https://github.com/DietrichGebert/ponytail)）。
    主会话同样可用——skill 目录已带 `ponytail`（说 "ponytail" 或 "be lazy" 唤醒，"stop ponytail" 退出）。
 
+### 构建后自检：容器 COMPLETE 冒烟（`complete-check.sh`）
+
+镜像建好**先跑一遍冒烟**，别等夜批才发现 worker 形态起不来（#34 第 1 项，源自 #18 批末遗留）：
+
+```bash
+bash .sandcastle/complete-check.sh --image localhost/<repo>:dsh
+# exit 0 = 容器内 `dsh --profile headless` 真的回了 <promise>COMPLETE</promise>
+```
+
+它做三件事：**复用现有** podman machine（**绝不** init/set/stop/rm，也不停不删别人的容器与镜像
+——machine 是共享 WSL VM，内有别的项目数据）、按需建镜像（`--no-build` 可禁）、在容器内跑一轮
+headless 并断言收尾契约。同时把「Dockerfile 钉的版本」与「镜像里真装的版本」比一次，
+陈旧镜像会在这里红，而不是在夜批里红。宿主 `$DSH_HOME` **只读**挂入，只拷
+`.credentials.yaml`（有 `settings.yaml` 一并带上）。
+
+常用开关：`--network host|podman`（默认 host，见下「已知边界」）、`--user 1000:1000`（默认，
+对齐镜像里的 agent；rootful machine 下 `--userns=keep-id` 与 host 网络冲突）、
+`--env KEY[=VALUE]`（可重复，只写 KEY 时从启动环境取值）。
+
+**凭据这一格的实测（2026-10-20）**：容器里**只拷 `.credentials.yaml` 不够** —— 新引导的
+headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_KEY` 从启动环境
+透传进去就过（本脚本**自动**透传，前提是它在你启动脚本的那个 shell 里存在）。两条路都保留：
+文件拷贝是 run-ticket 的现行形态，env 是本机实测可靠的一条。
+
+退出码：`0` 通过 / `2` 环境前置不满足（podman、machine 未起、镜像缺失、凭据缺失）/
+`3` 镜像构建失败 / `4` 运行失败或未观测到 COMPLETE / `5` 镜像内 dsh 版本 ≠ 钉版。
+
+### 钉版策略：DSH 版本只认一处（#34 第 3 项）
+
+`templates/Dockerfile` 里 `npm i -g @deepseek-ai/dsh@<ver>` 的版本**单一事实源是本包
+`package.json` 的 `version`**（去掉 `-r<N>` 后缀即宿主锚：`0.2.1-rc.2-r1` → `0.2.1-rc.2`；
+口径见 [docs/dev-environment.md](../docs/dev-environment.md) §2 与 ADR-0008）。
+Dockerfile 必须写死字面量（镜像构建期读不到本仓的 package.json），因此由
+`tests/verify-sandcastle-pins.mjs` 机械校验两处逐字一致——**别在 Dockerfile 里手改版本**：
+重锚只改 `package.json` 的 `version`，再 `podman build --no-cache` 重建镜像。
+`complete-check.sh` 补第二道：比对「Dockerfile 写的」与「镜像里真装的」。
+
 ## Y 车道流程（yolo）
 
 ```bash
@@ -120,5 +157,11 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - podman machine 内存是并行度上限（2GiB 只够 1–2 并行；放量先 `podman machine set` 扩容）
 - `PrintCommand` = `{ command, stdin }`，command 是完整 shell 串；DSH headless 不读 stdin
 - 官方 node 镜像已占 uid 1000（node 用户）——Dockerfile 里先删后建 agent 用户
+- **TUN 代理（fake-IP）宿主出网**：容器**自有 netns** 里 DNS 拿到 `198.18.x` fake-IP、TCP 全超时，
+  而 VM netns 正常 —— 构建与冒烟都要 `--network host`（`complete-check.sh` 默认即 host；无代理
+  宿主可 `--network podman` 用默认隔离网络）。2026-10-20 实测（apt 与 npm 两条都验证）
+- **DSH provider 包缺口（#146）**：`@ch1bug/sandcastle-dsh` 目前**不可获取**（npm 404、上游仓已不在），
+  而 `dsh.ts` / `run-ticket.mts` 是薄引用它 —— `audit-ticket.mts` 之外的模板会
+  `ERR_MODULE_NOT_FOUND`。本仓 `sandcastle-e2e` 因此全红（opt-in 掩盖至今），修法待 #146 拍板
 
 完整调研：工作区 `research/sandcastle-matt-workflow-integration.md`。
