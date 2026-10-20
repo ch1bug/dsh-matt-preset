@@ -24,8 +24,9 @@
  * 未知参数**响亮失败**（exit 2）：`--al` 这种拼错若被静默忽略，读数是"快集全绿"，而你以为
  * 跑的是全量 —— 这是最难发现的假绿，故不猜。
  * `--timeout` 为什么存在：外部 300s 截断会**整套**丢日志（只剩标题行）；装了 watchdog 至少能读出
- * "哪一项没跑完 + 什么信号"。它也是本仓唯一能在套件内**产出 `NORUN` 读数**的开关（`NORUN` 的
- * 判据若非空洞，就得有个能造出"没有退出码"的东西 —— 见 `tests/verify-all-entry.mjs` E12）。
+ * "哪一项没跑完 + 什么信号"。它也是本仓**唯一能主动造出** `NORUN` 读数的开关（另一条来路是被外部
+ * 信号杀掉 —— 那条谁都预期不到；`NORUN` 的判据若非空洞，就得有个能按需造出"没有退出码"的东西 ——
+ * 见 `tests/verify-all-entry.mjs` E12）。
  *
  * 读数分档（行首 `label`）与退出码：
  *   PASS   用例 exit 0，且没有 loud skip
@@ -107,17 +108,31 @@ const OPT_IN = new Map([
   ['sandcastle-e2e.mjs', { flag: 'DSH_MATT_E2E', why: 'sandcastle 三命令 e2e（需 podman）' }],
 ])
 
-/** 头部注释区 = 文件**开头那串注释与空行**（shebang / `//` / `/** … 星号斜杠` 都算），**到第一行有效代码为止**。
- *  ⚠ 别退回 `src.indexOf('闭合符')`（复核实测的放宽形态）：那样"没有头部块注释、正文里却有块注释"的
- *  用例会把**正文**扫进判据面 —— 正文里一行 `* @slow` 就让一个快用例被**静默跳过**（真没跑 →
- *  假绿）。本仓现网就有两个不以块注释起头的用例（`sandcastle-e2e.mjs` 带 shebang、
- *  `workflow-enforcer-grill-contract.mjs` 以 `//` 起头），它们的正文注释绝不能参与判定。 */
+/** 头部注释区 = 文件**开头那串注释与空行**（shebang / `//` 行注释 / 块注释，**块注释体内不论行首是什么**），
+ *  **到第一行代码为止**。
+ *  ⚠ 别退回 `src.indexOf('闭合符')`（第 1 轮复核实测的放宽形态）：那样"没有头部块注释、正文里却有
+ *  块注释"的用例会把**正文**扫进判据面 —— 正文里一行 `* @slow` 就让一个快用例被**误判成 slow**、
+ *  快集里根本不跑（行上可以看到，但那项**本该跑**）。本仓现网就有两个不以块注释起头的用例
+ *  （`sandcastle-e2e.mjs` 带 shebang、`workflow-enforcer-grill-contract.mjs` 以 `//` 起头）。
+ *  ⚠ 块注释**体内**要一路吞到闭合符为止（第 2 轮复核）：只按行首白名单判断的话，块注释里
+ *  不带 `*` 的散文行会被当成第一行代码、头部提前截断 —— 方向相反但同样是错配。 */
 const headerRegion = (file) => {
   const lines = readFileSync(join(REPO, 'tests', file), 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)
   const head = []
+  let inBlockComment = false
   for (const line of lines) {
-    if (/^\s*$/.test(line) || /^\s*(\/\/|\/\*|\*|\*\/)/.test(line) || /^#!/.test(line)) {
+    if (inBlockComment) {
       head.push(line)
+      if (line.includes('*/')) inBlockComment = false
+      continue
+    }
+    if (/^\s*$/.test(line) || /^#!/.test(line) || /^\s*\/\//.test(line)) {
+      head.push(line)
+      continue
+    }
+    if (/^\s*\/\*/.test(line)) {
+      head.push(line)
+      if (!line.includes('*/')) inBlockComment = true
       continue
     }
     break

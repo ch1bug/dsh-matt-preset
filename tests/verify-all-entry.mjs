@@ -1,5 +1,5 @@
 /**
- * verify-all-entry.mjs — 唯一检查入口 `scripts/verify-all.mjs` **自身**的契约（E1–E14）。
+ * verify-all-entry.mjs — 唯一检查入口 `scripts/verify-all.mjs` **自身**的契约（E1–E15）。
  *
  * Why（邻仓 #83 的同族）：入口的汇总逻辑是纯代码——枚举 `tests/*.mjs`、按退出码与
  * `SKIP (loud)` 分档、区分"缺环境跳过"、给 `hooksPath` 出 advisory、决定进程退出码。
@@ -29,9 +29,13 @@
  *   E13 反向自检：判据面**只到第一行代码为止**，正文里怎么提 `@slow` 都不算标记。两条伪装输入
  *      各钉一面：① 字符串常量 `'@slow'`；② **代码之后的块注释**里有一行 `* @slow …`
  *      —— ② 是第 1 轮复核打出来的真实放宽面（定稿前取"第一个闭合符之前"，会把正文扫进来 ⇒
- *      静默跳过 ⇒ 假绿；①单独存在时对锚定式判据是恒过的，钉不住这个放宽）
+ *      那个用例被误判成 SLOW、快集里不跑（汇总仍是 `OK` ⇒ 假绿）；①单独存在时对锚定式判据是恒过的，
+ *      钉不住这个放宽）
  *   E14 未知开关 / 坏值 → exit 2 + 用法行，且**一个用例都没跑**（拼错的 `--al` 不能被静默
  *      当成默认快集：那会让读数变成"快集全绿"而你以为跑了全量）
+ *   E15 **真树**仍在用 slow 层：存在标记行且每条都写了读数（≈NNs）。刻意**不**钉成员名单
+ *      （钉名单 = 第二份清单，D6）。**显式声明不覆盖**：入口的判定器在真树上没有守卫（再写一份
+ *      判定器就是 D4），靠 E10–E14 的夹具层 + 复核兜
  *
  * **环境隔离**：子进程清掉全部 `DSH_MATT_*`（门禁变量会把夹具那档从 SKIP 变成执行，计数随之
  * 漂移；2026-10-17 在 msys 全流程口径下实测红）**与全部 `GIT_*`**（本仓上一个版本在
@@ -42,7 +46,7 @@
  * 非空洞：把入口的 `loud` 判定改成 `false`（PASS* 退化成 PASS）→ E1/E2 红（已实测）。
  */
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -227,7 +231,8 @@ try {
       `import { writeFileSync } from 'node:fs'\nconst word = '@slow'\nwriteFileSync(${JSON.stringify(mark('ran-mentions.txt'))}, word)\nconsole.log('✓ mentions fixture')\n`)
     //   ② **块注释形态**（复核实测出来的真实放宽面）：没有头部块注释，代码之后才有一个块注释、
     //      里面正好有一行 ` * @slow …`。定稿前的实现取 `src.indexOf(闭合符)` ⇒ 会把这段正文
-    //      扫进判据面、把本用例**静默跳过**（真没跑 = 假绿）。头部注释区必须是"到第一行代码为止"。
+    //      扫进判据面、把本用例被**误判成 SLOW**（快集里不跑，汇总仍是 `OK` ⇒ 假绿）；头部注释区
+    //      必须是"到第一行代码为止"。
     await writeFile(join(layerRoot, 'tests', 'body-marker.mjs'),
       `import { writeFileSync } from 'node:fs'\n/*\n * 正文注释（在代码之后，不是头部）\n * @slow 这一行在正文块注释里，不是标记\n */\nwriteFileSync(${JSON.stringify(mark('ran-body-marker.txt'))}, 'ran')\nconsole.log('✓ body-marker fixture')\n`)
 
@@ -270,7 +275,8 @@ try {
     }
 
     // E13：反向自检 —— 判据面**只到第一行代码为止**；正文怎么提都不该降级成 slow。
-    // 两条伪装输入各钉一面：① 字符串常量；② **代码之后的块注释**（定稿前那条实现会在这条上静默假绿）。
+    // 两条伪装输入各钉一面：① 字符串常量；② **代码之后的块注释**（定稿前那条实现会在这条上把
+    // 一个快用例误判成 slow —— 行上能看到，但它在快集里根本不跑）。
     const e13Cases = [
       ['mentions.mjs', 'ran-mentions.txt', '字符串常量'],
       ['body-marker.mjs', 'ran-body-marker.txt', '代码之后的块注释'],
@@ -282,8 +288,8 @@ try {
     if (e13Bad.length === 0) {
       ok('E13. 反向自检：正文里的 `@slow` 字样 ≠ 标记（两条伪装输入 —— 字符串常量 / 代码之后的块注释 —— 默认跑**都仍被执行**）')
     } else {
-      bad('E13. 正文提到 `@slow` 就被跳过了（判据面越过了"第一行代码"，会随"谁提到这个词"而漂）',
-        e13Bad.map(([file, marker]) => `${file}: ran=${existsSync(mark(marker))} | ` +
+      bad('E13. 正文提到 `@slow` 就被降级成 slow 了（判据面越过了"第一行代码"，会随"谁提到这个词"而漂）',
+        e13Bad.map(([file, marker, shape]) => `${shape}（${file}）: ran=${existsSync(mark(marker))} | ` +
           `${(fastRun.out.split('\n').find(l => l.includes(file)) ?? '(无该行)').trim()}`).join(' ｜ '))
     }
 
@@ -302,10 +308,32 @@ try {
   } finally {
     await rm(layerRoot, { recursive: true, force: true })
   }
+
+  // ── E15：真树**仍在用**这套机制（夹具层钉的是行为，这条钉"机制没被真树悄悄丢下"）──────
+  // 刻意**不**钉成员名单：钉名单就是第二份清单（D6），而"哪一项算 slow"由标记本身决定。
+  // 只断言两件：① 真树里存在标记形状的行；② 每条标记行都带一个读数（≈NNs / NNs）。
+  // **显式声明不覆盖**：第 ① 条用的是"标记形状"这个最朴素的判据，入口自己的判定器**在真树上
+  // 没有守卫** —— 再写一份判定器就是 D4（守卫手抄被测语义），故靠 E10–E14 的夹具层 + 复核兜。
+  const realMarked = readdirSync(join(REPO, 'tests'))
+    .filter(f => f.endsWith('.mjs'))
+    .map(f => ({
+      file: f,
+      lines: readFileSync(join(REPO, 'tests', f), 'utf8').split(/\r?\n/).filter(l => /^[ \t]*\*[ \t]*@slow\b/.test(l)),
+    }))
+    .filter(x => x.lines.length > 0)
+  const noReading = realMarked.flatMap(x => x.lines.filter(l => !/≈?\d/.test(l)).map(l => `${x.file}: ${l.trim()}`))
+  if (realMarked.length > 0 && noReading.length === 0) {
+    ok('E15. 真树仍在用 slow 层：标记行在场，且每条都写了读数', realMarked.map(x => x.file).join(' / '))
+  } else {
+    bad('E15. slow 层的真树用法丢了（要么承认分层作废并改文档，要么补回标记）',
+      realMarked.length === 0
+        ? '真树里一条 `* @slow` 标记都没有'
+        : `标记行缺读数（写法：\`* @slow ≈NNs …\`）: ${noReading.join(' ｜ ')}`)
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }
 
-console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E14) ===')
+console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E15) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
