@@ -30,6 +30,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { fixtureEnv } from "./isolated-git.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -148,11 +149,14 @@ const DRIVER = join(W, "drv.sh");
 // `npx`（shebang `#!/usr/bin/env bash`）、uname、dirname 等全部不可执行。
 // 前置 bash 自身所在目录，让 bash 启动时转换出的 PATH 覆盖 /usr/bin。
 const BASH_BIN = dirname(BASH);
+// bash 的脚本入口用正斜杠；参数 W 保留原生形态：drv.sh 会把它拼进 PATH，
+// 把 W 改成 C:/... 会让冒号成为 PATH 分隔符，Node 找不到假 gh 而误调真实 gh。
+const bashPath = (p) => p.replace(/\\/g, "/");
 const runBash = (script, args, opts = {}) => {
-  const r = spawnSync(BASH, [script, ...args], {
+  const r = spawnSync(BASH, [bashPath(script), ...args], {
     encoding: "utf8",
     ...opts,
-    env: { ...process.env, ...opts.env, PATH: `${BASH_BIN};${process.env.PATH}` },
+    env: fixtureEnv({ ...opts.env, PATH: `${BASH_BIN};${process.env.PATH}` }),
   });
   return { status: r.status, out: (r.stdout || "") + (r.stderr || "") };
 };
@@ -222,6 +226,10 @@ const tsx = (args) => runBash(DRIVER, [W, ...args]);
 for (const n of [101, 102, 103]) {
   const r = tsx([".sandcastle/audit-ticket.mts", "--issue", String(n)]);
   check(`audit #${n} exit 0 (launch)`, r.status === 0);
+  if (r.status !== 0) {
+    console.error(r.out);
+    process.exit(1);
+  }
   const rec = readJ(".sandcastle", "audits", `${n}.json`);
   check(
     `audit #${n} record verdict=launch + touchSet[]`,
@@ -348,11 +356,15 @@ for (const n of [101, 102, 103]) {
   const smoke = `
 import { judgeSimplify, countDiffLines, EXIT_STATUS } from ${JSON.stringify(runTicketUrl)};
 import { statusForExit, loadSerialGroups, mergeSerialGroups } from ${JSON.stringify(nightRunUrl)};
-import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
+import { fixtureEnv, gitIn } from ${JSON.stringify(pathToFileURL(join(HERE, "isolated-git.mjs")).href)};
 
 // 真 git 仓库：master 上造 >800 行 diff 的分支（cwd = 假仓 W）
-const g = (...a) => spawnSync("git", a, { encoding: "utf8" }).status === 0;
+const G = gitIn(${JSON.stringify(W)}, fixtureEnv());
+const g = (...a) => {
+  const r = G(...a);
+  if (r.status !== 0) throw new Error("smoke git failed: " + a.join(" ") + "\\n" + r.stderr);
+};
 g("checkout", "-q", "-b", "ticket-big");
 const big = Array.from({ length: 900 }, (_, i) => "line " + i).join("\\n");
 writeFileSync("big.txt", big);

@@ -168,7 +168,7 @@ try {
 // git 子命令出现」来认「自建仓的用例」。这个**方向**是错的（#125 的实测与替换）：
 //   ① **漏**（假绿面）：`clone` / `worktree add` 自建仓的用例认不出；`sandcastle-e2e.mjs`
 //      的 `git -C "$W" init` 写在模板字符串里、**没有引号**，同样认不出 —— 而它确实自建了仓
-//      （#127 已登记为债务，见 REGISTRY）。
+//      （历史 #127 债务；现已接入挂具并摘牌）。
 //   ② **追不动**：把 `init` 加宽成 `init|clone|worktree` 只是把"下一个写法"往后推一格 ——
 //      自建仓的写法是**开放集**（init / clone / worktree add / submodule / 将来任何一种），
 //      正则永远差一条，这是 D15 点名的无收敛军备竞赛。
@@ -189,7 +189,7 @@ try {
 //   ① 观测面 = **六种** `child_process` 调用器（`GIT_SPAWNERS`）+ shell 串形态。**不覆盖**：
 //      (i) 执行器 / 命令串**写成变量**（`execSync(cmd)` 而 `cmd = 'git clone …'`、`spawn(gitBin, …)`）
 //      —— 判据看的是**字面量**；(ii) 把 git 路径**动态解析**出来再 spawn（`spawnSync(join(bin,'git'))`）；
-//      (iii) **经 bash / heredoc 起的 git**（`sandcastle-e2e.mjs` 的形态即此 —— 已登记债务，I2c 响亮列出）。
+//      (iii) **经 bash / heredoc 起的 git**（`sandcastle-e2e.mjs` 的搭台即此；#127 的实际隔离由 I4 opt-in 链验证）。
 //   ② `REGISTRY` 是**人写的**白名单：只读登记若用到 `READ_ONLY_SUBCOMMANDS` 之外的子命令
 //      ⇒ 红（默认拒绝），必须人来扩白名单并写理由。它不会静默放过，但也不会自己发现新用法。
 //   ③ `readOnly` 只核对**字面** argv：**非字面** argv（`spawnSync('git', argv)` / `[...spread]`）
@@ -259,13 +259,6 @@ const REGISTRY = {
   'verify-review-brief-readonly.mjs': {
     kind: 'readOnly',
     why: '同上：`git ls-files` 取本仓跟踪文件清单，核对 brief 的只读面',
-  },
-  'sandcastle-e2e.mjs': {
-    kind: 'debt',
-    why: '在 `os.tmpdir()` 里**自建临时仓**（setup.sh 的 `git -C "$W" init` + 生成脚本里的 ' +
-      'checkout/add/commit），且 env 原样继承 `GIT_*` —— 与 I1a 同形的污染面，但未走挂具。' +
-      '另有一个独立缺陷：本机搭台即失败（msys bash 吃掉反斜杠脚本路径，setup exit 127），' +
-      '加之 `DSH_MATT_E2E=1` 门控 ⇒ 长期未真正跑过。#127 跟踪修复；修好后本条会红，摘牌即可',
   },
 }
 
@@ -731,6 +724,8 @@ try {
       head: (C('rev-parse', 'HEAD').stdout ?? '').trim(),
     })
     const before = readShared()
+    // #127：完整配置字节也要不变，不能只守 core.bare 而漏掉其它配置写入。
+    const configBefore = readFileSync(join(BASE, '.git', 'config'))
 
     // 在 worktree 里**真提交** —— 不设 SKIP_HOOKS（AC4 的正脸）
     writeFileSync(join(WT, 'a.txt'), 'changed in worktree\n')
@@ -778,7 +773,17 @@ try {
     }
 
     // ② AC3 的**字面**形态：真套件跑完前后，调用方共享仓逐项不变
+    // opt-in 时必须证明内层 e2e 真通过，不能把 I4a 的 cwd 边界当作 e2e 跳过许可。
+    if (process.env.DSH_MATT_E2E === '1') {
+      if (/^\s+PASS\s+sandcastle-e2e\.mjs\s/m.test(out)) {
+        ok('I4d. opt-in e2e 在真实 worktree 钩子内真通过', '内层 verify-all 的 sandcastle-e2e 为 PASS')
+      } else {
+        bad('I4d. opt-in e2e 未在真实 worktree 钩子内通过',
+          out.split('\n').filter(line => /sandcastle-e2e|FAIL|NORUN|SKIP/.test(line)).join(' ｜ '))
+      }
+    }
     const SIGNALS = [
+      ['共享仓完整 config 字节未变', configBefore.equals(readFileSync(join(BASE, '.git', 'config'))), '比较钩子前后完整配置'],
       ['共享仓 `core.bare` 未变', before.bare === after.bare, `${JSON.stringify(before.bare)} → ${JSON.stringify(after.bare)}`],
       ['共享仓 `core.worktree` 未变', before.worktree === after.worktree, `${JSON.stringify(before.worktree)} → ${JSON.stringify(after.worktree)}`],
       ['共享仓分支 ref 未被顶走', before.branch === after.branch, `${JSON.stringify(before.branch)} → ${JSON.stringify(after.branch)}`],
