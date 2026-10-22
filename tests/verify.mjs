@@ -327,6 +327,11 @@ try {
   }
 
   await handleD.dispose()
+  // The handoff child is a separate producer: disposing the parent does not
+  // join its turn or its buffered JSONL writes. Stop producing, then drain
+  // persistence before cleanup may remove the borrowed root (#154).
+  await ctxD.agents.get(newIdD).whenIdle()
+  await ctxD.sessionPersistence.flush()
 } catch (error) {
   bad('harness run', String(error?.stack ?? error))
 }
@@ -361,8 +366,8 @@ console.log(results.join('\n'))
 // 判据与下面的退出码同源（同一个 results 扫描），保证「非 0 退出」与「现场还在」永远一致。
 // 条目 = Track D 的临时根 + 本用例触发的 handoff_tool 写下的那几份 `handoff-*.md`
 // （工具的契约是把文档写进 OS 临时目录 —— 真交接要留档，测试触发的那几份只是垃圾）。
-// 必须放在 Track D 的 dispose 之后：handoff 子会话的 jsonl 持久化是延迟写（实测 dispose
-// 后约 190ms 落地），在它落地前 rm 会被那次写入把 rootD 重新建出来（只剩 data/）。
+// 必须放在 Track D 的生产者空闲与持久化屏障之后（#154）：仅 dispose 父agent
+// 不会等待另一个子会话的延迟写；未join就rm会与落地交错，甚至抛ENOTEMPTY。
 // `tmpSettled` 让上面那个进程级兜底不再重复打印。
 tmpSettled = true
 const verdictFail = results.some(r => r.startsWith('  ✗'))
