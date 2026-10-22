@@ -20,7 +20,7 @@
  *   Y4  `docs/batch-state.md` 的「适用车道」节含 Y 车道，写明「复用 #71 标记、
  *       无需专用机制/专用状态文件」
  *   Y5  `sandcastle/README.md` 同写车道范围 + 指向 `docs/batch-state.md`（三处不漂移）
- *   Y6  **行为级**：把 `night-run.mts` 的两个纯函数渲染出来（拔掉 `@ch1bug/*` 依赖后
+ *   Y6  **行为级**：把 `night-run.mts` 的两个纯函数渲染出来（隔离导入边后
  *       在 `.scratch/` 里 import 副本），断言素材段真的产出四类、收口提醒真的点名步骤
  *   Y7  **负例硬守卫（本票最关键的一条，Q73-1）**：`night-run.mts` 里**没有**任何 retro
  *       **判定**逻辑——不出现 `matchesSurface` / `actionSurface` / `RETRO_TRIGGER` /
@@ -204,10 +204,10 @@ if (README_BULLET === null) {
       `README bullet 缺: ${readmeMissing.join(', ') || '(无)'}；两处共用措辞=${sharedLane}`)
 }
 
-// ── Y6: 行为级 —— 拔掉不可达的 `@ch1bug/*` 依赖后，真的把两个渲染函数跑出来 ──────
-// `.mts` 模板 import `./run-ticket.mts` → `@ch1bug/sandcastle-dsh`（本仓未安装，
-// 需沙箱）。所以副本放在**仓内 `.scratch/`**（`lib.ts` 的 node:* 依赖可达）并把
-// 那一行换成 stub —— 只换**导入边**，被测的两个渲染函数逐字节是仓内那份。
+// ── Y6: 行为级 —— 隔离导入边后，真的把两个渲染函数跑出来 ──────
+// 这份夹具原为绕过 #146 的外部包缺口而设；该缺口已修复，此处仍保留
+// stub 限定渲染测试面。真实无依赖导入链由 sandcastle-e2e 另行覆盖。
+// 只换**导入边**，被测的两个渲染函数逐字节是仓内那份。
 let scratch = null
 try {
   scratch = mkdtempSync(join(REPO, '.scratch', 'verify-sandcastle-retro-'))

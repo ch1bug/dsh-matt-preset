@@ -164,7 +164,7 @@ const runBash = (script, args, opts = {}) => {
   mkdirSync(join(W, "bin"), { recursive: true });
   mkdirSync(join(W, ".sandcastle"), { recursive: true });
   // 模板拷进假仓（同目录携带 lib.ts，#13 相对导入契约）
-  for (const f of ["audit-ticket.mts", "night-run.mts", "lib.ts"]) {
+  for (const f of ["audit-ticket.mts", "night-run.mts", "lib.ts", "run-ticket.mts", "dsh.ts", "dsh-config.ts"]) {
     cpSync(join(TPL, f), join(W, ".sandcastle", f));
   }
   // gh shim：per-issue JSON（node 转义换行，绕开 bash 转义坑）
@@ -207,6 +207,15 @@ exec npx tsx "$@"
 
 const tsx = (args) => runBash(DRIVER, [W, ...args]);
 
+// 临时消费者没有 node_modules；Node 原生 TS 去类型，不能靠宿主依赖掩盖静态引用。
+{
+  const files = ["run-ticket.mts", "night-run.mts", "dsh.ts", "dsh-config.ts", "lib.ts"];
+  const probe = files.map(f => `await import(${JSON.stringify(pathToFileURL(join(W, ".sandcastle", f)).href)});`).join("\n");
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", probe], { encoding: "utf8", cwd: W });
+  check("纯函数与 provider 模板在无任何 sandcastle 依赖的消费者中导入成功", r.status === 0);
+  if (r.status !== 0) console.error(r.stderr || r.error);
+}
+
 // ============================================================
 // 1. 单票审计 ×3：exit 0 + audits/N.json 落盘 verdict=launch + touchSet[]
 // ============================================================
@@ -242,6 +251,23 @@ for (const n of [101, 102, 103]) {
       && rt.modelRouteDecision({ modelLane: { lane: "C" } }, undefined, { C: "p/mini" }).model === "p/mini"
       && rt.modelRouteDecision({ modelLane: { lane: "A" } }, undefined, undefined).route === "default",
   );
+  const dsh = await import(pathToFileURL(join(TPL, "dsh.ts")).href);
+  const ready = "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml";
+  check("dshHomeReadyCommand：无模型与原内联命令逐字节等价（含 chmod 600）",
+    dsh.dshHomeReadyCommand() === ready + " && echo dsh-home-ready");
+  check("dshHomeReadyCommand：模型路由追加 patch 后才报告 ready",
+    dsh.dshHomeReadyCommand("prov/model-name") === ready + " && " + rt.patchAgentDefaultModelCmd("prov/model-name") + " && echo dsh-home-ready");
+  check("dshSandboxOptions：保留镜像、uid/gid 与只读宿主挂载",
+    JSON.stringify(dsh.dshSandboxOptions("localhost/demo:dsh")) === JSON.stringify({
+      imageName: "localhost/demo:dsh", containerUid: 1000, containerGid: 1000,
+      mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
+    }));
+  const provider = dsh.dshHeadless();
+  check("dshHeadless：保持非流式 provider 契约与 POSIX prompt 转义",
+    provider.name === "dsh-headless" && Object.keys(provider.env).length === 0
+      && provider.captureSessions === false && provider.parseStreamLine("anything").length === 0
+      && provider.buildPrintCommand({ prompt: "it's $HOME\nnext" }).command === String.raw`dsh --profile headless 'it'\''s $HOME` + "\nnext'"
+      && dsh.sh("") === "''");
   const sed = rt.patchAgentDefaultModelCmd("prov/model-name");
   check(
     "patchAgentDefaultModelCmd：替换 agent-default-model 块（provider+model 两行）",

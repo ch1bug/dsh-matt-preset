@@ -18,8 +18,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { arg, flag, isMain } from "./lib.ts";
-// patchAgentDefaultModelCmd 单源化进 @ch1bug/sandcastle-dsh 包（#18）；
-// re-export 保持既有导入面（冒烟测试 rt.patchAgentDefaultModelCmd）不变。
+// patch 命令来自仓内纯函数模块；re-export 保持既有导入面不变。
 // 沙箱依赖（@ai-hero/sandcastle、./dsh.ts）在 main() 内动态导入：
 // 本模块的纯函数（judgeSimplify）可在未安装 sandcastle 依赖的环境里被冒烟测试导入。
 
@@ -121,7 +120,7 @@ export function modelRouteDecision(
   return { route: "default", note: "无 lane 信息（无审计记录或旧版记录）→ worker 继承宿主默认" };
 }
 
-export { patchAgentDefaultModelCmd } from "@ch1bug/sandcastle-dsh";
+export { patchAgentDefaultModelCmd } from "./dsh-config.ts";
 
 /**
  * 统计票分支相对当前 HEAD 的 diff 总行数（merge-base…branch）。
@@ -227,25 +226,17 @@ const closer = [
 
 const { createSandbox } = await import("@ai-hero/sandcastle");
 const { podman } = await import("@ai-hero/sandcastle/sandboxes/podman");
-const { dshHeadless } = await import("./dsh.ts");
+const { dshHeadless, dshSandboxOptions, dshHomeReadyCommand } = await import("./dsh.ts");
 const sandbox = await createSandbox({
   branch,
-  sandbox: podman({
-    imageName: image,
-    containerUid: 1000,
-    containerGid: 1000,
-    mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
-  }),
+  sandbox: podman(dshSandboxOptions(image)),
   hooks: {
     sandbox: {
       onSandboxReady: [
         {
           // 基础：宿主凭据/settings 拷入容器 DSH_HOME；lane 路由命中时追加
           // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）
-          command:
-            "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml"
-            + (modelRoute.model ? ` && ${patchAgentDefaultModelCmd(modelRoute.model)}` : "")
-            + " && echo dsh-home-ready",
+          command: dshHomeReadyCommand(modelRoute.model),
           timeoutMs: 15_000,
         },
       ],

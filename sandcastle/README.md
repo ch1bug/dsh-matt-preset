@@ -11,21 +11,19 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 ## 项目接入（一次性）
 
 1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / **build-image.sh** / **complete-check.sh** /
-   dsh.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——lib.ts 与模板同目录、
-   相对导入 `./lib.ts`，别漏拷）
+   dsh.ts / dsh-config.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——共享模块与模板同目录、
+   相对导入 `./lib.ts` / `./dsh-config.ts`，别漏拷）
 2. `npm i -D @ai-hero/sandcastle@0.12.0 tsx` —— **钉版本**（0.x API 周级变动）
-3. `npm i ./ch1bug-sandcastle-dsh-<ver>.tgz` —— DSH provider 包（#18 正式化：
-   dshHeadless / patchAgentDefaultModelCmd / 沙箱接入件；`dsh.ts` 与 run-ticket
-   均从该包导入。发布后可直接 `npm i @ch1bug/sandcastle-dsh`；版本锚定见包内 docs/RELEASE.md）。
-   ⚠ 该包目前**不可获取**（npm 404 / 上游仓不在），见下文「已知边界」与 #146。
-4. 构建镜像：`bash .sandcastle/build-image.sh --image localhost/<repo>:dsh .sandcastle`
+   DSH 适配层 `dsh.ts` / `dsh-config.ts` 已在模板内自包含（#146），**无需额外 DSH provider 包**。
+   Dockerfile 以实体模板为唯一来源；沙箱依赖只在执行 run-ticket 主流程时动态加载。
+3. 构建镜像：`bash .sandcastle/build-image.sh --image localhost/<repo>:dsh .sandcastle`
    （包装器从 `package.json` 派生锚注入 `--build-arg DSH_VERSION`；**消费者树**里没有本仓
    `scripts/` 时它会响亮失败并要你显式给版本——那就用
    `podman build --build-arg DSH_VERSION=<宿主锚> -f .sandcastle/Dockerfile -t …`；
    Rust 项目把 Dockerfile 里 rustup 注释段打开）
-5. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
+4. 项目 `workflow-gates.yml` 的 `external:` 加 `sandcastle` 与 `run-ticket`
    （enforcer 默认清单已含这两条；项目文件存在时默认清单被替换，需显式带上）
-6. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
+5. `.sandcastle/worker-context.md`（可选）：项目 principles/gotchas 摘要，worker 开工前必读；
    缺省用模板内置的 ponytail 阶梯（ vendored 自 [ponytail](https://github.com/DietrichGebert/ponytail)）。
    主会话同样可用——skill 目录已带 `ponytail`（说 "ponytail" 或 "be lazy" 唤醒，"stop ponytail" 退出）。
 
@@ -202,8 +200,9 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - **rootful machine + `--userns=keep-id` + `--network host` 三者不可同用**：实测报
   `crun: mount sysfs … Operation not permitted`（三态对照：只换掉 keep-id 即恢复）——
   冒烟脚本因此用 `--user 1000:1000` 拿 worker 身份，rootless/rootful 两种 machine 都成立
-- **DSH provider 包缺口（#146）**：`@ch1bug/sandcastle-dsh` 目前**不可获取**（npm 404、上游仓已不在），
-  而 `dsh.ts` / `run-ticket.mts` 是薄引用它 —— `audit-ticket.mts` 之外的模板会
-  `ERR_MODULE_NOT_FOUND`。本仓 `sandcastle-e2e` 因此全红（opt-in 掩盖至今），修法待 #146 拍板
+- **DSH 适配层（#146 已修复）**：模板自包含，不再依赖已不可获取的外部 provider 包；
+  `run-ticket.mts` / `night-run.mts` 的纯函数可在未安装 sandcastle 时导入。
+  `sandcastle-e2e` 的非沙箱段覆盖导入与适配命令；它仍不证明真实容器 worker 链。
+  run-ticket 的凭据文件 / env 通道验证另见 [#147](https://github.com/ch1bug/dsh-matt-preset/issues/147)，本次未处理。
 
 完整调研：工作区 `research/sandcastle-matt-workflow-integration.md`。
