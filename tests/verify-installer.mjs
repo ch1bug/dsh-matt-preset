@@ -244,8 +244,8 @@ const stubRootHasSpace = /\s/u.test(stubRoot)
 /**
  * 造一对**记录型**假件。
  *
- *   dsh.cmd  → node dsh-stub.cjs %*   （`%*` 原样转发，命令本身不含任何需要引号的字符）
- *   pnpm.cmd → node pnpm-stub.cjs %*
+ *   dsh.cmd  → "<process.execPath>" dsh-stub.cjs %* （`%*` 原样转发，Node 路径加引号）
+ *   pnpm.cmd → "<process.execPath>" pnpm-stub.cjs %* （#126：不依赖登录壳 PATH）
  *
  * 两个 stub 都是 Node 脚本：`.cmd` 里做变量展开/重定向是雷区（`if not defined X` 与
  * `%X%` 展开时机在 cmd.exe 不同调用形态下表现不一致），而 Node 脚本能可靠落盘，也和
@@ -259,7 +259,7 @@ const stubRootHasSpace = /\s/u.test(stubRoot)
 async function makeStubs() {
   const dir = await mkdtemp(join(stubRoot, 's-'))
   await writeFile(join(dir, 'dsh.cmd'),
-    '@echo off\r\nnode "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+    `@echo off\r\n"${process.execPath}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
   await writeFile(join(dir, 'dsh-stub.cjs'), `
 'use strict'
 const { appendFileSync } = require('node:fs')
@@ -284,7 +284,7 @@ if (argv.includes('plugin')) {
 process.exit(0)
 `.trimStart(), 'utf8')
   await writeFile(join(dir, 'pnpm.cmd'),
-    '@echo off\r\nnode "%~dp0pnpm-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+    `@echo off\r\n"${process.execPath}" "%~dp0pnpm-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
   await writeFile(join(dir, 'pnpm-stub.cjs'), `
 'use strict'
 const { appendFileSync } = require('node:fs')
@@ -417,7 +417,9 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
     recursive: true,
     filter: (s) => !/[\\/](\.git|node_modules|\.scratch|docs|tests)([\\/]|$)/.test(s),
   })
-  const packed = spawnSync('npm', ['pack', '--pack-destination', tmp], { cwd: src, encoding: 'utf8', shell: process.platform === 'win32' })
+  // #126：登录壳 PATH 未必包含 Node/npm；使用当前 Node 同目录的 npm 入口。
+  const npmPath = join(dirname(process.execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm')
+  const packed = spawnSync(quoteForShell(npmPath), ['pack', '--pack-destination', tmp], { cwd: src, encoding: 'utf8', shell: process.platform === 'win32' })
   assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`)
   const [tgzName] = (await readdir(tmp)).filter((f) => f.endsWith('.tgz'))
   assert.ok(tgzName, 'npm pack produced no tarball')
@@ -650,7 +652,7 @@ if (stubRootHasSpace) {
     // 用系统临时目录会让相对路径指到 `..\..\..` 外面（那就成了"探测未命中"，是另一回事）。
     const relDir = await mkdtemp(join(REPO, 'node_modules', '.dsh-matt-stub-'))
     const relDsh = join(relDir, 'dsh.cmd')
-    await writeFile(relDsh, '@echo off\r\nnode "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n', 'ascii')
+    await writeFile(relDsh, `@echo off\r\n"${process.execPath}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
     await cp(join(dirname(stubs.dshCmd), 'dsh-stub.cjs'), join(relDir, 'dsh-stub.cjs'))
     const relArg = relative(REPO, relDsh)
     try {
