@@ -110,8 +110,8 @@ function violations(source, owner = false) {
   const ts = tokens(source), found = [], calls = []
   for (let i = 0; i < ts.length; i++) {
     const t = ts[i]
-    if (t.value === '(') calls.push(ts[i - 1]?.kind === 'word' ? ts[i - 1].value : '')
-    if (t.value === ')') calls.pop()
+    if (t.kind === 'punct' && t.value === '(') calls.push(ts[i - 1]?.kind === 'word' ? ts[i - 1].value : '')
+    if (t.kind === 'punct' && t.value === ')') calls.pop()
     if (t.kind === 'word' && /^(spawnSync|spawn|execFileSync|execFile|execSync|exec)$/.test(t.value)
       && ts[i + 1]?.value === '(' && ts[i + 2]?.kind === 'string'
       && /^(?:node(?:\.exe)?|npm(?:\.cmd)?)(?:\s|$)/i.test(ts[i + 2].value)) found.push('bare executable call')
@@ -130,6 +130,10 @@ assert.deepEqual(violations('const example = "spawnSync(\'npm\', args)"'), [])
 assert.deepEqual(violations("// spawnSync('npm', args)\n/* 'npm-cli.js' */"), [])
 assert.deepEqual(violations('writeFile(path, `@echo off\\r\\nnode "%~dp0a.js" %*`)'), ['bare generated command'])
 assert.deepEqual(violations("const renamed = join(dir, 'npm-cli.js')"), ['npm candidate copy'])
+assert.deepEqual(violations("join(')', 'npm-cli.js')"), ['npm candidate copy'], 'quoted close is data, not a stack delimiter')
+assert.deepEqual(violations("join('(', 'npm-cli.js')"), ['npm candidate copy'], 'quoted open is data, not a stack delimiter')
+assert.deepEqual(violations("console.log('(', ')', 'npm-cli.js')"), [], 'quoted delimiters must not create a path-call context')
+assert.deepEqual(violations("join('(', 'file.txt'); const example = 'npm-cli.js'"), [], 'quoted open must not leak a path-call context to later data')
 assert.deepEqual(violations("const harmless = 'npm-cli.js'"), [])
 assert.deepEqual(violations("console.log('npm.cmd')"), [])
 assert.deepEqual(violations("const re = /['()]/; spawnSync('node', [])"), ['bare executable call'])
