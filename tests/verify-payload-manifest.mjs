@@ -19,7 +19,16 @@
  *   - 正向端到端（P10）：CLI 真装一次，通配命中的文件落进 store、manifest.files 一致
  *     （fixture 自带 `node_modules/yaml` stub，所以不依赖仓外依赖、fresh clone 也不会红）。
  *
- * 本文件的 P 编号是**自有序列**（P1–P10）：与 `tests/verify-workflow-profiles.mjs`
+ * #72 落地后加第三层（P11–P17）：语法收敛与通配命中逐文件——
+ *   - 通配命中**逐文件**（P11 / P13）：命中目录递归枚举其下的文件进 payload，目录本身
+ *     不再是条目（manifest.files 对通配条目保真为逐文件清单）；空目录不发货也不报错
+ *     （P11 / P13），**只**命中空目录 = 零展开 → 仍响亮（P14）；
+ *   - 显式目录条目仍是一条（P12）：manifest 保真但不膨胀（`skills` 这类不展开）；
+ *   - 子集外语法具名拒绝（P15–P17）：`**` 任何位置、`?`/`{}`/`[]`/`!`（即使文件系统上
+ *     真有同名文件）都在展开层抛 `unsupported files pattern: <条目>`；CLI 退出非 0、
+ *     点名条目、不落 store——`dir/**` 静默退化成 `dir/*` 的旧病就此变红。
+ *
+ * 本文件的 P 编号是**自有序列**（P1–P17）：与 `tests/verify-workflow-profiles.mjs`
  * （P1–P4）和 `tests/verify-workflow-profiles-2.mjs`（P5–P8）各自独立，引用时带文件名。
  */
 import { existsSync, readFileSync, rmSync } from 'node:fs'
@@ -83,6 +92,16 @@ process.on('exit', () => { try { rmSync(FX, { recursive: true, force: true }) } 
 await mkdir(join(FX, 'deltas'), { recursive: true })
 for (const n of ['name-a.txt', 'name-b.txt', 'other.txt']) await writeFile(join(FX, 'deltas', n), n)
 await writeFile(join(FX, 'root-a.mjs'), '')
+// #72 fixture：trees/ 供"通配命中目录逐文件"（sub 两层 + 空目录 hollow）；bundle/ 供
+// "显式目录条目仍是一条"；三个字面通配字符文件供 P16——`!`/`[]`/`{}` 在 Windows 上
+// 合法、**真建出来**，证明拒绝先于文件系统访问（`?` 在 Windows 上建不出来，其拒绝
+// 由语法检查先行保证，不依赖文件存在）。
+await mkdir(join(FX, 'trees', 'sub', 'deeper'), { recursive: true })
+await mkdir(join(FX, 'trees', 'hollow'), { recursive: true })
+await mkdir(join(FX, 'bundle'), { recursive: true })
+for (const n of ['trees/sub/c.txt', 'trees/sub/deeper/d.txt', 'bundle/x.txt', 'bundle/y.txt'])
+  await writeFile(join(FX, n), n)
+for (const n of ['bang!.txt', 'brack[0].txt', 'brace{a}.txt']) await writeFile(join(FX, n), n)
 
 const filenameGlob = (await expandEntry(FX, 'deltas/name-*.txt')).sort()
 if (JSON.stringify(filenameGlob) === JSON.stringify(['deltas/name-a.txt', 'deltas/name-b.txt']))
@@ -154,6 +173,75 @@ if (fresh.status === 0 && landed && manifestMatches && manifest.dependencies?.ya
   ok('P10. the installer really ships every glob-matched file (store + manifest.files agree)', (manifest.files ?? []).join(', '))
 else bad('P10. installer positive glob case',
   `exit=${fresh.status} landed=${landed} files=${JSON.stringify(manifest.files)} yaml=${String(manifest.dependencies?.yaml)} stderr=${(fresh.stderr ?? '').trim().slice(0, 160)}`)
+
+// ── P11–P14: 通配命中逐文件、空目录不发货、显式目录仍是一条（#72 拍板口径） ────
+// 旧实现把命中到的目录**当条目**进 payload（store 里的子树靠安装器递归 cp 带上），
+// manifest.files 因此不是逐文件的发货清单；空目录也会被当条目发货。#72 后：
+// 命中目录 → 递归枚举其下的文件（npm 对命中目录递归的语义）；空目录 → 贡献零个文件。
+const treeGlob = (await expandEntry(FX, 'trees/*')).sort()
+if (JSON.stringify(treeGlob) === JSON.stringify(['trees/sub/c.txt', 'trees/sub/deeper/d.txt']))
+  ok('P11. a glob hitting directories expands per-file, recursively (#72: no dir entries; empty dir ships nothing)', treeGlob.join(', '))
+else bad('P11. per-file wildcard expansion', JSON.stringify(treeGlob))
+
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['root-a.mjs', 'bundle'] }))
+let explicitDir = null
+try { explicitDir = (await payloadOf(FX)).entries.slice().sort() } catch (error) { explicitDir = `threw: ${String(error?.message ?? error)}` }
+if (JSON.stringify(explicitDir) === JSON.stringify(['bundle', 'root-a.mjs']))
+  ok('P12. an explicit directory entry stays ONE payload entry (#72: manifest stays faithful without inflating)', explicitDir.join(', '))
+else bad('P12. explicit directory entry', JSON.stringify(explicitDir))
+
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['root-a.mjs', 'trees/*'] }))
+let perFile = null
+try { perFile = (await payloadOf(FX)).entries.slice().sort() } catch (error) { perFile = `threw: ${String(error?.message ?? error)}` }
+if (JSON.stringify(perFile) === JSON.stringify(['root-a.mjs', 'trees/sub/c.txt', 'trees/sub/deeper/d.txt']))
+  ok('P13. payloadOf lists files only for wildcard entries; a matched empty dir ships nothing, no error (#72)', perFile.join(', '))
+else bad('P13. payloadOf per-file wildcard', JSON.stringify(perFile))
+
+// 边界：通配**只**命中空目录 = 零展开 → 仍按 #66 的口径响亮（不是新语义的静默逃生阀）。
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['trees/hollow/*'] }))
+let hollowLoud = null
+try { await payloadOf(FX) } catch (error) { hollowLoud = String(error?.message ?? error) }
+if (hollowLoud !== null && hollowLoud.includes('trees/hollow/*'))
+  ok('P14. a wildcard matching ONLY an empty dir is still the loud zero-resolution error (#72 boundary)')
+else bad('P14. empty-dir-only wildcard',
+  hollowLoud === null ? 'payloadOf() returned silently — empty dirs would ship as entries' : `message incomplete: ${hollowLoud}`)
+
+// ── P15–P17: 子集外语法一律具名拒绝（#72：`dir/**` 静默退化成 `dir/*` 变响） ───
+// `**` 无论落在哪一段都曾静默退化（`dir/**` ≡ `dir/*`）或零命中；#72 后在展开层
+// 抛 `unsupported files pattern: <条目>`，先于一切文件系统访问。
+const doubleStar = []
+for (const entry of ['trees/**', '**/*.mjs', 'trees/**/*.txt']) {
+  let msg = null
+  try { await expandEntry(FX, entry) } catch (error) { msg = String(error?.message ?? error) }
+  if (msg === null || !msg.includes('unsupported files pattern') || !msg.includes(entry)) doubleStar.push(`${entry}(${msg ?? 'no throw'})`)
+}
+if (doubleStar.length === 0)
+  ok('P15. `**` in any position is a named error at the expansion layer (#72)', 'trees/**, **/*.mjs, trees/**/*.txt')
+else bad('P15. `**` must throw unsupported files pattern', `not rejected: ${doubleStar.join(', ')}`)
+
+// 字面通配字符同理——且 bang!/brack/brace 三个文件**真实存在**于 fixture 根上：
+// 旧实现把它们当字面量，在允许这些字符的文件系统上会静默命中（Linux 实测路径）；
+// #72 的判据先于存在性，条目本身被具名拒绝。
+const literalChars = []
+for (const entry of ['bang!.txt', 'brack[0].txt', 'brace{a}.txt', 'trees/q?.txt', 'trees/x?*.txt']) {
+  let msg = null
+  try { await expandEntry(FX, entry) } catch (error) { msg = String(error?.message ?? error) }
+  if (msg === null || !msg.includes('unsupported files pattern') || !msg.includes(entry)) literalChars.push(`${entry}(${msg ?? 'no throw'})`)
+}
+if (literalChars.length === 0)
+  ok('P16. `?`/`{}`/`[]`/`!` are named errors even when same-named files exist on disk (#72)', 'bang!.txt, brack[0].txt, brace{a}.txt, trees/q?.txt, trees/x?*.txt')
+else bad('P16. literal glob metacharacters must throw', `not rejected: ${literalChars.join(', ')}`)
+
+// CLI 收口（同 P9 的语义，换成子集外语法）：退出非 0、stderr 点名 pattern、store 没落盘。
+// 同样依赖 installTo 的语句顺序——payload 解析（payloadOfOrDie）先于 rm/mkdir(target)。
+const patternStore = join(FX, 'store-pattern')
+await writeFile(join(FX, 'package.json'), JSON.stringify({ files: ['root-a.mjs', 'trees/**'] }))
+const cliPattern = spawnSync(process.execPath, [join(REPO, 'bin', 'install.mjs'), 'install', '--root', patternStore, '--from', FX], { encoding: 'utf8' })
+if (cliPattern.status !== 0 && /unsupported files pattern/.test(cliPattern.stderr ?? '')
+  && (cliPattern.stderr ?? '').includes('trees/**') && !existsSync(patternStore))
+  ok('P17. the installer dies loudly (exit≠0, no store) on an unsupported files pattern (#72)')
+else bad('P17. installer loudness on unsupported pattern',
+  `exit=${cliPattern.status} store=${existsSync(patternStore)} stderr=${(cliPattern.stderr ?? '').trim().slice(0, 160)}`)
 
 console.log('\n=== PAYLOAD MANIFEST VERIFY (offline) ===')
 console.log(results.join('\n'))
