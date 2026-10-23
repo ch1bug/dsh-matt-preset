@@ -714,6 +714,38 @@ if (stubRootHasSpace) {
   })
 
   /**
+   * F1 回归（2026-10-23 实机两复现）：`--dsh` 指向**脚本形态**（`.js`）必须经 node 起。
+   *
+   * 旧行为按来源判（只有 checkout 档包 node）：explicit 档的 `.js` 被直接 spawn，
+   * Windows 文件关联把它送进编辑器（实测弹 VSCode），`dsh plugin add` 实际未运行，
+   * 挂载静默丢失而安装器仍打印成功行并 exit 0。修法（lib/runtime-probe.mjs 的
+   * `dshRunner`）：脚本形态无论来源都经 node。本用例把 `.cjs` stub 复制成 `.js`
+   * 名字传给 `--dsh` —— 断言 stub 的 argv 记录**真的落盘**（node 执行了它）。
+   * 红证据：修复前该用例在实机上复现过两次「编辑器弹出 + 记录空 + exit 0」。
+   */
+  await test('#86 stub perturbation: a `.js` --dsh is executed via node, not by file association (F1)', async () => {
+    const jsDir = await mkdtemp(join(stubRoot, 'js-dsh-'))
+    // 与 .cmd stub 同一个记录型 Node 脚本，只换成 `.js` 名字——探测命中 explicit 档，
+    // runner 必须认出这是脚本形态并用 node 起。
+    const jsDsh = join(jsDir, 'dsh-as-js.js')
+    await cp(join(dirname(stubs.dshCmd), 'dsh-stub.cjs'), jsDsh)
+    try {
+      const home = join(tmp, 'pnpm-js-dsh')
+      await stubs.reset()
+      const r = run(['install', '--profile', 'web', '--dsh', jsDsh, '--pnpm', stubs.pnpmCmd], home)
+      assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+      const argv = parseStubArgv(readLog(join(jsDir, 'dsh-argv.txt')), 'DSH')
+      assert.ok(argv !== null,
+        `the .js stub was not executed by node — dshRunner regressed to spawning it directly ` +
+        `(pre-fix this opens the OS file association and the mount is silently lost)`)
+      assert.ok(argv.includes('plugin') && argv.includes('add'),
+        `expected the mount argv to reach the stub, got ${JSON.stringify(argv)}`)
+    } finally {
+      await rm(jsDir, { recursive: true, force: true })
+    }
+  })
+
+  /**
    * AC② 非空洞对照 C：**PATH 注入被拿掉** → 主断言变红。
    *
    * 不直接改产品代码（那是 prober 的写权面），改成"同形状的病"：把假 pnpm 换到一个

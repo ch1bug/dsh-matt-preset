@@ -7,7 +7,8 @@
  *   R3 注入面：`pathEntries` / `exists` / `env` / `platform` 全可注入，用例不动真实 PATH/磁盘
  *   R4 桌面惯例：`DSH_DESKTOP_ROOT` 下 `resources/runtime/cli/bin/dsh.cmd` 与
  *      `…/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` 两形
- *   R5 源码检出惯例：`DSH_MATT_DSH_SRC` → `apps/cli/lib/bin.js`，且 `dshRunner` 说明它经 `node` 跑
+ *   R5 源码检出惯例：`DSH_MATT_DSH_SRC` → `apps/cli/lib/bin.js`，且 `dshRunner` 按形态判：
+ *      脚本形态（.js/.cjs/.mjs）无论来源都经 `node` 起（F1），可执行形态直接起
  *   R6 pnpm 两形态注入：可执行 → 所在目录（`shim:false`）；`*.cjs` → mkdtemp shim 目录 + 转发内容
  *   R7 未命中 `detail` 逐条说明每个来源为何落空；`missingToolHint` 非空且**可执行**（含真变量名/命令）
  *   R8 **扰动会红**：把探测顺序改坏（env 抢 explicit）→ R2 必须红（见文件头「非空洞取证」）
@@ -365,13 +366,24 @@ test('R5a. DSH_MATT_DSH_SRC 下 apps/cli/lib/bin.js 可命中', () => {
   assert.equal(r.source, 'checkout')
 })
 
-test('R5b. dshRunner：检出形态经 node 起，其余形态直接起', () => {
+test('R5b. dshRunner：脚本形态经 node 起（无论来源），可执行形态直接起', () => {
   const checkout = dshRunner({ found: true, path: 'X:\\src\\apps\\cli\\lib\\bin.js', source: 'checkout' })
   assert.equal(checkout.cmd, process.execPath)
   assert.deepEqual(checkout.prefix, ['X:\\src\\apps\\cli\\lib\\bin.js'])
+  // F1（2026-10-23 实测两复现）：explicit/env 档的脚本形态也必须经 node —— 直接 spawn
+  // 会触发 Windows 文件关联（编辑器打开 .js，挂载静默丢失且安装器仍报成功 exit 0）。
+  const explicitJs = dshRunner({ found: true, path: 'X:\\x\\dsh.js', source: 'explicit' })
+  assert.equal(explicitJs.cmd, process.execPath)
+  assert.deepEqual(explicitJs.prefix, ['X:\\x\\dsh.js'])
+  const envCjs = dshRunner({ found: true, path: 'X:\\x\\dsh.cjs', source: 'env' })
+  assert.equal(envCjs.cmd, process.execPath)
+  assert.deepEqual(envCjs.prefix, ['X:\\x\\dsh.cjs'])
   const direct = dshRunner({ found: true, path: 'X:\\bin\\dsh.cmd', source: 'path' })
   assert.equal(direct.cmd, 'X:\\bin\\dsh.cmd')
   assert.deepEqual(direct.prefix, [])
+  const directExe = dshRunner({ found: true, path: 'X:\\bin\\dsh.exe', source: 'path' })
+  assert.equal(directExe.cmd, 'X:\\bin\\dsh.exe')
+  assert.deepEqual(directExe.prefix, [])
 })
 
 // ── R6 pnpm 两形态注入 ──────────────────────────────────────────────────────
