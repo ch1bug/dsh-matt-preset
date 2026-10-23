@@ -28,7 +28,8 @@ export function testExecutable(tool, {
   // 普通路径/参数整体加引号，空格与&等元字符不再拆分成命令。
   const quote = value => {
     if (/[\r\n"%!]/.test(value)) throw new Error('Unsafe CMD test executable argument')
-    return `"${value}"`
+    // Node/CRT把闭引号前的反斜杠按转义解释；成对保留，避免吞掉下一个argv。
+    return `"${value.replace(/\\+$/, slashes => slashes + slashes)}"`
   }
   return { command: shell ? quote(resolved) : resolved, args: shell ? args.map(quote) : [...args], shell }
 }
