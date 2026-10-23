@@ -518,6 +518,44 @@ $env:DSH_DESKTOP_ROOT='<app>'                          # 桌面应用根（含 r
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）
 ```
 
+**实机验证预配最小清单（agent shell / Git Bash 视角，2026-10-23 实测走通）**——live 套件
+全绿需要的全部东西，四步：
+
+1. **上游构建**（tag 现查仓内锚，别抄本行）：`git clone --depth 1 --branch <tag>
+   https://github.com/deepseek-ai/deepseek-harness.git <src>` → `pnpm install --ignore-scripts
+   --package-import-method=copy` → `pnpm run clean` → `pnpm run build`；验 `node
+   <src>/apps/cli/lib/bin.js --version`。构建产物入口**不是可执行**，见第 3 步。
+2. **两个转发 shim**（运行时依赖在 `%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\`
+   下有 `node`/`pnpm`/`python`，**但整个 dsh-primary-runtime 目录里没有 CLI 入口**——「运行时在位
+   ≠ dsh 可执行」；CLI 只能来自第 1 步的源码构建或桌面应用 `resources\runtime\cli\bin\dsh.cmd`）：
+   `dsh.cmd` = `@echo off` + `node "<src>\apps\cli\lib\bin.js" %*`；`pnpm.cmd` 同形转发
+   `dependencies\pnpm\bin\pnpm.cjs`。**`.cmd` 形态是硬要求**：把 `.js` 直接传 `--dsh`/`DSH_MATT_DSH`
+   会触发 Windows 文件关联（实测弹编辑器、挂载静默丢失且安装器仍报成功，F1——现已修为脚本形态
+   一律经 node，见 `lib/runtime-probe.mjs` 的 `dshRunner` 与 `tests/verify-installer.mjs` 的 F1 回归用例）。
+3. **四个环境变量**：`DSH_MATT_LIVE_CLI`（e2e/调用面套件直连，给 `.js` 没问题——套件自己经 node 起）、
+   `DSH_MATT_DSH`（安装器探测档 2，**必须给 `.cmd` shim**——同 F1）、`DSH_PNPM`（装 **`.cjs`** 原件，
+   安装器自己会造转发 shim）、`DSH_MATT_INSTALLER=1`。注意前两个是**不同的变量、喂不同的消费方**，
+   只设一个会让另一半用例静默跳过（PASS*）。
+4. **PATH 前缀**：Git Bash 里给 Windows 子进程造 PATH 一律 **POSIX 形式**（`cygpath -u` 转换后的
+   路径），混反斜杠条目会被 msys 的 PATH 转换静默丢弃（实测 shim 就这样失效过）；pnpm 的 shim
+   目录必须在这条 PATH 上——`DSH_PNPM` 只够安装器自己解析，plugin-manager 起的 pnpm 子进程
+   找的是字面 `pnpm`（§3.1 pnpm 三点注记）。
+
+隔离照旧：临时 `DSH_HOME` + `--port 0`（cheatsheet「探针卫生」），真实 home 零触碰。
+
+**未测项 / 补测清单（2026-10-24，实机验证批的遗留面——补测前这些层的「绿」不构成证据）**：
+
+| # | 未测面 | 缺什么 | 补测入口 |
+| --- | --- | --- | --- |
+| 1 | installer 桌面端形态（`--profile desktop` 用例挂载半边） | 本机无桌面应用根；真实 dsh CLI 拒挂 `desktop` 名（upstream Electron 专属守卫，实测 exit 1） | `DSH_MATT_DESKTOP_ROOT=<app>` 指真桌面根；或改用例 skip 理由串写明该守卫 |
+| 2 | `verify-live-real-llm.mjs`（preset 真实 LLM 层） | 套件门禁只认 `DEEPSEEK_API_KEY`/`DSH_MATT_REAL_CREDENTIALS_SOURCE`，未接桌面账号凭据默认路线（邻仓 dsh-shell-host 的 `e2e-real-llm-machine` 已示范：`<home>/.dsh/.credentials.yaml` 只读复制 + modelCatalog 路由，实测真跑计费 turn） | 给该套件补账号凭据默认（对齐邻仓设计）后跑通 |
+| 3 | enforcer 门禁触发型行为面（push 警告 / 关票抽查 / retro 落盘等十二段中的动作触发段） | 现有 live 闭环只驱动单轮工具调用；无 mock-LLM 多轮工具序列 e2e | 扩展 `verify-clean-env-e2e` 或新挂具：驱动真实例连续工具调用打到触发面 |
+| 4 | `ssh-pty-live`（live SSH 往返） | 无 `DSH_SSH_LIVE_HOST` 外部主机 | 配置 live host 环境变量后 machine 车道自动解跳 |
+
+另：**retro 机制未实现**——`docs/batch-state.md` 的 `retro:` / `.aggregated` 双标记与
+workflow-body 的落盘口径是**票面设计**（`dsh-matt-preset#132`/#140/#156），enforcer 侧仅
+reminder 提醒已实现，聚合/去重呈现管线未落地；夜批等场景在该票族收口前只能用轻量约定替代。
+
 实测结果（2026-10-16，装上包装后）：`verify-installer.mjs` **11/11、零 loud skip**（此前 4 条 link
 断言 + e2e 全是 loud skip）；`node scripts/verify-all.mjs` 里 `verify-installer` 由 `PASS*` 变
 **`PASS`**（#67 时基线 20/21；#75 加入 `verify-clean-env-e2e.mjs` 后为 **21/22**，无 dsh 时 20/22）。
