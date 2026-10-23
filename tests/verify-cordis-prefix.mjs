@@ -37,12 +37,40 @@ function collect(dir) {
   }
 }
 for (const dir of ['lib', 'tests', 'scripts']) collect(dir)
+// 与仓内同类守卫一致：只判剥掉注释后的行式代码，不把说明文字当实现。
+const codeOnly = (text) => text
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+function ownsPrefixParser(text) {
+  const code = codeOnly(text)
+  const named = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+personaPrefix\s*\(|^[ \t]*(?:export\s+)?(?:const|let|var)\s+personaPrefix\s*=/m.test(code)
+  const extraction = /^[ \t]*(?:const|let|var)\s+\w+\s*=\s*\w+\.findIndex\([^\n]*prefix:/m.test(code) && /\.slice\(6\)/.test(code)
+  return named || extraction
+}
+const importsPrefixParser = (text) => /^[ \t]*import\s*\{\s*personaPrefix\s*\}\s*from\s*['"]\.\.\/lib\/cordis-prefix\.mjs['"]/m.test(codeOnly(text))
+
+// 同一判定函数的双向夹具：注释不算声明/导入，真代码仍要被识别。
+const declaration = 'function personaPrefix(text) { return text }'
+const sharedImport = "import { personaPrefix } from '../lib/cordis-prefix.mjs'"
+for (const text of [`// ${declaration}`, `/*\n${declaration}\n*/`]) {
+  assert.equal(ownsPrefixParser(text), false, 'comment-only declaration must not be a parser')
+}
+assert.equal(ownsPrefixParser(declaration), true, 'real declaration must be detected')
+for (const text of [`// ${sharedImport}`, `/*\n${sharedImport}\n*/`]) {
+  assert.equal(importsPrefixParser(text), false, 'commented import must not wire a reader')
+}
+assert.equal(importsPrefixParser(sharedImport), true, 'real shared import must be detected')
+assert.equal(ownsPrefixParser(`const example = ${JSON.stringify(declaration)}`), false, 'ordinary string is not a declaration')
+assert.equal(importsPrefixParser(`const example = ${JSON.stringify(sharedImport)}`), false, 'ordinary string is not an import')
+const renamedExtraction = 'const start = lines.findIndex(line => /^\\s*prefix:/.test(line))\nout.push(lines[i].slice(6))'
+assert.equal(ownsPrefixParser(renamedExtraction), true, 'renamed legacy parser must still be detected')
+assert.equal(ownsPrefixParser(`/*\n${renamedExtraction}\n*/`), false, 'legacy algorithm in a block comment is not a parser')
+console.log('PASS guard self-checks: comments/strings inert, real declarations/imports/copies detected')
+
 const definitions = []
 for (const path of sources) {
   const text = readFileSync(resolve(REPO, path), 'utf8')
-  const named = /\bfunction\s+personaPrefix\s*\(|\b(?:const|let|var)\s+personaPrefix\s*=/.test(text)
-  const extraction = /\.findIndex\([^\n]*prefix:/.test(text) && /\.slice\(6\)/.test(text)
-  if (named || extraction) definitions.push(path)
+  if (ownsPrefixParser(text)) definitions.push(path)
 }
 assert.deepEqual(definitions.sort(), ['lib/cordis-prefix.mjs'], 'prefix parser definitions must have exactly one owner')
 for (const path of [
@@ -53,6 +81,6 @@ for (const path of [
   'tests/verify-batch-state.mjs',
 ]) {
   const text = readFileSync(resolve(REPO, path), 'utf8')
-  assert.match(text, /import\s*\{\s*personaPrefix\s*\}\s*from\s*['"]\.\.\/lib\/cordis-prefix\.mjs['"]/, `${path} must import the shared parser`)
+  assert.equal(importsPrefixParser(text), true, `${path} must import the shared parser`)
 }
 console.log('PASS one prefix parser owner and all five reader imports')
