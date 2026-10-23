@@ -31,25 +31,13 @@ import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { bootHarness, ENFORCER_PLUGIN } from './preset-harness.mjs'
 
+import { personaPrefix } from '../lib/cordis-prefix.mjs'
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 const WORKFLOW_CORE = pathToFileURL(REPO + '/workflow-core.mjs').href
 
 /** The full persona-carried text (intro + body): the L1 baseline, re-taken at #85 and #89. */
 const PERSONA_CARRIED = readFileSync(new URL('./fixtures/persona-prefix-v1.txt', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-
-/** Extract the `prefix: |` block scalar (same shape as verify-production). */
-function personaPrefix(yml) {
-  const lines = yml.split('\n')
-  const start = lines.findIndex(line => /^\s*prefix:/.test(line))
-  if (start < 0) throw new Error('no prefix: in composition')
-  const out = []
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^ {6}/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i].slice(6))
-    else if (out.length > 0) break
-  }
-  return out.join('\n')
-}
 
 /** The NEW persona prefix from the working tree (must NOT carry the body). */
 const newComposition = readFileSync(REPO + '/agent.cordis.yml', 'utf8').replace(/\r\n/g, '\n')

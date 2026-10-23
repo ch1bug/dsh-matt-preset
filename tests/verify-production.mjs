@@ -22,27 +22,18 @@ import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { AgentPreset, RUNTIME, bootHarness, smokePlugins, emitSessionEvent } from './preset-harness.mjs'
 
+import { personaPrefix } from '../lib/cordis-prefix.mjs'
 const MATT_COMPOSITION = process.env.MATT_COMPOSITION ?? fileURLToPath(new URL('../agent.cordis.yml', import.meta.url))
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
-/** Extract the persona prefix: `prefix: |` block scalar or `prefix: <inline>`. */
-async function personaPrefix(path) {
-  const lines = (await readFile(path, 'utf8')).split('\n')
-  const start = lines.findIndex(line => /^\s*prefix:/.test(line))
-  if (start < 0) throw new Error(`no prefix: in ${path}`)
-  const inline = lines[start].match(/^\s*prefix:\s*(.*)$/)?.[1]
-  if (inline !== undefined && inline !== '|') return inline
-  const out = []
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^ {6}/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i].slice(6))
-    else if (out.length > 0) break
-  }
-  return out.join('\n')
+/** 路径读取包壳；文本解析只由共享入口负责。 */
+async function readPersonaPrefix(path) {
+  return personaPrefix(await readFile(path, 'utf8'))
 }
 
-const MATT_PERSONA = await personaPrefix(MATT_COMPOSITION)
+const MATT_PERSONA = await readPersonaPrefix(MATT_COMPOSITION)
 
 // The shipped minimal preset's persona: a `@deepseek-ai/dsh-persona` row
 // inside the runtime's presets/minimal.patch.yml overlay.

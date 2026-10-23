@@ -27,6 +27,8 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { personaPrefix } from '../lib/cordis-prefix.mjs'
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BODY = resolve(REPO, 'workflow-body.txt')
 const BODY_FIXTURE = resolve(REPO, 'tests/fixtures/workflow-body-v1.txt')
@@ -36,22 +38,8 @@ const COMPOSITION = resolve(REPO, 'agent.cordis.yml')
 const lf = (text) => String(text).replace(/\r\n/g, '\n')
 const crlf = (text) => String(text).replace(/\n/g, '\r\n')
 
-/** 取 persona 前缀：`prefix: |` 块标量**或** `prefix: <inline>`（两种形态都要认——
- *  与 `tests/verify-production.mjs` 的取法同构；只认块标量时，inline 形态会被读成空串，
- *  重取就会把基线写歪而测试侧仍绿）。 */
-export function personaPrefix(yml) {
-  const lines = lf(yml).split('\n')
-  const start = lines.findIndex(line => /^\s*prefix:/.test(line))
-  if (start < 0) throw new Error('composition has no `prefix:` block')
-  const inline = lines[start].match(/^\s*prefix:\s*(.*)$/)?.[1]
-  if (inline !== undefined && inline !== '|') return inline
-  const out = []
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^ {6}/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i].slice(6))
-    else if (out.length > 0) break
-  }
-  return out.join('\n')
-}
+// 保留脚本已有的公开导出，但解析只由 lib 持有。
+export { personaPrefix } from '../lib/cordis-prefix.mjs'
 
 /** 一份骨架正文 → 它的往返字节（parse → join，恒等）。 */
 async function retake(core, bodyText) {

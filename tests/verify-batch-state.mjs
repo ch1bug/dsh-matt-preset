@@ -74,6 +74,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { fixtureEnv } from './isolated-git.mjs'
 
+import { personaPrefix } from '../lib/cordis-prefix.mjs'
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const results = []
@@ -381,19 +383,6 @@ else bad('C7. 写入者归属', 'docs/batch-state.md 未写明 retro 标记由 a
 const PERSONA_FIXTURE = read('tests/fixtures/persona-prefix-v1.txt')
 const CARRIED_BASELINE = read('tests/fixtures/workflow-body-v1.txt')
 const COMPOSITION = read('agent.cordis.yml')
-
-/** 取 `prefix: |` 块标量（与 verify-workflow-core / verify-production 同形）。 */
-function personaPrefix(yml) {
-  const lines = yml.split('\n')
-  const start = lines.findIndex(line => /^\s*prefix:/.test(line))
-  if (start < 0) return null
-  const out = []
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^ {6}/.test(lines[i]) || lines[i].trim() === '') out.push(lines[i].slice(6))
-    else if (out.length > 0) break
-  }
-  return out.join('\n')
-}
 
 if (PERSONA_FIXTURE === null) {
   bad('C8. persona-carried 基线可读', 'tests/fixtures/persona-prefix-v1.txt 缺失')
