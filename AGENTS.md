@@ -28,6 +28,8 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 ## Repo docs（导航指针；细节在各文件里，勿在此复述）
 
+- **项目层（跨两仓）**：本工作区 = preset 仓 + 邻仓 `dsh-shell-host`；跨仓 tracker 路由、
+  triage 标签映射、双域文档地图在 `.zcode/agents/`（项目作用域，git 排除，不进仓）
 - 决策与术语：`CONTEXT.md`（D1–D51）、`docs/adr/`
 - **会变的东西别抄当前值**：成员名单 / 当前读数 / 编号这类跨会话会变的东西，文档里写**现查命令**（或区间、
   指针），不抄当前值 —— 抄一份就是第二份清单，它一定会腐。现查命令的正则**照抄判据的正则**（手写简化
@@ -61,7 +63,8 @@ stderr 打一行、脚本继续跑，`$home` 仍是真实 profile，后续 `New-
 - 临时目录变量一律**换名**（`$tmpHome`），不要用 `$home` / `$HOME`；
 - 删除/覆盖目标**只能是本条命令自己建出来的路径**（`mktemp` / `mkdtemp` 的输出），
   **禁止**按 `$env:DSH_HOME` / `$HOME` 的展开结果再解析一遍当目标；
-- 需要隔离跑一条命令时，**不要手写 PowerShell 造沙箱 home**，走
+- 需要隔离跑一条命令时，**不要手搓 shell 造沙箱 home**（PowerShell / bash / 临时脚本同罪——
+  2026-10-23 实机验证时 bash 手搓 `DSH_HOME=<temp>` 就绕过了守卫），走
   `node scripts/with-temp-home.mjs -- <cmd…>`（在 `os.tmpdir()` 下建、建前与删前各断言一次、
   只删自己建的那一个路径；缺失 `--` 或空命令时**响亮失败**）。守卫纯函数
   `assertSafeTempHome` 由 `tests/verify-temp-home-guard.mjs` 钉住；
