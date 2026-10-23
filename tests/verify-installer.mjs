@@ -35,6 +35,9 @@ import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { payloadOf } from '../lib/payload.mjs'
 import { probeDsh, probePnpm } from '../lib/runtime-probe.mjs'
+import { testExecutable } from './lib-exec.mjs'
+
+const testNode = testExecutable('node').command
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
 const BIN = join(REPO, 'bin', 'install.mjs')
@@ -259,7 +262,7 @@ const stubRootHasSpace = /\s/u.test(stubRoot)
 async function makeStubs() {
   const dir = await mkdtemp(join(stubRoot, 's-'))
   await writeFile(join(dir, 'dsh.cmd'),
-    `@echo off\r\n"${process.execPath}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
+    `@echo off\r\n"${testNode}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
   await writeFile(join(dir, 'dsh-stub.cjs'), `
 'use strict'
 const { appendFileSync } = require('node:fs')
@@ -284,7 +287,7 @@ if (argv.includes('plugin')) {
 process.exit(0)
 `.trimStart(), 'utf8')
   await writeFile(join(dir, 'pnpm.cmd'),
-    `@echo off\r\n"${process.execPath}" "%~dp0pnpm-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
+    `@echo off\r\n"${testNode}" "%~dp0pnpm-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
   await writeFile(join(dir, 'pnpm-stub.cjs'), `
 'use strict'
 const { appendFileSync } = require('node:fs')
@@ -417,9 +420,9 @@ await test('--from <tarball>: installs from an npm pack artifact', async () => {
     recursive: true,
     filter: (s) => !/[\\/](\.git|node_modules|\.scratch|docs|tests)([\\/]|$)/.test(s),
   })
-  // #126：登录壳 PATH 未必包含 Node/npm；使用当前 Node 同目录的 npm 入口。
-  const npmPath = join(dirname(process.execPath), process.platform === 'win32' ? 'npm.cmd' : 'npm')
-  const packed = spawnSync(quoteForShell(npmPath), ['pack', '--pack-destination', tmp], { cwd: src, encoding: 'utf8', shell: process.platform === 'win32' })
+  // 保留#126的显式路径保障，由共享挂具统一候选；不依赖登录壳裸名。
+  const npm = testExecutable('npm', { args: ['pack', '--pack-destination', tmp] })
+  const packed = spawnSync(npm.command, npm.args, { cwd: src, encoding: 'utf8', shell: npm.shell })
   assert.equal(packed.status, 0, `npm pack failed: ${packed.stderr}`)
   const [tgzName] = (await readdir(tmp)).filter((f) => f.endsWith('.tgz'))
   assert.ok(tgzName, 'npm pack produced no tarball')
@@ -543,7 +546,7 @@ if (mountable) {
     assert.match(dumpDsh.stdout, /dsh-matt-preset\/workflow-enforcer\.mjs/, 'enforcer plugin not referenced')
     // 2) 安装副本自身可加载（插件文件 + yaml 依赖在 link/store 路径下解析）
     const enforcer = join(storeOf(home), 'workflow-enforcer.mjs')
-    const imp = spawnSync(process.execPath, [
+    const imp = spawnSync(testNode, [
       '-e', `import('file:///${enforcer.replaceAll('\\', '/')}').then(() => console.log('OK'))`,
     ], { encoding: 'utf8' })
     assert.equal(imp.status, 0, `plugin import failed: ${imp.stderr}`)
@@ -652,7 +655,7 @@ if (stubRootHasSpace) {
     // 用系统临时目录会让相对路径指到 `..\..\..` 外面（那就成了"探测未命中"，是另一回事）。
     const relDir = await mkdtemp(join(REPO, 'node_modules', '.dsh-matt-stub-'))
     const relDsh = join(relDir, 'dsh.cmd')
-    await writeFile(relDsh, `@echo off\r\n"${process.execPath}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
+    await writeFile(relDsh, `@echo off\r\n"${testNode}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`, 'utf8')
     await cp(join(dirname(stubs.dshCmd), 'dsh-stub.cjs'), join(relDir, 'dsh-stub.cjs'))
     const relArg = relative(REPO, relDsh)
     try {

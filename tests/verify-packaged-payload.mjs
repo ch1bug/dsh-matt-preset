@@ -78,6 +78,7 @@ import { registerHooks } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { testExecutable } from './lib-exec.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REPO_URL = pathToFileURL(REPO).href + '/'
@@ -209,12 +210,13 @@ if (!hookAvailable) {
   }
 
   // ── K3–K6: 真实打包布局（权威层） ───────────────────────────────────────────
-  const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  const npmViaNode = existsSync(npmCli)
-  // 直接 `npm` + shell:true 在 Node 24 会触发 DEP0190；能走 npm-cli.js 就走它。
-  const npmRun = (args) => (npmViaNode
-    ? spawnSync(process.execPath, [npmCli, ...args], { cwd: REPO, encoding: 'utf8' })
-    : spawnSync('npm', args, { cwd: REPO, encoding: 'utf8', shell: process.platform === 'win32' }))
+  let npm
+  try { npm = testExecutable('npm') } catch (error) { console.warn(error.message) }
+  const npmRun = (args) => {
+    if (!npm) return { status: null }
+    const invocation = testExecutable('npm', { args })
+    return spawnSync(invocation.command, invocation.args, { cwd: REPO, encoding: 'utf8', shell: invocation.shell })
+  }
   const probe = npmRun(['--version'])
   if (probe.status !== 0) {
     skipLoud('K3–K6. 打包层（npm pack + 解包实跑）', '本机找不到可用的 npm —— 发布物本身未验证')
