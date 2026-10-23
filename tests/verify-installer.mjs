@@ -399,6 +399,42 @@ await test('uninstall: removes store and the profile link', async () => {
   assert.notEqual(run(['uninstall', '--profile', 'web'], home).status, 0)
 })
 
+/**
+ * #46：文档（docs/RELEASE.md「安装 / 升级 / 回滚 / 卸载」）新增的卸载语义之
+ * 「无 dsh 时响亮降级」半边的机械断言——store 照删、profile link 原样保留（stale）、
+ * exit 0、指路行点名的手动命令带**默认** profile（web）。判据全部放在子进程内
+ * （PATH 清空 + 删掉其余探测来源，与 #86 pnpm 扰动同构造），不依赖本机形态。
+ */
+await test('uninstall without dsh: loud degrade — store removed, stale link kept, exit 0 (#46)', async () => {
+  const home = join(tmp, 'h7b')
+  const noDsh = {
+    PATH: '',                       // PATH 上什么都找不到
+    DSH_MATT_DSH: undefined,        // **删掉**（留空串也可能被当成有序前缀）
+    DSH_MATT_DSH_SRC: undefined,
+    DSH_DESKTOP_ROOT: undefined,
+  }
+  assert.equal(run(['install', '--profile', 'web'], home, noDsh).status, 0)
+  assert.ok(existsSync(join(storeOf(home), 'VERSION.json')), 'store should land even without dsh')
+  // 预置 profile 层 + link（真实形态由 dsh 写；这里手写以便离线断言「降级时 link 不被碰」）：
+  // 降级路径根本走不到 unmount()，profile 层必须原样。
+  const profileDir = join(home, 'profiles', 'web')
+  await mkdir(profileDir, { recursive: true })
+  await writeFile(join(profileDir, 'package.json'),
+    JSON.stringify({ name: 'web', private: true, dependencies: { 'dsh-matt-preset': `link:${storeOf(home)}` } }, null, 2))
+  const r = run(['uninstall'], home, noDsh) // 裸形态（无 --profile）= 默认 profile web
+  assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+  const combined = `${r.stdout}${r.stderr}`
+  assert.match(combined, /dsh not found on PATH — skipped profile unmount/u,
+    `no loud degrade line: ${combined.slice(-300)}`)
+  assert.match(combined, /dsh plugin --profile web rm dsh-matt-preset/u,
+    'the manual-command hint must name the DEFAULT profile (web) and the rm chain')
+  assert.match(r.stdout, /profile 'web' NOT unmounted/u, 'completion line must not claim success')
+  assert.ok(!existsSync(storeOf(home)), 'store should still be removed on the degrade path')
+  const after = JSON.parse(await readFile(join(profileDir, 'package.json'), 'utf8'))
+  assert.ok('dsh-matt-preset' in (after.dependencies ?? {}),
+    'stale link must survive the degrade path untouched')
+})
+
 await test('--version: prints package version', () => {
   const r = run(['--version'], tmp)
   assert.equal(r.status, 0)
@@ -769,6 +805,35 @@ if (stubRootHasSpace) {
       'mountable was true, so the mount assertions must actually run and see the link')
     assert.ok(samePath(await linkedStoreDir(realHome, 'web'), storeOf(realHome)),
       'the link must point at THIS store (same judgement the desktop case uses)')
+  })
+
+  /**
+   * #46 AC③：文档新增的裸卸载形态（`uninstall [--profile <name>]`，默认 profile web）
+   * 的机械断言（离线，假 dsh / 假 pnpm）。既有 uninstall 用例显式传 `--profile web`，
+   * 钉不住默认值——这里裸跑（不给 --profile）断言两件事：
+   *   1. 发出的层摘除调用逐项等于 `plugin --profile web rm dsh-matt-preset`
+   *      （bin/install.mjs unmount() 的 layer rm 链路）——**默认 profile = web**；
+   *   2. 收尾文案如实写 `(profile 'web' unmounted)`，store 被清。
+   * 预置 profile 层 + link 是必须的：unmount() 先读依赖表、没有 link 就**不调** dsh
+   * （早退），而假 dsh 不写真实 profile 层——不预置则 rm 调用根本不发生，断言空洞。
+   */
+  await test('#46 stub: bare uninstall defaults to profile web — dsh plugin --profile web rm dsh-matt-preset', async () => {
+    const home = join(tmp, 'uninstall-default')
+    assert.equal((await installWithStubs(home)).status, 0)
+    const profileDir = join(home, 'profiles', 'web')
+    await mkdir(profileDir, { recursive: true })
+    await writeFile(join(profileDir, 'package.json'),
+      JSON.stringify({ name: 'web', private: true, dependencies: { 'dsh-matt-preset': `link:${storeOf(home)}` } }, null, 2))
+    await stubs.reset()
+    const r = run(['uninstall', '--dsh', stubs.dshCmd, '--pnpm', stubs.pnpmCmd], home) // 裸形态：不给 --profile
+    assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
+    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH')
+    assert.ok(argv !== null,
+      `stub dsh was never invoked on uninstall — no rm happened (log: ${JSON.stringify(readLog(stubs.dshArgv))})`)
+    assert.deepEqual(argv, ['plugin', '--profile', 'web', 'rm', 'dsh-matt-preset'],
+      `bare uninstall must rm from the DEFAULT profile (web) via the layer-rm chain: ${JSON.stringify(argv)}`)
+    assert.ok(!existsSync(storeOf(home)), 'store survived uninstall')
+    assert.ok(r.stdout.includes(`(profile 'web' unmounted)`), `completion line: ${r.stdout.slice(-200)}`)
   })
 }
 

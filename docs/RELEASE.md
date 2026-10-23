@@ -34,7 +34,7 @@ node bin/install.mjs install --from /path/to/checkout                   # 从源
 node bin/install.mjs install --root <dir>           # 默认 root = $DSH_HOME/.agent-presets
 node bin/install.mjs install --profile <name>       # 默认挂到 profile web；layer 不存在时自动创建
 node bin/install.mjs upgrade  [--from …]            # 原地替换（stale 文件清除，记录 previousVersion）
-node bin/install.mjs uninstall
+node bin/install.mjs uninstall [--profile <name>]   # 默认摘 profile web 的 link + 清 store（语义见下「卸载」条）
 node bin/install.mjs --version
 ```
 
@@ -76,6 +76,12 @@ node bin/install.mjs install --profile desktop --dsh "<app>/resources/runtime/cl
 - **升级**：`upgrade` 原地替换；manifest 记录被替换的旧版本。
 - **回滚**：重装旧版本包（旧 tag ↔ 旧 npm 版本一一对应）：
   `install --force --from dsh-matt-preset-<旧版本>.tgz`。
+- **卸载**：`uninstall [--profile <name>]`（默认 profile `web`，与 install/upgrade 同）先摘
+  profile link 再清 store——摘 link 走 `dsh plugin --profile <p> rm dsh-matt-preset`
+  （profile 层里本就没有该 link 时跳过、不报错）；dsh 未命中时**响亮降级**（exit 0）：
+  store 照删、profile link 原样保留（stale），并打印手动命令
+  `dsh plugin --profile <p> rm dsh-matt-preset` 收尾。`--root`（store-only）下只清 store、
+  不碰任何 profile。桌面端完整卸载示例见下文「回滚」节（`uninstall --profile desktop`）。
 - 已知风险：install/upgrade 先清空目标再拷入，拷贝中途失败会破坏旧安装（无原子
   swap）；此时用 `install --force --from <旧版本>.tgz` 重装即可恢复。
 
