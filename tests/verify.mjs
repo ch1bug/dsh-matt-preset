@@ -246,7 +246,7 @@ try {
   // through to the child untouched.
   {
     const idsBeforeP = new Set(ctxA.sessions.list().map(s => String(s.id)))
-    const assignedDoc = doc + '\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A3'
+    const assignedDoc = doc + '\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A3\n- 凭据：#156（已落票，票 open）'
     const pOut = await ctxA.tools.execute({
       callId: ToolCallId('verify-handoff-3'),
       name: 'handoff_tool',
@@ -264,15 +264,78 @@ try {
       const idxP = pText.indexOf('交接边界')
       const dualRule = pText.includes('定向交接') && pText.includes('声明开工') && pText.includes('候选交接') && pText.includes('不得自动开工')
       const scoped = pText.includes('仅限定向节所指派的当前票') && pText.includes('TICKET EXIT')
+      // #156/D52：边界必须承载凭据核对规则（定向节带可核凭据行；核对不过降级候选），
+      // 且父会话注承载「范围认可 ≠ 派单」。删掉对应行本断言红（非空洞）。
+      const credentialed = pText.includes('凭据：批次 <宣告id>') && pText.includes('凭据：#<已落票票号>')
+        && pText.includes('自动降级为候选交接')
+      const ackNotDispatch = pText.includes('范围认可 ≠ 派单')
       const markerPassed = pText.includes('## 本会话任务（human 已定向）')
       const skillPinned = pText.includes('/implement')
-      if (dualRule && scoped && markerPassed && skillPinned) {
-        ok('A3. boundary carries D35 dual rules + D37 per-hop scope; 定向 marker passes through; /implement pinned', JSON.stringify(pText.slice(idxP, idxP + 120)))
+      if (dualRule && scoped && credentialed && ackNotDispatch && markerPassed && skillPinned) {
+        ok('A3. boundary carries D35 dual rules + D37 scope + #156 credential rule; 定向 marker passes through; /implement pinned', JSON.stringify(pText.slice(idxP, idxP + 120)))
       } else {
-        bad('A3. D35/D37 boundary', JSON.stringify({ dualRule, scoped, markerPassed, skillPinned, sample: pText.slice(idxP, idxP + 240) }))
+        bad('A3. D35/D37 boundary', JSON.stringify({ dualRule, scoped, credentialed, ackNotDispatch, markerPassed, skillPinned, sample: pText.slice(idxP, idxP + 240) }))
       }
     } else {
       bad('A3. D35/D37 boundary', pOut ? `isError=${pOut.isError} err=${JSON.stringify(pOut.error)?.slice(0, 400)} newId=${newIdP}` : 'no result')
+    }
+  }
+  // A4 (#156/D52): a directed section WITHOUT a credential line must be
+  // rejected LOUDLY by the tool — no child spawned, error names the fix.
+  // Structural check only: the tool judges the line's PRESENCE, never
+  // authorization semantics (that boundary is declared in the landing doc).
+  {
+    const beforeNoCred = ctxA.sessions.list().length
+    const noCredDoc = doc + '\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A4（无凭据行）'
+    let noCredError = ''
+    let noCredOut
+    try {
+      noCredOut = await ctxA.tools.execute({
+        callId: ToolCallId('verify-handoff-4'),
+        name: 'handoff_tool',
+        arguments: { document: noCredDoc, skill: 'implement' },
+        agent: agentA,
+        signal: new AbortController().signal,
+      })
+      noCredError = String(noCredOut?.error?.message ?? noCredOut?.error ?? '')
+    } catch (error) {
+      noCredError = String(error?.message ?? error)
+    }
+    trackHandoffDoc(noCredOut)
+    const spawned = ctxA.sessions.list().length > beforeNoCred
+    if (!spawned && /凭据/.test(noCredError)) {
+      ok('A4. directed handoff without credential line rejected loudly, no child spawned (#156)', noCredError.slice(0, 80))
+    } else {
+      bad('A4. directed handoff without credential line (#156)', `spawned=${spawned} err=${noCredError.slice(0, 200) || '(none)'}`)
+    }
+  }
+  // A5 (#156 复审③): the credential line must live INSIDE the directed
+  // section — one placed in the doc body (before the marker) does not count:
+  // directedSection extraction cuts from the marker to the next heading, so
+  // this input must be rejected exactly like A4.
+  {
+    const beforeA5 = ctxA.sessions.list().length
+    const outsideDoc = doc + '\n\n- 凭据：#156（写错位置：在定向节之外）\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A5'
+    let a5Error = ''
+    let a5Out
+    try {
+      a5Out = await ctxA.tools.execute({
+        callId: ToolCallId('verify-handoff-5'),
+        name: 'handoff_tool',
+        arguments: { document: outsideDoc, skill: 'implement' },
+        agent: agentA,
+        signal: new AbortController().signal,
+      })
+      a5Error = String(a5Out?.error?.message ?? a5Out?.error ?? '')
+    } catch (error) {
+      a5Error = String(error?.message ?? error)
+    }
+    trackHandoffDoc(a5Out)
+    const spawnedA5 = ctxA.sessions.list().length > beforeA5
+    if (!spawnedA5 && /凭据/.test(a5Error)) {
+      ok('A5. credential line outside the directed section does not count (#156)', a5Error.slice(0, 80))
+    } else {
+      bad('A5. credential line outside the directed section (#156)', `spawned=${spawnedA5} err=${a5Error.slice(0, 200) || '(none)'}`)
     }
   }
   await handleA.dispose()

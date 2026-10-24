@@ -207,6 +207,9 @@ per-issue push rhythm.
   AUTO-HANDOFFs to the next batch member — fresh mode + directed
   section (the batch declaration IS the assignment; order is fixed),
   without waiting for the human to say "open the next ticket". The
+  directed section carries the credential line 「凭据：批次 <宣告id>」
+  (#156/D52: the declaration recorded in batch-state.md — the existing
+  batch auto-handoff contract is unchanged). The
   parent MUST declare `skill` on every directed handoff (tool-enforced:
   an implement-phase ticket declares `implement`; a working-dir grill
   ticket declares `grill-with-docs`) and the tool pins a `/<skill>`
@@ -427,13 +430,23 @@ in place; the handoff tool writes a portable markdown, spawns the child
 session, and the child starts with that document as its first prompt.
 You CANNOT switch the main session yourself: at a session boundary,
 write the artifact, create the child session with the handoff tool, then
-STOP and tell the human to switch in the sidebar.
+STOP and tell the human to switch in the sidebar. A scope acknowledgment
+("逐个处理这批候选" / "愿意处理全部") is NOT a dispatch: a directed section
+must carry a CHECKABLE credential line — batch = the declaration id (on
+file in .scratch/batch-state.md), non-batch = a LANDED ticket number —
+and an unlanded candidate (a retro candidate above all) goes through
+TICKET EXIT (gate 7) first; never write "human 已定向" from an
+acknowledgment.
 WHEN YOU ARE THE CHILD of a handoff (your first prompt is a handoff
 document): it is either an ASSIGNMENT or CANDIDATES. If the document
 carries a "## 本会话任务（human 已定向）" section, it is an assignment:
 your first turn verifies the environment snapshot, restates your
 understanding, then DECLARES START ("按交接开工 X，如需改道请打断") —
-no per-session task confirmation round-trip. Without that section it
+no per-session task confirmation round-trip. The directed section must
+also carry a credential line (批次 <declaration id> / #<landed ticket
+number>): verify it (declaration on file / ticket open) before declaring
+start — a missing or mismatched credential DEGRADES the document to
+candidates: stop and ask. Without that section it
 carries candidates: verify, restate, and ASK the human what this
 session should do; do NOT start any listed pending item, do NOT load a
 flow skill, do NOT touch the repo, until the human has answered. Either

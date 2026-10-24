@@ -64,7 +64,7 @@ const handoffSchema = {
     skill: {
       type: 'string',
       description:
-        "定向交接（含「## 本会话任务（human 已定向）」节）必填：子会话要执行的 flow skill 名（implement / code-review / grill-with-docs / to-tickets…；实现票按惯例 = implement，工作区内 grill 票 = grill-with-docs）。工具只在 # Handoff 前单起一行 /<skill> 调用指令——内容由 DSH skill 插件自动注入，工具不做文件读取。确无适用技能传 'none'。候选交接不带此参数。",
+        "定向交接（含「## 本会话任务（human 已定向）」节）必填：子会话要执行的 flow skill 名（implement / code-review / grill-with-docs / to-tickets…；实现票按惯例 = implement，工作区内 grill 票 = grill-with-docs）。工具只在 # Handoff 前单起一行 /<skill> 调用指令——内容由 DSH skill 插件自动注入，工具不做文件读取。确无适用技能传 'none'。候选交接不带此参数。定向节还须携带凭据行（批次 = 宣告 id / 非批 = 已落票票号，#156/D52）——缺凭据行工具会响亮拒绝。",
     },
     mode: {
       type: 'string',
@@ -216,11 +216,12 @@ async function executeHandoff(ctx, args, exec) {
     '## 交接边界（首轮必读）',
     '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
     '- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（"按交接开工 X，如需改道请打断"），不再逐会话确认任务。',
+    '- 定向节必须携带**可核凭据行**（#156/D52）：批次定向 = `凭据：批次 <宣告id>`（.scratch/batch-state.md 在案）；非批定向 = `凭据：#<已落票票号>`（先落票才有定向资格）。开工前核对凭据（宣告在案 / 票 open）——**缺凭据行或核对不过 → 自动降级为候选交接**：按下方候选规则停下问 human，不开工。',
     '- 授权范围**仅限定向节所指派的当前票**：完成后写 handoff 传下一票时，同样在正文写入「## 本会话任务（human 已定向）」节——授权逐跳显式传递，不得默认外溢到队列外工作（队列外一律 TICKET EXIT 立票）。',
     '- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
     '- 候选 / 待办清单（含「下一步」列表）：每条必须带「判据 + 读数」；判不了的标「未核」——零证据断言（"疑似已完成，可关"）= 把核账成本推给下一会话。',
     '- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入"先报告等确认"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。',
-    '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
+    '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节，且节内必带凭据行（批次 = `凭据：批次 <宣告id>`；非批 = `凭据：#<已落票票号>`——#156/D52）；否则视为候选交接，子会话会问 human。范围认可 ≠ 派单：human 认可候选范围/愿意处理 ≠ 授权定向 handoff；未落票的候选（如 retro 候选）一律先 TICKET EXIT 立票，不得在交接里写成 "human 已定向"。 -->',
   ].join('\n')
   // Gate-4 父会话强约束（2026-09-02 IRIS 观察: 两个批内 handoff 都直接开工、
   // 没加载 implement 技能——只有 review 阶段加载了 code-review）。
@@ -229,7 +230,25 @@ async function executeHandoff(ctx, args, exec) {
   // <skill_content>（实测于 WF-T2 grill）。工具只在 # Handoff 前单起一行发射
   // 调用指令（/<skill>），首因位 + 平台注入 = 子会话零读取、零内容重复。
   const isAssignment = body.includes('## 本会话任务（human 已定向）')
+  // #156/D52 定向凭据：结构校验 only —— 定向节内必须有一行凭据（批次宣告 id
+  // 或已落票票号）。工具不做关键词语义判断、不搞授权语义理解：它无法核验 human
+  // 的真实意图，只能拒绝转发一份没带凭据的定向派单（child 侧的实体核对——
+  // 票 open / 宣告在 .scratch/batch-state.md——由边界模板承载，核对不过降级候选）。
+  const directedSection = (() => {
+    const start = body.indexOf('## 本会话任务（human 已定向）')
+    if (start < 0) return ''
+    const next = body.indexOf('\n## ', start)
+    return next < 0 ? body.slice(start) : body.slice(start, next)
+  })()
+  const hasCredentialLine = /^\s*(?:[-*]\s*)?凭据[:：]\s*\S/m.test(directedSection)
   const skill = typeof args.skill === 'string' ? args.skill.trim().replace(/^\//, '') : ''
+  if (isAssignment && !hasCredentialLine) {
+    throw new Error(
+      '定向交接缺凭据行（#156/D52，结构校验）——工具拒绝转发本派单（不创建子会话）。修复两选一：'
+      + '① 在「## 本会话任务（human 已定向）」节内加一行可核凭据——批次定向：`凭据：批次 <宣告id>（.scratch/batch-state.md 在案）`；非批定向：`凭据：#<已落票票号>`（先落票才有定向资格，未落票候选一律 TICKET EXIT 立票）；'
+      + '② 去掉定向节，降级为候选交接后重调（child 会停下问 human）。范围认可 ≠ 派单。',
+    )
+  }
   if (isAssignment && !skill) {
     throw new Error(
       "定向交接必须声明 skill（父会话强约束，不是子会话的自觉）：传 skill: 'implement' / 'code-review' / 'grill-with-docs' 等——实现票按惯例等价于以 /implement 开工；工作区内的 grill 票用 grill-with-docs；确无适用技能传 skill: 'none' 并在定向节说明。",

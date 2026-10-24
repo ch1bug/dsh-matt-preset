@@ -93,14 +93,18 @@ const BOUNDARY_SECTION = [
   "## 交接边界（首轮必读）",
   "- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。",
   "- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（\"按交接开工 X，如需改道请打断\"），不再逐会话确认任务。",
+  "- 定向节必须携带**可核凭据行**（#156/D52）：批次定向 = `凭据：批次 <宣告id>`（.scratch/batch-state.md 在案）；非批定向 = `凭据：#<已落票票号>`（先落票才有定向资格）。开工前核对凭据（宣告在案 / 票 open）——**缺凭据行或核对不过 → 自动降级为候选交接**：按下方候选规则停下问 human，不开工。",
   "- 授权范围**仅限定向节所指派的当前票**：完成后写 handoff 传下一票时，同样在正文写入「## 本会话任务（human 已定向）」节——授权逐跳显式传递，不得默认外溢到队列外工作（队列外一律 TICKET EXIT 立票）。",
   "- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其\"最热/续作\"字样——那是候选热度，不是派单）。",
   "- 候选 / 待办清单（含「下一步」列表）：每条必须带「判据 + 读数」；判不了的标「未核」——零证据断言（\"疑似已完成，可关\"）= 把核账成本推给下一会话。",
   "- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入\"先报告等确认\"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。",
-  "<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 \"## 本会话任务（human 已定向）\" 节；否则视为候选交接，子会话会问 human。 -->",
+  "<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 \"## 本会话任务（human 已定向）\" 节，且节内必带凭据行（批次 = `凭据：批次 <宣告id>`；非批 = `凭据：#<已落票票号>`——#156/D52）；否则视为候选交接，子会话会问 human。范围认可 ≠ 派单：human 认可候选范围/愿意处理 ≠ 授权定向 handoff；未落票的候选（如 retro 候选）一律先 TICKET EXIT 立票，不得在交接里写成 \"human 已定向\"。 -->",
 ];
 
-// mode b 启动前逐行核对边界副本与正典（handoff-tool.mjs）——漂移即响亮退出（exit 2）。
+// mode b 启动前核对边界副本与正典（handoff-tool.mjs）——**双向**逐行核对，漂移即响亮退出
+// （exit 2）：副本缺正典的行（旧副本漏新规则）与正典缺副本的行（正典被删/改写）都算漂移。
+// 单向核对的反例（#156 复审实锤）：正典新增凭据规则行后旧副本仍是正典子集，单向核对照常绿，
+// mode b 会把旧版边界协议（无凭据行）当契约喂给评测会话。
 function assertBoundarySynced() {
   const src = join(process.cwd(), "handoff-tool.mjs");
   if (!existsSync(src)) {
@@ -109,12 +113,21 @@ function assertBoundarySynced() {
   }
   // 正典源码是单引号字符串，内层双引号写作 \" ——先剥掉转义再比（否则误报漂移）
   const canonical = readFileSync(src, "utf8").replace(/\\(["'])/g, "$1");
-  const missing = BOUNDARY_SECTION.filter((l) => l && !canonical.includes(l));
-  if (missing.length) {
+  // 切出 `const boundary = [` … `].join('\n')` 块，取块内每个单引号字符串字面量为一行
+  const block = canonical.match(/const boundary = \[([\s\S]*?)\n  \]\.join/);
+  if (!block) {
+    console.error("[autonomy] 无法从 handoff-tool.mjs 切出 const boundary 块——正典结构变了，重查核对器");
+    process.exit(2);
+  }
+  const canonicalLines = [...block[1].matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+  const missing = BOUNDARY_SECTION.filter((l) => l && !canonicalLines.includes(l)); // 副本缺正典的行
+  const stale = canonicalLines.filter((l) => l && !BOUNDARY_SECTION.includes(l));   // 正典有而副本没有的行
+  if (missing.length || stale.length) {
     console.error(
-      "[autonomy] BOUNDARY_SECTION 副本与 handoff-tool.mjs 交接边界段漂移（缺行如下）——\n" +
+      "[autonomy] BOUNDARY_SECTION 副本与 handoff-tool.mjs 交接边界段漂移（双向核对）——\n" +
       "以 handoff-tool.mjs 为正典同步 runner 后再复跑（评测不得固化旧版边界协议）：\n" +
-      missing.join("\n"),
+      (missing.length ? "副本缺行：\n" + missing.join("\n") + "\n" : "") +
+      (stale.length ? "正典新增/改写而副本未同步的行：\n" + stale.join("\n") : ""),
     );
     process.exit(2);
   }
