@@ -185,7 +185,7 @@ async function executeHandoff(ctx, args, exec) {
     '- 关键文件状态: ',
     '- 环境结论（每条一行 `命令 → 输出`；裸结论无效）: ',
     '- 已确认决策: ',
-    '- 下一步: ',
+    '- 下一步（候选待办每条带「判据 + 读数」；判不了的标「未核」——见交接边界）: ',
   ].join('\n')
   // 产物清单 (artifact manifest, C1/#35): each line is a path + sha256 the
   // child can verify mechanically before starting (sha256sum / Get-FileHash).
@@ -209,12 +209,16 @@ async function executeHandoff(ctx, args, exec) {
   // handoff re-marks its OWN ticket explicitly (2026-08-31 IRIS incident: a
   // batch-Q prose claim of blanket authorization collided with the old
   // single-rule boundary, and children resolved the conflict both ways).
+  // #133 覆盖边界（如实声明，不装成全局护栏）：下面的候选判据规则（含快照段
+  // 「下一步」行的指针）只随本工具拼的「交接边界」段发布，管辖范围 = 经
+  // handoff_tool 生成的交接文档；手写交接文档不受它约束。
   const boundary = [
     '## 交接边界（首轮必读）',
     '- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。',
     '- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（"按交接开工 X，如需改道请打断"），不再逐会话确认任务。',
     '- 授权范围**仅限定向节所指派的当前票**：完成后写 handoff 传下一票时，同样在正文写入「## 本会话任务（human 已定向）」节——授权逐跳显式传递，不得默认外溢到队列外工作（队列外一律 TICKET EXIT 立票）。',
     '- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其"最热/续作"字样——那是候选热度，不是派单）。',
+    '- 候选 / 待办清单（含「下一步」列表）：每条必须带「判据 + 读数」；判不了的标「未核」——零证据断言（"疑似已完成，可关"）= 把核账成本推给下一会话。',
     '- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入"先报告等确认"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。',
     '<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节；否则视为候选交接，子会话会问 human。 -->',
   ].join('\n')

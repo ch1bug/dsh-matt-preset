@@ -186,6 +186,23 @@ try {
       } else {
         bad('A. handoff snapshot section', '环境快照/环境结论 missing from document')
       }
+      // #133：快照的「下一步」行必须带候选判据指针（判据 + 读数 / 未核）。
+      // 行锚定到该行本身（D2 复审：全文级 includes('未核') 会被边界段契约句
+      // 兜住——单删本行半句断言照绿 = 半边假绿）。
+      if (/^- 下一步（[^\n]*判据[^\n]*未核/m.test(text)) {
+        ok('A. handoff snapshot 下一步 line points at the candidate-criteria rule (#133)')
+      } else {
+        bad('A. handoff snapshot 下一步 pointer (#133)', '下一步 line lacks 判据/未核 pointer')
+      }
+      // #133（K 批 6 票「疑似已完成」0 张真完成的反例）：候选/待办清单必须
+      // 带判据 + 读数，判不了的标「未核」——这句契约在工具拼的交接边界里，
+      // 删掉它本断言红。同样行锚定（D2：快照指针行也有「判据 + 读数」「未核」，
+      // 全文级子串会互相兜底）。
+      if (/^- 候选 \/ 待办清单[^\n]*判据 \+ 读数[^\n]*未核/m.test(text)) {
+        ok('A. handoff boundary requires 判据+读数 / 未核 on candidate lists (#133)')
+      } else {
+        bad('A. handoff boundary candidate-criteria rule (#133)', '候选 / 待办清单 判据+读数/未核 contract missing from boundary section')
+      }
     } else {
       bad('A. handoff child first user message', `events=${childEvents.map(ev => ev.type).join(',')}`)
     }
