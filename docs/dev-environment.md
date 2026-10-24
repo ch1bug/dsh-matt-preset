@@ -548,7 +548,7 @@ $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-
 | # | 未测面 | 缺什么 | 补测入口 |
 | --- | --- | --- | --- |
 | 1 | installer 桌面端形态（`--profile desktop` 用例挂载半边） | 本机无桌面应用根；真实 dsh CLI 拒挂 `desktop` 名（upstream Electron 专属守卫，实测 exit 1） | `DSH_MATT_DESKTOP_ROOT=<app>` 指真桌面根；或改用例 skip 理由串写明该守卫 |
-| 2 | `verify-live-real-llm.mjs`（preset 真实 LLM 层） | 套件门禁只认 `DEEPSEEK_API_KEY`/`DSH_MATT_REAL_CREDENTIALS_SOURCE`，未接桌面账号凭据默认路线（邻仓 dsh-shell-host 的 `e2e-real-llm-machine` 已示范：`<home>/.dsh/.credentials.yaml` 只读复制 + modelCatalog 路由，实测真跑计费 turn） | 给该套件补账号凭据默认（对齐邻仓设计）后跑通 |
+| 2 | ~~`verify-live-real-llm.mjs`（preset 真实 LLM 层）~~ **已补测（2026-10-24）**：桌面凭据本就含 `deepseek-account-platform/*` 两条记录，套件 `CRED_SOURCE` 默认即指向 `<home>/.dsh/.credentials.yaml`——此前 skip 的唯一缺件是 `DSH_MATT_LIVE_CLI`（整个实机环境）。按「实机预配最小清单」配好后实跑：真实端点受理、真会话跑 matt preset、计费 turn（outputTokens=24 / uncached 33274）、持久日志含真实 assistant 消息与 tool 活动。**曾有「套件未接凭据默认路线」的误判，实为环境缺件，勿再据此改套件** | （无——随实机环境即解） | — |
 | 3 | enforcer 门禁触发型行为面（push 警告 / 关票抽查 / retro 落盘等十二段中的动作触发段） | 现有 live 闭环只驱动单轮工具调用；无 mock-LLM 多轮工具序列 e2e | 扩展 `verify-clean-env-e2e` 或新挂具：驱动真实例连续工具调用打到触发面 |
 | 4 | `ssh-pty-live`（live SSH 往返） | 无 `DSH_SSH_LIVE_HOST` 外部主机 | 配置 live host 环境变量后 machine 车道自动解跳 |
 

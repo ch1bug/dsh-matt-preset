@@ -49,6 +49,16 @@ if [ -z "$NODE" ]; then
   exit 0
 fi
 
+# pathspec 提交（`git commit -- <paths>`，#103/#158 的共享树纪律形态）会给钩子挂
+# **绝对路径的临时 index**（GIT_INDEX_FILE 指向它）。上面的 index/工作树检查与实验标记
+# 检查需要它（它们判的就是"本次提交的面"）；但 verify-all 及其套件会 spawn git，
+# 继承的临时 index 让夹具 git 操作读到父仓对象——实测三测试全红（46/50 → 43/50：
+# H3 "invalid object ... Error building trees" / F16 install-root 探针空 / F3 脏树拦截失效，
+# #158）。到这里临时 index 已完成使命，unset 掉，让子进程看到每仓自己的常规 index。
+unset GIT_INDEX_FILE
+
+echo "pre-commit: $NODE scripts/verify-all.mjs"
+
 echo "pre-commit: $NODE scripts/verify-all.mjs"
 "$NODE" scripts/verify-all.mjs || {
   echo "pre-commit: 检查未通过 —— 修掉再提交，或用 SKIP_HOOKS=1 明确跳过"
