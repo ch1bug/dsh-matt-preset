@@ -25,8 +25,20 @@
  *      `tests/*` new line → refused, marker named.
  *   H6 the same marker outside `tests/*` → not blocked (the scope is tests/*
  *      new lines, so docs describing the practice don't trip it).
+ *   H7 (#158 AC3) a pathspec commit (`git commit -- <paths>`, the §0.4 shared-
+ *      tree discipline shape) makes git hang an ABSOLUTE-path temp index
+ *      (GIT_INDEX_FILE) on the hook. The two index checks above need it, but
+ *      verify-all and the suites it spawns inherit it and their git calls then
+ *      read the PARENT repo's objects — measured 46/50 → 43/50 in #158 (H3
+ *      "invalid object … Error building trees" / F16 install-root probe empty /
+ *      F3 dirty-tree guard dead). Since c41de61 the hook unsets GIT_INDEX_FILE
+ *      before verify-all: H7 pins that the hook-inner checker reads like
+ *      standalone, and H7R flips the mutation (strips the unset line from the
+ *      FIXTURE's hook copy — the real hook is never touched) to prove H7 is
+ *      not vacuous: without the unset, the temp index leaks and the probe
+ *      inside the stub checker fails the same way #158 measured.
  */
-import { mkdtemp, mkdir, writeFile, copyFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, copyFile, rm, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,7 +52,13 @@ const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' �
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const root = await mkdtemp(join(tmpdir(), 'dsh-precommit-'))
-const marker = join(root, 'checker-ran.txt')
+// Probe outputs live OUTSIDE the throwaway repo: anything written inside it is
+// tree state the hook's own divergence guard (①) reasons about — a tracked
+// unstaged probe file would block H7 for the right guard at the wrong trigger.
+const out = await mkdtemp(join(tmpdir(), 'dsh-precommit-out-'))
+const marker = join(out, 'checker-ran.txt')
+// Structured probe written by the stub checker (see the stub source below).
+const stubPayload = join(out, 'checker-payload.json')
 
 /** Env for the throwaway-repo git calls: git exports `GIT_DIR` /
  * `GIT_INDEX_FILE` / `GIT_WORK_TREE` to hooks, so when this test runs under the
@@ -73,8 +91,44 @@ try {
   await mkdir(join(root, '.githooks'), { recursive: true })
   await mkdir(join(root, 'scripts'), { recursive: true })
   await copyFile(join(REPO, '.githooks', 'pre-commit'), join(root, '.githooks', 'pre-commit'))
-  await writeFile(join(root, 'scripts', 'verify-all.mjs'),
-    `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'ran')\n`)
+  // The stub checker records WHAT IT SAW. Its git reads run in a NESTED fixture
+  // repo (below) — that is the #158 shape: suites spawn git inside their OWN
+  // repos, and a leaked GIT_INDEX_FILE points those reads at the HOST's temp
+  // index, whose blobs don't exist in the nested store — `cat-file -e` fails
+  // exactly the way #158's H3 "invalid object … Error building trees" did.
+  // READ-ONLY ops only: the committing process still holds index.lock for
+  // writable ones (measured). The env strips only the HOST-repo anchors
+  // (GIT_DIR etc.); GIT_INDEX_FILE is deliberately KEPT — it is the thing
+  // under test. The stub always touches `marker` so the H1–H6
+  // `existsSync(marker)` contract ("did the checker run at all?") keeps its
+  // old meaning.
+  const nested = join(out, 'nested')
+  await mkdir(nested, { recursive: true })
+  const runN = (args, extra) => spawnSync('git', ['-C', nested, ...args], { encoding: 'utf8', env: cleanEnv(extra) })
+  runN(['init', '-q'])
+  runN(['config', 'user.name', 'hook-probe'])
+  runN(['config', 'user.email', 'hook-probe@example.invalid'])
+  await writeFile(join(nested, 'seed.txt'), 'nested\n')
+  runN(['add', '-A'])
+  runN(['commit', '-q', '-m', 'nested seed'])
+  await writeFile(join(root, 'scripts', 'verify-all.mjs'), [
+    `import { spawnSync } from 'node:child_process'`,
+    `import { writeFileSync } from 'node:fs'`,
+    `const env = { ...process.env }`,
+    `for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[k]`,
+    `const ls = spawnSync('git', ['-C', ${JSON.stringify(nested)}, 'ls-files', '-s'], { encoding: 'utf8', env })`,
+    `const first = (ls.stdout.match(/^[0-7]{6} ([0-9a-f]{40}) /m) || [])[1]`,
+    `const blobOk = first ? spawnSync('git', ['-C', ${JSON.stringify(nested)}, 'cat-file', '-e', first], { encoding: 'utf8', env }).status === 0 : false`,
+    `writeFileSync(${JSON.stringify(marker)}, 'ran')`,
+    `writeFileSync(${JSON.stringify(stubPayload)}, JSON.stringify({`,
+    `  tmpIndexInEnv: 'GIT_INDEX_FILE' in process.env,`,
+    `  gitIndexFile: process.env.GIT_INDEX_FILE ?? null,`,
+    `  blobOk,`,
+    `  detail: first ? first.slice(0, 8) : (ls.stderr || '').trim().split('\\n').slice(-1).join(' | ')`,
+    `}))`,
+    `process.exit(blobOk ? 0 : 1)`,
+    ``,
+  ].join('\n'))
   await writeFile(join(root, 'tracked.txt'), 'first\n')
   run(['add', '-A'])
   run(['commit', '-q', '-m', 'seed'])
@@ -166,10 +220,61 @@ try {
   } else {
     bad('H6. marker scope too wide (docs blocked)', `exit=${h6.status} checkerRan=${existsSync(marker)} | ${tail(h6)}`)
   }
+
+  // H7 (#158 AC3): pathspec 提交 —— §0.4 共享树纪律的形态(`git commit -- <paths>`)。
+  // git 给钩子挂**绝对路径的临时 index**(GIT_INDEX_FILE 指向它):钩子前段两项检查
+  // 需要它(判的就是"本次提交的面"),但 verify-all 及其套件 spawn 的 git 若继承它,
+  // 会读到父仓的对象——#158 实测 46/50 → 43/50(H3 invalid object / F16 探针空 /
+  // F3 脏树拦截失效)。c41de61 在 verify-all 前 unset:本用例断言钩内 stub(= standalone
+  // 形态下同一个 stub)看到的环境里**没有**临时 index、且套件读到的 index 自洽
+  // (blob 都在本仓对象库)—— 即钩内与 standalone 同读数。本测试自身在真钩子下
+  // (经 verify-all)与 standalone 各跑一次,断言都成立,读数天然与形态无关。
+  const readProbe = async () => {
+    try { return JSON.parse(await readFile(stubPayload, 'utf8')) } catch { return null }
+  }
+  await writeFile(join(root, 'tracked.txt'), 'seventh\n')
+  await rm(marker, { force: true })
+  await rm(stubPayload, { force: true })
+  const h7 = run(['commit', '-m', 'h7', '--', 'tracked.txt'])
+  const p7 = await readProbe()
+  if (h7.status === 0 && p7 && p7.tmpIndexInEnv === false && p7.blobOk === true) {
+    ok('H7. pathspec commit → hook-inner verify-all reads like standalone (temp index unset before the suite)')
+  } else {
+    bad('H7. pathspec commit leaked temp index into verify-all',
+      `exit=${h7.status} probe=${JSON.stringify(p7)} | ${tail(h7)}`)
+  }
+  // 常规 index 追上 HEAD:pathspec 提交走临时 index,常规 index 还停在 h6 ——
+  // 给 H7R 一个自洽的起跑树,别让它的红来自这里而不是泄漏本身。
+  run(['add', '-A'])
+
+  // H7R(非空洞翻转):把 unset 行从 **fixture 内的钩子副本**摘掉(真钩子不动),
+  // 同样的 pathspec 提交必须复现 #158:临时 index 泄漏进 stub 环境、index 引用的
+  // blob 不在本仓对象库、提交被拒。若摘行后这里仍绿(或泄漏没发生),说明 H7
+  // 区分不出两个世界 —— 用例空洞,当场红。钩子副本是 tracked 文件且 pathspec 临时
+  // index = HEAD + pathspec(不看常规 index),所以它必须**进 pathspec** 才能过 ①。
+  const hookCopy = join(root, '.githooks', 'pre-commit')
+  const hookSrc = await readFile(hookCopy, 'utf8')
+  if (!hookSrc.includes('unset GIT_INDEX_FILE')) {
+    bad('H7R. fixture hook copy has no unset line — hook shape changed, flip probe is vacuous')
+  } else {
+    await writeFile(hookCopy, hookSrc.replace('unset GIT_INDEX_FILE', ''))
+    await writeFile(join(root, 'tracked.txt'), 'eighth\n')
+    await rm(marker, { force: true })
+    await rm(stubPayload, { force: true })
+    const h7r = run(['commit', '-m', 'h7r', '--', 'tracked.txt', '.githooks/pre-commit'])
+    const p7r = await readProbe()
+    if (h7r.status !== 0 && p7r && p7r.tmpIndexInEnv === true && p7r.blobOk === false) {
+      ok('H7R. mutation flip: without the unset the temp index leaks (blob missing from this object store) — H7 is non-vacuous')
+    } else {
+      bad('H7R. flip did NOT reproduce the #158 leak — H7 cannot tell the two worlds apart',
+        `exit=${h7r.status} probe=${JSON.stringify(p7r)} | ${tail(h7r)}`)
+    }
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
+  await rm(out, { recursive: true, force: true })
 }
 
-console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H6) ===')
+console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H7) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
