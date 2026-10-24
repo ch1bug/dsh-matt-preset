@@ -102,23 +102,35 @@ face is the text layer.
   batch-end push).
 - A real push whose `.scratch/batch-state.md` **already carries the `retro:`
   marker** gets the **Batch-end retro aggregation** reminder instead — but only
-  while the batch has **not** been aggregated yet. The cross-session suppressor
-  is a SECOND existence marker, `.scratch/retro/.aggregated`, which the agent
-  writes after it presents; once it exists, later sessions fall back to the
-  landing face (`Retro candidate — file it now`, with the "do NOT aggregate or
-  re-present" wording) so the material is still landed and never silently
-  dropped. The `retro:` marker alone cannot hold this: it is written **before**
-  the batch-end push, so on its own every later session in the same batch would
-  re-take the aggregation branch (measured: 3 sessions → 3 aggregations). Two
-  different facts, so two markers — `retro:` answers "has the batch-end retro
-  run", `.aggregated` answers "has the aggregation already been PRESENTED". The
+  while THIS batch has **not** been aggregated yet. The suppressor is a
+  PER-BATCH registry, `.scratch/retro/.aggregated` (#140): an append log with
+  one line per presented batch, each carrying that batch's id, which the agent
+  appends after it presents; once the CURRENT batch's id has an entry, later
+  sessions fall back to the landing face (`Retro candidate — file it now`, with
+  the "do NOT aggregate or re-present" wording) so the material is still landed
+  and never silently dropped. The `retro:` marker alone cannot hold this: it is
+  written **before** the batch-end push, so on its own every later session in
+  the same batch would re-take the aggregation branch (measured: 3 sessions →
+  3 aggregations). Two different facts, so two markers — `retro:` answers "has
+  the batch-end retro run", `.aggregated` answers "has THIS batch's aggregation
+  already been PRESENTED". The check is "the current batch id has an entry",
+  never mere file existence: existence-only permanently silenced every batch
+  after the first (#140, measured — one F/A/B log suppressed batch K's
+  aggregation). The batch id comes from the same `batch-state.md` probe (the
+  `批次标识` field, else the `# Batch state —` title's id); when it cannot be
+  extracted the probe degrades to the existence-only behaviour **loudly** (a
+  `FALLBACK` line), and when the registry file cannot be read at all the
+  aggregation stays due with a `FAILED` line — a probe failure never reads as
+  "already aggregated" (D47). The
   aggregation section itself: run this session's retro first, then
   `read EVERY `.scratch/retro/*.md`` written by this batch, `dedupe` (merge the
   same issue and `record its count`), `sort by severity`, and `present it to the
   human ONCE`, each candidate naming its `source ticket / session`; after
-  presenting, write `.scratch/retro/.aggregated`. Do not re-read the batch's old
-  sessions wholesale — the per-session candidate files are the material. Both
-  markers are read as **existence only** (never parsed), and 每批至多一次
+  presenting, append `<batch id> aggregated @ <date>` to
+  `.scratch/retro/.aggregated`. Do not re-read the batch's old
+  sessions wholesale — the per-session candidate files are the material. The
+  `retro:` marker is read as **existence only** (never parsed); the registry is
+  matched per batch id, and 每批至多一次
   constrains the **presentation**, never the material.
 - A push whose `.scratch/batch-state.md` probe **failed to read** gets the
   one-shot **Batch-state probe FAILED** report — the loud path for a read failure

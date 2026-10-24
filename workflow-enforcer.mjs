@@ -362,21 +362,26 @@ export const RETRO_TRIGGER = {
     words: ['攒批', '批量模式', '系列处理', '大系列', '这批攒批'],
   },
   retroMarker: 'retro:',
-  // The AGGREGATION-COMPLETED probe (#71 fix): a SECOND, independent existence
-  // marker — `.scratch/retro/.aggregated` — that the agent writes per the body
-  // rule AFTER it has presented the batch-end aggregation. The `retro:` marker
-  // alone cannot suppress the aggregation ACROSS SESSIONS: it is written BEFORE
-  // the batch-end push, so every later session in the same batch would re-take
-  // the aggregation branch (measured: 3 sessions → 3 aggregations). `retro:`
-  // answers "has the batch-end retro run"; `.aggregated` answers "has the
-  // aggregation already been PRESENTED" — two different facts, so two markers.
+  // The AGGREGATION-COMPLETED probe (#71 fix, per-batch since #140): a SECOND,
+  // independent marker — `.scratch/retro/.aggregated` — that the agent appends
+  // to per the body rule AFTER it has presented the batch-end aggregation. The
+  // `retro:` marker alone cannot suppress the aggregation ACROSS SESSIONS: it
+  // is written BEFORE the batch-end push, so every later session in the same
+  // batch would re-take the aggregation branch (measured: 3 sessions → 3
+  // aggregations). `retro:` answers "has the batch-end retro run"; `.aggregated`
+  // answers "has THIS batch's aggregation already been PRESENTED" — two
+  // different facts, so two markers.
   //
-  // EXISTENCE ONLY, same shape as `retroMarker` (the file's content is never
-  // read). Deliberately a DOT-FILE inside the retro dir rather than a row in
-  // batch-state.md: the aggregation's completion is retro-MATERIAL state (it
-  // lives with the candidate files, same lifecycle), not batch-status state —
-  // and, critically, a `.md` name would be swept up by the aggregation's own
-  // `read EVERY .scratch/retro/*.md` and be mistaken for a candidate file.
+  // #140: the file is a PER-BATCH APPEND LOG (one line per presented batch,
+  // containing that batch's id) and the check is "the CURRENT batch id has an
+  // entry" — EXISTENCE-ONLY was measured to permanently silence every batch
+  // after the first (one F/A/B log suppressed batch K's aggregation). See
+  // `batchIdOf` / `aggregationState`. Still a DOT-FILE inside the retro dir
+  // rather than a row in batch-state.md: the aggregation's completion is
+  // retro-MATERIAL state (it lives with the candidate files, same lifecycle),
+  // not batch-status state — and, critically, a `.md` name would be swept up by
+  // the aggregation's own `read EVERY .scratch/retro/*.md` and be mistaken for
+  // a candidate file.
   aggregatedMarker: '.scratch/retro/.aggregated',
 }
 
@@ -512,22 +517,52 @@ async function probeBatchState(cwd) {
   }
 }
 
-/** Whether the `.scratch/retro/.aggregated` existence marker is present (#71's
- * 每批至多一次 suppressor for the AGGREGATION face). EXISTENCE ONLY — the
- * content is never read. `false` on any failure: a suppressor that cannot be
- * read must never SUPPRESS, because suppressing on a failed probe would drop the
- * aggregation silently; the loud reporting of a failed `batch-state.md` probe
- * covers the diagnostics (this probe's own failure only ever widens behaviour
- * back to the aggregation face, which the marker would have suppressed only if
- * it demonstrably existed). */
-async function hasAggregatedMarker(cwd) {
-  if (!cwd) return false
+/** The batch id the aggregation registry keys on (#140), extracted from the
+ * SAME `.scratch/batch-state.md` probe the retro face already runs: the
+ * explicit `批次标识` field when present, else the `# Batch state —` title
+ * (trailing `（id）` parenthesis first, else the raw suffix). Null when neither
+ * shape matches — the caller must then degrade LOUD (see `aggregationState`),
+ * never silently.
+ *
+ * The aggregation-suppressor probe states (#71's
+ * 每批至多一次 suppressor for the AGGREGATION face). PER BATCH since #140 — the
+ * file is an append LOG and the check is "the CURRENT batch id has an entry";
+ * EXISTENCE-ONLY was measured to permanently silence every batch after the
+ * first. Four distinct states (never a boolean that flattens them):
+ *
+ *   - `aggregated` — the current batch id HAS an entry → suppress (landing face)
+ *   - `fresh`      — marker absent, or present WITHOUT this batch's entry →
+ *                    aggregation face (the #140 bug shape: existence-only read
+ *                    this as "already presented")
+ *   - `fallback`   — the batch id could not be extracted from batch-state.md →
+ *                    EXISTENCE-only behaviour (the pre-#140 semantics) + a LOUD
+ *                    note, per the ticket; never a silent widening
+ *   - `failed`     — the marker exists but could not be READ (corrupt /
+ *                    permissions) → NEVER suppress on a failed probe (D47:
+ *                    a probe failure must not silently read as "already
+ *                    aggregated") + loud; the caller takes the aggregation face
+ *                    and asks for a hand check. */
+export function batchIdOf(batchStateContent) {
+  const content = String(batchStateContent ?? '')
+  const declared = /批次标识[：:]\s*`?([^\s`（(]+)`?/.exec(content)
+  if (declared) return declared[1]
+  const titled = /^#\s*Batch state[^\n]*?[—-]+\s*(.+?)\s*$/m.exec(content)
+  if (!titled) return null
+  const paren = /（([^（）]+)）\s*$/.exec(titled[1])
+  if (paren) return paren[1].trim()
+  return titled[1].trim()
+}
+
+export async function aggregationState(cwd, batchId) {
+  let content
   try {
-    await readFile(join(cwd, RETRO_TRIGGER.aggregatedMarker), 'utf8')
-    return true
-  } catch {
-    return false
+    content = await readFile(join(cwd, RETRO_TRIGGER.aggregatedMarker), 'utf8')
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { kind: 'fresh' }
+    return { kind: 'failed', why: String(e?.code ?? e) }
   }
+  if (!batchId) return { kind: 'fallback', why: 'no 批次标识 field or parsable `# Batch state —` title in .scratch/batch-state.md' }
+  return content.includes(batchId) ? { kind: 'aggregated' } : { kind: 'fresh' }
 }
 
 /** The SHORT session token this repo's artifacts use — the 8-hex segment right
@@ -1331,17 +1366,40 @@ async function reminderText(agent, config, ctx, assembled) {
     }
     if (probe.kind === 'ok' && probe.content.includes(RETRO_TRIGGER.retroMarker)) {
       // batch-state.md WITH the `retro:` marker → the batch-end wrap has been
-      // reached. The aggregation is injected ONLY while the batch has not been
-      // aggregated yet: `.scratch/retro/.aggregated` (written by the agent after
-      // it presents) is the CROSS-SESSION suppressor, so the SECOND and later
-      // sessions of the same batch fall through to the landing face instead of
-      // re-presenting. A later session still lands its own candidates — 每批至多
-      // 一次 constrains the PRESENTATION, never the material (不静默丢素材).
-      if (await hasAggregatedMarker(agentCwd(agent))) {
+      // reached. The aggregation is injected ONLY while THIS batch has not been
+      // aggregated yet: `.scratch/retro/.aggregated` is a PER-BATCH append log
+      // (#140) — one line per presented batch, carrying that batch's id — and
+      // the suppressor reads "the CURRENT batch id has an entry", so a NEW
+      // batch aggregates even when older batches' lines are present (the
+      // existence-only read permanently silenced every batch after the first).
+      // A later session of the same batch still lands its own candidates —
+      // 每批至多一次 constrains the PRESENTATION, never the material
+      // (不静默丢素材).
+      const agg = await aggregationState(agentCwd(agent), batchIdOf(probe.content))
+      if (agg.kind === 'failed') {
+        parts.push([
+          'Aggregation-marker probe FAILED (' + agg.why + '): `.scratch/retro/.aggregated`',
+          'exists but could not be read, so per-batch suppression cannot be decided.',
+          'Treating the aggregation as DUE — deciding by hand is safer than silently',
+          'skipping it. Read the file manually (permissions / corrupt content); do NOT',
+          'assume either way.',
+        ].join(' '))
+      }
+      if (agg.kind === 'fallback') {
+        parts.push([
+          'Aggregation registry FALLBACK (' + agg.why + '): the per-batch check',
+          'cannot identify this batch, so suppression degraded to EXISTENCE-only —',
+          'if the marker file exists at all, this batch is treated as already',
+          'presented. Verify by hand whether the aggregation is really due; fix the',
+          'batch-state title / 批次标识 field so the per-batch check works.',
+        ].join(' '))
+      }
+      if (agg.kind === 'aggregated' || agg.kind === 'fallback') {
         parts.push([
           'Retro candidate — file it now: this batch\'s end aggregation has already',
-          'been presented (`.scratch/retro/.aggregated`), so do NOT aggregate or',
-          're-present it. Still run this session\'s retro and WRITE its candidates to',
+          'been presented (the `.scratch/retro/.aggregated` registry already carries',
+          'THIS batch\'s entry), so do NOT aggregate or re-present it. Still run this',
+          'session\'s retro and WRITE its candidates to',
           '`.scratch/retro/<batch>-<session>.md` so the material is not lost',
           '(re-running overwrites the same name, idempotent).',
         ].join(' '))
@@ -1354,10 +1412,12 @@ async function reminderText(agent, config, ctx, assembled) {
           'source ticket / session. Two markers answer two different facts: the',
           '`retro:` line in `.scratch/batch-state.md` says the batch-end retro has',
           'RUN (that is the trigger for this face); what suppresses a SECOND',
-          'presentation is `.scratch/retro/.aggregated`, which YOU write after',
-          'presenting — that is what stops every LATER session in this batch from',
-          'aggregating again. Do NOT re-read the batch\'s old sessions wholesale:',
-          'the per-session candidate files are the material.',
+          'presentation of THIS batch is a line carrying THIS batch\'s id in',
+          '`.scratch/retro/.aggregated` (a per-batch append log), which YOU write after',
+          'presenting — append `<batch id> aggregated @ <date>` so every LATER',
+          'session of this batch stops aggregating while a NEW batch stays due.',
+          'Do NOT re-read the batch\'s old sessions wholesale: the per-session',
+          'candidate files are the material.',
         ].join(' '))
       }
     } else if (probe.kind !== 'ok' || !probe.content.includes(RETRO_TRIGGER.retroMarker)) {

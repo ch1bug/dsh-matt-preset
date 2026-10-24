@@ -324,14 +324,19 @@ per-issue push rhythm.
     the batch-end retro has RUN — it is NOT what keeps the presentation to
     once per batch, because it is written BEFORE the batch-end push, so
     every later session of the same batch would aggregate again. Two
-    markers, two facts: after actually PRESENTING the aggregation, write
-    the second existence marker `.scratch/retro/.aggregated` — that one is
-    the CROSS-SESSION suppressor (每批至多一次 constrains the
-    PRESENTATION, never the material). A later session in an
-    already-aggregated batch does NOT aggregate or re-present; it still
-    runs its own retro and LANDS its candidates, so no material is lost
-    (不静默丢素材). Both markers are written by YOU (this rule); the
-    enforcer only READS them and writes no file. The batch-state shape is
+    markers, two facts: after actually PRESENTING the aggregation, APPEND
+    to the registry file `.scratch/retro/.aggregated` one line carrying
+    THIS batch's id (`<batch id> aggregated @ <date>`; the id is the
+    批次标识 / title id from .scratch/batch-state.md) — the per-batch
+    ENTRY is the CROSS-SESSION suppressor for THIS batch (每批至多一次
+    constrains the PRESENTATION, never the material): a later session of THIS batch does NOT aggregate
+    or re-present, while a NEW batch stays due (the check is "the current
+    batch id has an entry", never mere file existence — #140). A later
+    session in an already-aggregated batch does NOT aggregate or
+    re-present; it still runs its own retro and LANDS its candidates, so
+    no material is lost (不静默丢素材). Both markers are written by YOU
+    (this rule); the enforcer only READS them and writes no file. The
+    batch-state shape is
     .scratch/batch-state.md per docs/batch-state.md.
   - TRIGGER FACE — A REAL PUSH OR COMMIT CALL (宁严勿宽): the trigger
     is the (toolName, argv) pair — the tool layer plus the command layer

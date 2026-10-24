@@ -976,17 +976,23 @@ else bad('V28d. declared batch words not found in source')
 // read from FILES in the session's cwd (never a per-session WeakMap, which is
 // what makes the suppression hold across sessions):
 //   `retro:` in `.scratch/batch-state.md`        → the batch reached its end
-//   `.scratch/retro/.aggregated` (agent-written) → the aggregation was PRESENTED
-// The second one is written by the AGENT after presenting; the enforcer only
+//   `.scratch/retro/.aggregated` (agent-written) → THIS batch's aggregation was
+//   PRESENTED — the file is a PER-BATCH append log, one line per presented
+//   batch, each carrying that batch's id (#140).
+// The second one is appended by the AGENT after presenting; the enforcer only
 // READS it (this plugin writes no file). So the test must write it — expecting
 // suppression WITHOUT writing it would be requiring the plugin to write a file.
 //
 // (a) `retro:` present, `.aggregated` ABSENT → aggregation is due. A FIRST
 // session in that state gets 聚合呈现 (already asserted by V27 on the same root).
-// (b) then the agent presents and writes `.aggregated` → every LATER session of
-// the same batch must NOT aggregate again, and must fall through to the LANDING
-// face rather than going silent (不静默丢素材: the material still lands).
-await writeFile(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), '2026-10-17T18:00:00Z\n')
+// (b) then the agent appends a line carrying THIS batch's id → every LATER
+// session of the same batch must NOT aggregate again, and must fall through to
+// the LANDING face rather than going silent (不静默丢素材: the material still
+// lands).
+// (c) #140 THE BUG SHAPE: the marker present with only ANOTHER batch's entry →
+// a NEW batch must still aggregate (existence-only read this as "already
+// presented" and permanently silenced every batch after the first).
+await writeFile(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), '71 aggregated @ 2026-10-17T18:00:00Z\n')
 const handleBE2 = await ctx.agents.create({
   sessionId: SessionId('enforcer-retroend-other-session'),
   meta: { cwd: batchEndRoot },
@@ -1018,6 +1024,84 @@ await emitSessionEvent(ctx, handleBE3.agent.session, {
 const v29c = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE3.agent, signal)))
 if (!aggregateText(v29c) && retroText(v29c)) ok('V29c. a THIRD session of the same batch also does not aggregate (the file is the suppressor)')
 else bad('V29c. third-session suppression lost', v29c.slice(-240))
+
+// V29b (#140 THE BUG SHAPE): the marker present with only ANOTHER batch's entry
+// → a NEW batch must STILL aggregate. Existence-only read this as "already
+// presented" and permanently silenced every batch after the first (measured:
+// batch K's aggregation suppressed by an F/A/B log).
+await writeFile(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), 'older-batch aggregated @ 2026-10-17T18:00:00Z\n')
+const handleBE4 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend-newbatch'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleBE4.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 3052, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29n = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE4.agent, signal)))
+if (aggregateText(v29n) && !v29n.includes("already been presented"))
+  ok('V29h. a NEW batch with only ANOTHER batch\'s entry in the registry still aggregates (#140: per-batch, not existence)')
+else bad('V29h. new batch wrongly suppressed by another batch\'s registry entry (existence-only regression)',
+  `aggregate: ${aggregateText(v29n)} | already-claimed: ${v29n.includes("already been presented")}`)
+
+// V29e (#140 AC2): the marker exists but CANNOT be read (a directory of the
+// same name) → loud failure, aggregation face (never a silent "already
+// aggregated"), and the reminder says the probe FAILED.
+await rm(join(batchEndRoot, '.scratch', 'retro', '.aggregated'))
+await mkdir(join(batchEndRoot, '.scratch', 'retro', '.aggregated'))
+const handleBE5 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend-corrupt'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleBE5.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 3053, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29e = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE5.agent, signal)))
+if (aggregateText(v29e) && v29e.includes('Aggregation-marker probe FAILED'))
+  ok('V29i. an unreadable marker is a LOUD failure — aggregation stays due, never silently suppressed (#140 AC2)')
+else bad('V29i. unreadable marker did not fail loudly',
+  `aggregate: ${aggregateText(v29e)} | loud: ${v29e.includes('Aggregation-marker probe FAILED')}`)
+await rm(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), { recursive: true })
+await writeFile(join(batchEndRoot, '.scratch', 'retro', '.aggregated'), '71 aggregated @ 2026-10-17T18:00:00Z\n')
+
+// V29g (#140 AC1 third state): batch-state.md WITHOUT an extractable batch id
+// → EXISTENCE-only fallback (the pre-#140 behaviour) + a LOUD fallback note.
+await writeFile(join(batchEndRoot, '.scratch', 'batch-state.md'), [
+  '# Batch state',
+  '',
+  '- retro: done @ deadbee',
+  '',
+].join('\n'))
+const handleBE6 = await ctx.agents.create({
+  sessionId: SessionId('enforcer-retroend-noid'),
+  meta: { cwd: batchEndRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleBE6.agent.session, {
+  type: 'tool/call',
+  data: { turn: 1, step: 3054, name: 'bash', arguments: JSON.stringify({ command: 'git push' }) },
+})
+const v29g = await renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleBE6.agent, signal)))
+if (!aggregateText(v29g) && retroText(v29g) && v29g.includes('FALLBACK'))
+  ok('V29g. no extractable batch id → existence-only FALLBACK with a loud note (lands, does not widen)')
+else bad('V29g. fallback state wrong',
+  `aggregate: ${aggregateText(v29g)} | lands: ${retroText(v29g)} | loud: ${v29g.includes('FALLBACK')}`)
+await writeFile(join(batchEndRoot, '.scratch', 'batch-state.md'), [
+  '# Batch state — 71',
+  '',
+  '| # | 票 | 状态 |',
+  '| --- | --- | --- |',
+  '| 1 | #71 | 进行中 |',
+  '',
+  '- retro: done @ deadbee',
+  '',
+].join('\n'))
 // The aggregation reminder must TELL the agent to write the marker — otherwise
 // the suppression could never engage in a real run.
 if (v27.includes('.scratch/retro/.aggregated') && /which YOU write after\s+'?\s*presenting|write after/.test(v27))
