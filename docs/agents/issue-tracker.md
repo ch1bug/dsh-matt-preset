@@ -34,6 +34,14 @@ GitHub shares one number space across issues and PRs, so a bare `#42` may be eit
 
 Create a GitHub issue.
 
+### D21 确认通道（headless / 无人值守场景）
+
+外部动作门（D21）要求的「human 确认」在 headless / 无人值守会话里：**结构化提问工具
+（AskUserQuestion 一类）的明确应答 = 合法确认形态**（156族批 #141 建标签实测走通）；确认必须
+落在**可回读的记录面**（工具问答记录或票面评论）——agent 自述「human 已同意」不算（与 #156/D52
+同族口径：不用 agent 自述证明 human 授权）。等不到确认通道时如实 **blocked**，不跳门、不降级为
+「先做了再说」。
+
 ## When a skill says "fetch the relevant ticket"
 
 Read it as in **Read an issue** above.
