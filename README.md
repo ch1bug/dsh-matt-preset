@@ -44,8 +44,9 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 
 装完按 docs/RELEASE.md 提示重启生效，hero-chip 选择 "Matt 工作流"。
 
-> 定时任务：`scheduled-jobs.mjs` 已退役（#4，ADR-0001）；提醒类需求用
-> schedule-bundle 的 `schedule_create` 等工具。
+> 定时任务：`scheduled-jobs.mjs` 已退役（#4，ADR-0001）。0.2.1 起提醒/定时服务已内建出货，
+> 但本仓 preset 未声明 `tool-schedule` 行、`schedule_*` 工具不可用——三分事实（服务层/出货面/
+> 本仓面，唯一全文）见 [CONTEXT.md](CONTEXT.md)「已核实的环境事实」（补行归 #117）。
 
 ## 沙箱批跑（sandcastle × DSH headless，opt-in）
 

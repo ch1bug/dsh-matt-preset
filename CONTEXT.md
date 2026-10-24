@@ -33,7 +33,7 @@
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
 - `cordis-plugin-timer`（`ctx.timeout/interval/debounce/throttle`，随 fiber 释放）可用于插件内定时。
-- `dsh-schedule` 已作为包存在但当前部署未挂载（本会话无 `schedule_*` 工具）。
+- 提醒/定时三分事实（0.2.1，#90 复核）：**服务层**——`dsh-schedule` + `ui-schedule` 由出货 `web-app` bundle 内建提供；**出货面**——`tool-schedule` 行由 `standard` / `ptc` / `cordis` 各自声明（`minimal` 不声明）；**本仓面**——本仓四档 preset 目前都未声明该行，matt 会话拿不到 `schedule_*` 工具（补行归 #117 roster 写域）。
 - 宿主组成（base/web.cordis.yml）不可改：任何新能力只能进 preset 层。
 
 - `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。
@@ -42,7 +42,7 @@
 
 - **D1（2026-08-18，访谈 R1）** — 做**通用 job-runner**：配置驱动的定时任务列表，每任务 = 时间表 + shell 命令；技能同步是第一个消费者。
 - **D2（2026-08-18，访谈 R1）** — 挂 **matt preset 插件**（standing mount 生命周期）；不用系统 cron 兜底。
-- **D3（2026-08-18，访谈 R1）** — **新建小 job-runner**；`dsh-schedule` 保留为"会话级提醒"的现成路径，本用例不装。
+- **D3（2026-08-18，访谈 R1）** — **新建小 job-runner**；`dsh-schedule` 保留为"会话级提醒"的现成路径，本用例不装。（2026-10-24 注：0.2.1 起服务层已内建、出货 preset 已声明 `tool-schedule`，本仓面现状见上文三分事实。）
 - **D4（2026-08-18，访谈 R2）** — 时间表用 **cron 表达式**（5 段）。
 - **D5（2026-08-18，访谈 R2）** — 结果处理：记日志 + 可选 `notifyOnFailure`，不自动重试。
 - **D6（2026-08-18，访谈 R2）** — 任务清单以 **agent.cordis.yml 行式配置**（每任务一行）。

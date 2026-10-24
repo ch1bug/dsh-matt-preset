@@ -139,7 +139,13 @@ error: profile "desktop" is managed exclusively by the Electron application
 日常 GUI 里还有另一条路（Plugins 页 / `plugin_manager` 工具的 `install_bundle` / `set_bundle`），
 形态与桌面既有的 `link:` 依赖一致；装完用应用自述确认活行（Host Inspect 的
 `Config.listConfigs`, `patchId: "preset-dsh-matt-preset"`，`total: 0` = 没装上）。
-那条路是**外部动作**（改的是日常 profile），且 bundle 形态若按 #76 拍板改变，需要重装一次。
+那条路是**外部动作**（改的是日常 profile）。0.2.1 起，在**跑 HMR 的 profile** 上（本机桌面
+profile 实测确认：活组合树 `include:hmr` = `schema`，#90 票面取证）`install_bundle` 对**已装**包
+直接 `application: 'failed'` + `error.code: 'already-installed'`（旧版是 `restart-required` 后旧版本
+继续跑），故重装（覆盖已装包，如 bundle 形态按 #76 拍板改变后）必须先 `remove_bundle` 再
+`install_bundle`。另一条可继承的桌面行为（2026-10-17 实机，#88）：桌面端更新会自动清理**退休的
+experimental bundle 选择**——schedule 的实验档（`dsh-experimental-…`）已从
+`dsh.profile.bundles` 消失，任务数据保留。
 
 **只让绿树成为 live**：link 面没有"安装"这道闸，权威树的任何状态都会直达该面。故约定
 升级前跑唯一入口（`node scripts/verify-all.mjs`）与 `privacy-scan`——`.githooks/pre-commit`

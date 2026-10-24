@@ -138,7 +138,9 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
 
 - **`node tests/<file>.mjs` 的依赖锚点是 `tests/node_modules/`，不是仓根**：`@deepseek-ai`（+ `yaml`）
   是 junction → 本机 dsh 安装的 `node_modules/@deepseek-ai`；新 clone / 换机器用
-  `node scripts/link-runtime-deps.mjs` 一条命令补齐（D43）。仓根 `node_modules` 只有 `yaml`
+  `node scripts/link-runtime-deps.mjs` 一条命令补齐（D43）。⚠ 该锚**只能指向源码检出 `<src>`**——
+  桌面安装版不能当挂具运行时锚（原因与路径证据见 §3.1「桌面安装版 ≠ 挂具运行时锚」段）。
+  仓根 `node_modules` 只有 `yaml`
   （供插件自身的 `import 'yaml'`）——**据此判"套件跑不了"是误读**：#82 会话的复核轴就因此退化成只读码，
   4 条发现里 2 条本可自己跑用例钉死。
 - **`pnpm` 未必在 PATH 上**（现场报 `术语 'pnpm' 不会被识别…`）。验证走
@@ -512,6 +514,14 @@ $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 15/15、exi
 | 4 | `DSH_DESKTOP_ROOT` → `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` | 桌面安装版惯例；**`DSH_DESKTOP_ROOT` = 桌面应用根目录**（含 `resources` 的那一层）。设成 `<app>/resources` 也认 —— 该档对每个候选都试「先 `<root>/resources/…`、再 `<root>/…` 回落」两种读法，实测两种读法收敛到**同一条真实路径**（2026-10-18）；档位顺序不变，回落只在**本档内**发生 |
 | 5 | `DSH_MATT_DSH_SRC` → `<src>/apps/cli/lib/bin.js`（**经 `node` 跑**） | — | 源码检出惯例 |
 
+**桌面安装版 ≠ 挂具运行时锚（0.2.1，#88 实测）**：上表第 4 档让 `DSH_DESKTOP_ROOT` 能当 **dsh CLI /
+pnpm** 的探测来源，但**测试挂具的依赖锚不能用它**——`@deepseek-ai` 包表在 `resources/app.asar`
+内部，磁盘上既无 `resources/runtime` 下的 `node_modules/@deepseek-ai`，也无
+`app.asar.unpacked` 下的同名包表（`resources/runtime` 只有 `bin`、`cli`、`office-skills`、
+`primary-runtime`、`versions.json` 五项）。故 `scripts/link-runtime-deps.mjs` 的
+"源码检出或桌面安装"两个来源里，桌面分支在本机不可用——**只有 `<src>` 这条路**（守卫已随 #88 落进
+该脚本头注）。
+
 **pnpm 的那半边与 dsh 不同，三点必须分清**：
 
 1. **形态可能是 `.cjs` 而不是可执行**：harness 把 pnpm 作为依赖分发
@@ -626,7 +636,11 @@ B1/D1 红；把实例改到保留口 → B5 红。
 当前读数见上文「三档读数」表（无 dsh 基线 16/16；dsh+pnpm 都在场 17/17；桌面根 18/18，后两档**零 loud skip**）。
 
 **profile 的"面"由初始化模板决定**（2026-10-16 实测，#75）：起 **web 面**的 profile 必须由 shipped
-web 模板初始化（`--profile <p> --from-default-profile web …`）。`dsh plugin --profile <p> add <store>`
+web 模板初始化（`--profile <p> --from-default-profile web …`）。⚠ 0.2.1 起 `--from-default-profile
+<template>` 是**整体替换**语义（非合并）：用出货模板整体替换目标 profile（含其 `package.json`
+依赖、`node_modules`、`cordis.patch.yml`），重复跑 = 清空重来（#88 取证；上游 guide
+`from-default-profile-replaces-target`），**不要**对已定制的 profile 重复跑。另注意
+`dsh plugin --profile <p> add <store>`
 给**自建新名字**的 profile 只建出 `@deepseek-ai/dsh-base`（+ 挂进去的 preset），实例**不会**打印
 `dsh web:`（实测 60s 无该行 → 会被误读成"起不来"），stderr 出
 `preset-…: pending (waiting for service: agentPresets)`。用 shipped 名（如 `web`）时自建 layer 自带该

@@ -3,7 +3,8 @@
 Status: retired（2026-09-30，T1 拍板 4c，#4）
 
 > **退役注记**：`scheduled-jobs.mjs` 与 `job-sync-skills` 行已随 #4（T2 本体合并）
-> 删除。原因：schedule-bundle（time-context + schedule + ui-schedule）三端统一挂载
+> 删除。原因：定时三件套（`time-context` + `schedule` + `ui-schedule`；0.2.1 起 `dsh-schedule`
+> / `ui-schedule` 由出货 `web-app` bundle 内建提供，不再以独立 bundle 形态挂载）三端统一挂载
 > 后，preset 自带的 cron 执行器失去唯一消费者（`job-sync-skills` 自 2026-08-31 起
 > 因 WSL 路径失效已 disabled，见 #1）。本文保留以记录决策历史；相关测试
 > （`verify-advisory.mjs`、`verify-notify.mjs`、`verify.mjs` Track C）一并移除。
@@ -13,7 +14,7 @@ Matt 模式需要一个"cron 类似的插件"来定时跑技能同步（`sync-sk
 ## Considered Options
 
 - **系统 cron（WSL）** — 守护进程已在运行，但它是非插件的宿主机制：结果不进 DSH 视野、无会话通知、也违背"插件"的直觉。
-- **复用 dsh-schedule** — 它是会话级提醒（模型建 `schedule_create`、到点 `followup()` 递话给 live 会话的 agent），`every_seconds` ≥ 5 分钟、无 cron 表达式、冷会话不投递——解决不了"宿主级定时跑 shell 命令"。保留为提醒领域的现成路径，本插件不装它。
+- **复用 dsh-schedule** — 它是会话级提醒（模型建 `schedule_create`、到点 `followup()` 递话给 live 会话的 agent），`every_seconds` ≥ 5 分钟、无 cron 表达式、冷会话不投递——解决不了"宿主级定时跑 shell 命令"。保留为提醒领域的现成路径，本插件不装它。（0.2.1 注：`schedule_*` 工具经 `tool-schedule` 行声明后即可用，服务层已内建——本仓面现状见 CONTEXT.md 三分事实。）
 - **内置迷你 cron 解析器** — 被否：用户选择完整 `cron-parser` 语法（`?`、`L`、`W`、名称等），零依赖方案只覆盖 `* , - /` 子集。
 
 ## Consequences
