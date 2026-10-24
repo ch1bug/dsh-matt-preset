@@ -54,7 +54,7 @@ headers: { cookie, 'content-type':'application/json' }
 
 | 目的 | 用 |
 | --- | --- |
-| 会话是否在跑 / token 用量 / 加载了哪个 preset | `session/projections` → `{ running, values:{ tokenUsage, contextBreakdown, agentPreset, title } }` |
+| token 用量 / 加载了哪个 preset / 子代理目录 | `session/projections` → `{ running, values:{ tokenUsage, contextBreakdown, agentPreset, title, subagentCatalog } }`。⚠ **`running` 别当 turn 完成判据**（#50 实测 2026-10-24：turn 进行中可为 false，runner 据此截早把开头当完成）——判定 turn 结束用 `session/page` 事件流的 `turn/end` 且其后无 `turn/start` |
 | 耐久事件（assistant 消息、tool/call、tool/result） | `session/page` → `{ address:{kind:'session',sessionId}, throughSeq:<投影 asOfSeq>, maxMessages:N }` |
 | 该会话可见的技能目录 | `skills/list`（**冷读**：会话未 live 时走宿主注册表，live 时走 preset 作用域 —— 同一 session 前后可能不同） |
 
