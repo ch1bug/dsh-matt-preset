@@ -18,6 +18,9 @@
   否则显式路径——判据同上）：index 是"复核前"的快照，复核产生的修改只落在工作树，
   而 pre-commit 的 verify-all 跑的是**工作树**——它会为提交里根本没有的内容背书。`#82` 实测：
   提交记 `283/30`、树里是 `347/32`，只有事后 `git status` 才发现，靠两次 amend 补救。
+- **grep 找承载副本不带 `--include` 过滤**：无扩展名文件（`.githooks/pre-commit` 一类）
+  会被扩展名过滤**静默漏掉**——`#103` 实测带过滤 4 命中、全量 5 命中，漏掉的恰是钩子里的
+  承载副本。先无过滤跑一遍定全集，再按需收窄；与 #129「正则照抄判据」同族（扫描面窄了漏报）。
   `.githooks/pre-commit` 现在会**响亮拒绝**这种脱节（`tests/verify-precommit-hook.mjs` H1）。
 - 已提交：`git diff <fixed-point>...HEAD`（三点，对 merge-base）。
 - 先验固定点可解析、diff 非空，再派 subagent——坏 ref 要在这一层炸，不要炸在两个 subagent 里。

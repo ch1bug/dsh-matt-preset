@@ -8,6 +8,7 @@
    ```bash
    node bin/install.mjs install --profile headless
    ```
+   ⚠ **勘误（2026-10-24，#50 实测）**：`dsh headless` one-shot **没有 agentPresets 服务**——preset 注册行全 pending，会话是**裸模型**（system ~1196 tokens、无 `/implement`），本 runbook 的 pass^3 实测的是「裸模型按任务文本角色扮演」，**不是 preset 工作流**。后续评 preset 工作流一律用 **web 实例 + RPC 驱动**（`evals/autonomy/runner.mjs` 即模板），评测报告须写明驱动口径。另：自动化率类评测应把**编排者代行动作**（idle-nudge、代答）显式计量并随结论携带——把 human 兜底藏进实现细节会虚高「全自动」读数（#50 把 nudge 计入「每跳 human 交互数」）。
 2. **三连跑**（同一任务，fresh 会话；label 唯一）：
    ```bash
    node evals/passk-implement/smoke.mjs run1
