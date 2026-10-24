@@ -61,7 +61,7 @@ if (lines.length > 0) {
   if (lines.length > 20) console.error(`    … 另有 ${lines.length - 20} 项`)
   console.error('')
   console.error('  处置（二选一，都是你的判断）：')
-  console.error('    · 这些改动属于本票 → `git add -A && git commit` 后再跑本脚本；')
+  console.error('    · 这些改动属于本票 → 按暂存纪律收进并提交（docs/dev-environment.md §0.4：确认唯一写者才 `git add -A`，否则显式路径）后再跑本脚本；')
   console.error('    · 属于下一票/无关 → 先收走再利用（注意 #108：**别用 `git checkout --` 当还原手段**）。')
   process.exit(1)
 }

@@ -341,6 +341,59 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
 
 **不做**：汇总行不加 `gates=` 等传感器字段（门禁状态看 `SKIP` / `PASS*` 行即可，D29）。
 
+## 0.4 并行会话：分支归属与暂存/提交纪律（#103）
+
+同一检出上**实测出现过 3 个并行会话**同时写树（#103 票面，2026-10-18）；邻仓
+`ch1bug/dsh-shell-host` 更因此**两次**被 `git add -A` 吞掉并行会话的改动并沉淀了纪律
+（commit `2bf18ef`，只指针不复述其正文）。本节是本仓对应纪律的**唯一清单**——
+判据本体（逐项归属测试）只写在这里；`docs/code-review-brief.md` §1 与
+`.githooks/pre-commit` 的提示语各带**一行摘要 + 本节指针**（摘要措辞随各自上下文，
+不改判据本体）。
+
+### 分支形态：一票一分支（票面三选一定死为 b）
+
+**多会话共享一个工作目录时，`main` 不再当工作分支**：
+
+- 每票开工先切自己的分支：`git switch -c feat/<票号>-<slug>`（分支名**带票号**，可归属；
+  `git log <branch> --oneline` 就是该票的账）。收尾由人/单一会话合并回 `main`，用
+  `--ff-only`（本仓副本同步的既有先例见上文 §0 与 `docs/agents/privacy.md`）。
+- 选 (b) 而非 (a) 一会话一分支 / (c) main 直做：(b) 与「严格一票一会话」天然对齐——
+  票、会话、分支三个量纲一一对应，票与分支可互查；main 直做（c）在并发下就是邻仓
+  两次事故的形态。
+- **边界（别把分支当万能）**：分支不防**同一分支**内两会话互踩；不能替代下面的暂存纪律
+  （同一分支上 `add -A` 照样吞同事改动）；`.scratch/` 等 gitignored 文件不归 git 管
+  （那面靠 `docs/batch-state.md` 的批次登记）；本仓无 CI，分支隔离不自动带来验证
+  ——合并前仍需本地 `node scripts/verify-all.mjs --all`（AGENTS.md「验证」）。
+
+### 暂存/提交纪律（三条，含「唯一写者」判据）
+
+1. **暂存前**：先 `git status --short` 看清有哪些文件；**不属于本次改动的一律不收**。
+   默认用**显式路径** `git add <path>` 代替 `-A`；`git add -A` 只在确认自己是
+   **唯一写者**时才用。**唯一写者判据**：`git status --short` 列出的**每一项**都能
+   一句话归属到本票（当前批次只有本会话一个写者、没有别的会话在这个检出上留
+   未提交/已暂存的改动）；说不出归属的那一项 = 不是唯一写者 → 用显式路径，
+   并顺藤摸瓜找到那一项的主人。
+2. **提交前**：`git diff --staged --name-only` 核对将提交的面；发现别人的条目 →
+   `git restore --staged <path>`（**工作树内容不动**，对方不丢东西），或直接
+   **带 pathspec 提交** `git commit -F <msg> -- <你的路径>`（只提交这些路径，
+   索引其余条目原样留着——本仓批提交已走 pathspec 形态，#158）。
+3. **提交后**：`git show --stat` 核对提交清单**恰好等于**本次改动面——多出条目 =
+   有人搭车，立即处置；少了 = 漏提交（含新增文件，判据见下）。
+
+**新增文件必须进 diff（brief §1 原意的判据）**：untracked 文件在 `git diff` /
+`git diff --staged` 里**不可见**（只在 `git status --short` 以 `??` 出现）——漏 add
+新文件 = 复核/提交面残缺（#55 实测 4 个新增文件）。判据：提交前 `git status --short`
+对本票**不再有任何 `??` 行**（该进的都已进 index；列出但不属于你的项走纪律第 2 条收走）。
+
+### 钩子项（票面 §3(ii)）：显式声明不覆盖
+
+pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只能看到 index，而 index 不携带
+「这一条是谁暂存的」——「哪些路径属于本次」在钩子里**没有机械判据**；任何启发式都会误报、
+把人推向 `SKIP_HOOKS=1`（防线被日常绕开比缺席更糟）。按 [code-review-brief §8](code-review-brief.md)
+缺陷类登记 **D13/D15**（declare-not-covered 先例：Y7d / R7）的口径**显式声明不覆盖**，
+以结构性防线替代：一票一分支（污染落在自己分支、进不了 main）+ pathspec 提交 +
+提交后 `git show --stat` 核对。H1（index/工作树脱节）与 H4（detached HEAD）照旧。
+
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 
 启动器用 **`DSH_HOME`** 定位 home、用 **`--profile <name>`** 选择 `$DSH_HOME/profiles/<name>`。

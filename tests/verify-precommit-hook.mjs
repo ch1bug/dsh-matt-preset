@@ -1,10 +1,12 @@
 /**
- * verify-precommit-hook.mjs — acceptance for `.githooks/pre-commit` (H1–H3).
+ * verify-precommit-hook.mjs — acceptance for `.githooks/pre-commit` (H1–H6).
  *
  * Why: the hook is this repo's only gate (no CI), and it runs
  * `scripts/verify-all.mjs` against the WORKING TREE while `git commit` records
  * the INDEX. When the two diverge — the review round edits files after the
- * pre-review `git add -A` that `docs/code-review-brief.md` §1 prescribes — the
+ * pre-review staging that `docs/code-review-brief.md` §1 prescribes (CONDITIONAL
+ * since #103: `git add -A` only when this session is the sole writer; otherwise
+ * explicit paths / pathspec commit, per docs/dev-environment.md §0.4) — the
  * gate reports OK for content the commit will NOT contain. Measured in the #82
  * session: the commit recorded 283/30 while the tree held 347/32; caught only by
  * a post-commit `git status`, then fixed with two amends. H1 pins the guard.

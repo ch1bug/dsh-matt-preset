@@ -23,7 +23,8 @@ UNSTAGED=$(git diff --name-only)
 if [ -n "$UNSTAGED" ]; then
   echo "pre-commit: 工作树有未 staged 的改动 —— 本次提交不会包含它们："
   echo "$UNSTAGED" | sed 's/^/  /'
-  echo "  复核后请重新 git add -A；确要有意部分暂存则 SKIP_HOOKS=1 git commit …"
+  echo "  复核后请把复核产生的修改重新暂存（docs/dev-environment.md §0.4：确认唯一写者才 git add -A，否则显式路径）；"
+  echo "  确要有意部分暂存则 SKIP_HOOKS=1 git commit …"
   exit 1
 fi
 

@@ -8,9 +8,14 @@
 ## 1. 定固定点
 
 - 默认固定点 = **`HEAD`**（起手快照）。
-- 工作还没提交：先 `git add -A`，再用 `git diff --staged`——否则**新增文件不出现**在 diff 里
-  （本次 #55 有 4 个新增文件，漏掉就等于审了个残缺面）。
-- **复核后必须重新 `git add -A` 再 commit**：index 是"复核前"的快照，复核产生的修改只落在工作树，
+- 工作还没提交：先把改动**收进 index** 再用 `git diff --staged`——否则**新增文件不出现**在 diff 里
+  （untracked 只在 `git status --short` 以 `??` 可见，`git diff` / `git diff --staged` 都看不见它；
+  本次 #55 有 4 个新增文件，漏掉就等于审了个残缺面）。收进 index 走
+  [dev-environment §0.4](dev-environment.md) 的暂存纪律：先 `git status --short` 逐项归属，
+  **确认本会话是唯一写者才用 `git add -A`**，否则逐个显式路径 `git add <path>`——
+  新文件用显式路径同样进 diff（判据：add 后 `git status --short` 不再有本票的 `??` 行）。
+- **复核后必须把复核产生的修改重新暂存再 commit**（确认唯一写者才整体 `git add -A`，
+  否则显式路径——判据同上）：index 是"复核前"的快照，复核产生的修改只落在工作树，
   而 pre-commit 的 verify-all 跑的是**工作树**——它会为提交里根本没有的内容背书。`#82` 实测：
   提交记 `283/30`、树里是 `347/32`，只有事后 `git status` 才发现，靠两次 amend 补救。
   `.githooks/pre-commit` 现在会**响亮拒绝**这种脱节（`tests/verify-precommit-hook.mjs` H1）。
