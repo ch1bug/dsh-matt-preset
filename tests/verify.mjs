@@ -14,6 +14,7 @@
  *     rows this work added.
  */
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -21,7 +22,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import { bootHarness, parsePlugins, resolveLocalNames } from './preset-harness.mjs'
-import { childStarted, waitForFirstTurn } from '../handoff-tool.mjs'
+import { childStarted, waitForFirstTurn, CREDENTIAL_FORMATS } from '../handoff-tool.mjs'
 
 // Repo-relative: tests/verify.mjs -> the repo root, which IS the matt preset directory.
 const MATT_DIR = fileURLToPath(new URL('..', import.meta.url))
@@ -438,6 +439,40 @@ try {
   else bad('E. waitForFirstTurn true once turn appears')
 } catch (error) {
   bad('track E', String(error?.stack ?? error))
+}
+
+// ── Track F: 凭据格式正典同源守卫（#162/D52）────────────────────────────────
+// workflow-body.txt 是散文，无法 import handoff-tool.mjs 的正典导出 —— 这里以
+// 「读文件 + 字面对照」代替。判据 = **逐字面的副本计数**（#128 口径：副本数量
+// 本身是判据的一部分，文件级 includes 只钉一半 —— 同一字面两处承载、漂移其一
+// 时另一处会兜底成假绿）。字面取自正典对象本身，不手写副本（#129 教训）。
+// 非空洞（brief §3.1）：探针敲掉**一个**副本（只 replace 首次出现），同一判据
+// 必须翻红 —— 单处漂移探不出来，说明守卫空转，本项自己红。
+try {
+  const bodyF = readFileSync(join(MATT_DIR, 'workflow-body.txt'), 'utf8').replace(/\r\n/g, '\n')
+  const countF = (text, lit) => text.split(lit).length - 1
+  // 每个字面的承载副本清单（现文三处：batch-mode 段、父端段、child 段——
+  // 增删副本时这里同步改计数，改漏 = 本项红，正是守卫要拦的漂移）。
+  const canonicalF = [
+    { lit: CREDENTIAL_FORMATS.batch, copies: 3, where: 'batch-mode 段 + 父端段 + child 段' },
+    { lit: CREDENTIAL_FORMATS.ticket, copies: 2, where: '父端段 + child 段' },
+  ]
+  const driftedF = canonicalF.filter(({ lit, copies }) => countF(bodyF, lit) !== copies)
+  if (driftedF.length === 0) {
+    ok('F. workflow-body credential literals match handoff-tool canonical exports, per-copy (#162)', canonicalF.map(({ lit, copies }) => `${lit} x${copies}`).join(' / '))
+  } else {
+    bad('F. workflow-body credential literal copy-count drift (#162)', driftedF.map(({ lit, copies }) => `"${lit}" expected x${copies}, found x${countF(bodyF, lit)}`).join(' | '))
+  }
+  // 非空洞对照：敲掉批次字面的**首个**副本（模拟单处漂移）→ 主判据必须红。
+  const knockedF = bodyF.replace(CREDENTIAL_FORMATS.batch, '')
+  const driftKnockedF = canonicalF.filter(({ lit, copies }) => countF(knockedF, lit) !== copies)
+  if (driftKnockedF.length > 0) {
+    ok('F. non-hollow: knocking out ONE copy of the batch literal flips the same check red (#162)')
+  } else {
+    bad('F. non-hollow probe (#162)', 'single-copy drift still passes the copy-count check — guard would not fire')
+  }
+} catch (error) {
+  bad('track F', String(error?.stack ?? error))
 }
 
 console.log('\n=== VERIFY RESULTS ===')

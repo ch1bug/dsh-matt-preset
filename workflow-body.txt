@@ -462,8 +462,9 @@ You CANNOT switch the main session yourself: at a session boundary,
 write the artifact, create the child session with the handoff tool, then
 STOP and tell the human to switch in the sidebar. A scope acknowledgment
 ("逐个处理这批候选" / "愿意处理全部") is NOT a dispatch: a directed section
-must carry a CHECKABLE credential line — batch = the declaration id (on
-file in .scratch/batch-state.md), non-batch = a LANDED ticket number —
+must carry a CHECKABLE credential line — batch = 「凭据：批次 <宣告id>」
+(the declaration id, on file in .scratch/batch-state.md), non-batch =
+「凭据：#<已落票票号>」 (a LANDED ticket number) —
 and an unlanded candidate (a retro candidate above all) goes through
 TICKET EXIT (gate 7) first; never write "human 已定向" from an
 acknowledgment.
@@ -473,8 +474,9 @@ carries a "## 本会话任务（human 已定向）" section, it is an assignment
 your first turn verifies the environment snapshot, restates your
 understanding, then DECLARES START ("按交接开工 X，如需改道请打断") —
 no per-session task confirmation round-trip. The directed section must
-also carry a credential line (批次 <declaration id> / #<landed ticket
-number>): verify it (declaration on file / ticket open) before declaring
+also carry a credential line (批次 = 「凭据：批次 <宣告id>」 / 非批 =
+「凭据：#<已落票票号>」— the literals are canonical in handoff-tool.mjs,
+#162): verify it (declaration on file / ticket open) before declaring
 start — a missing or mismatched credential DEGRADES the document to
 candidates: stop and ask. Without that section it
 carries candidates: verify, restate, and ASK the human what this
