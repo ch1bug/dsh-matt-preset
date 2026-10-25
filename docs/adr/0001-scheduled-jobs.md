@@ -8,6 +8,15 @@ Status: retired（2026-09-30，T1 拍板 4c，#4）
 > 后，preset 自带的 cron 执行器失去唯一消费者（`job-sync-skills` 自 2026-08-31 起
 > 因 WSL 路径失效已 disabled，见 #1）。本文保留以记录决策历史；相关测试
 > （`verify-advisory.mjs`、`verify-notify.mjs`、`verify.mjs` Track C）一并移除。
+>
+> **2026-10 复核（#117，方向 b）**：官方 `0.2.1-rc.2` 的 `standard`/`ptc`/`cordis`
+> 三档现在**独立挂着** `time-context` 与 `tool-schedule` 行；本仓拍板（2026-10-24）
+> **维持退役口径不回补、不追平**。注意方向：`tool-schedule` 的服务层虽内建，
+> `schedule_*` 工具**经行声明后才可用**（见下 Considered Options 的 0.2.1 注）——
+> 本仓未声明 ⇒ matt 会话**拿不到** `schedule_*`，这是拍板 b **有意接受的缺口**，
+> 不是「不挂也无损失」。理由登记于
+> `tests/fixtures/official-presets-roster-v1.json` 的 `registeredDiff`（取证配方与
+> 版本锚：`docs/preset-roster-alignment.md`；守卫 `tests/verify-roster-alignment.mjs`）。
 
 Matt 模式需要一个"cron 类似的插件"来定时跑技能同步（`sync-skills.sh`）等任务。我们决定在 matt preset 里挂载一个 `scheduled-jobs` 插件：任务以 agent.cordis.yml 行式配置（每任务 = cron 表达式 + 命令 + 可选 `notifyOnFailure`/`notifySessionId`/`runOnMount`），cron 表达式用 `cron-parser` 库解析（装在 `~/.dsh/node_modules` 用户自有目录，不碰部署包），单一分钟 tick 驱动，配 `jobs_list`/`jobs_run`/`jobs_pause` 三个模型工具；第一个任务是每天 09:00 跑 `sync-skills.sh`（`runOnMount`，失败时通知显式配置的会话）。
 

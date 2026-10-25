@@ -74,6 +74,15 @@ Supersedes: [0014](0014-matt-workflow-bundle-shape.md) **Decision 第 3 条的�
    | --- | --- | --- |
    | `tool-cordis`（提供 `cordis_inspect_*`） | **无** | **有** |
    | `tool-plugin-manager` | `disabled: true` | `disabled: !!js "!ctx.get('profileContext')"`（与官方第四档同形）|
+   | `tool-plugin-market` | `disabled: true` | `disabled: !!js "!ctx.get('profileContext')"`（**逐份跟 manager 同款**）|
+
+   `tool-plugin-market` 行 2026-10 由 **#117 补入**（折叠自 #97）：上游
+   `standard`/`ptc`/`cordis` 三档都在 manager 紧后挂 market 行且 `disabled`
+   **从不单独设值**（永远与 manager 同款）——本仓照此（Z1/Z2），否则重现
+   「manager 活的、market 关着」的单边缺口。与官方对应模式的**全量差异**
+   （多与少逐行带理由）登记于 `tests/fixtures/official-presets-roster-v1.json`
+   并由 `tests/verify-roster-alignment.mjs` 钉住（#117 拍板方向 b：有据差异；
+   取证配方与版本锚见 `docs/preset-roster-alignment.md`）。
 
    **为什么必须有这条**：`cordis` 档的注入文本（`creator-inspect-first`）**要求**模型
    先 `cordis_inspect_list` → `cordis_inspect_query` 读契约再写插件代码。若 roster 里没有

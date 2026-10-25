@@ -50,8 +50,11 @@ const docs = files.filter(f => /^(AGENTS|README|CONTEXT)\.md$/.test(f) || /^docs
 /** 带仓内前缀 + 扩展名的引用，以及无扩展名的 `.githooks/*` 引用。
  *  负向环视只排除"更长路径的一部分"与 URL/占位符前缀（`\w / . - < > $ % :`）——
  *  **反引号必须在集合之外**：文档里的指针大多写在行内代码里，曾把它排除掉 → 整片引用
- *  静默漏扫（2026-10-17 自检抓到；R2 阈值当时抓不到，因为非行内引用仍够数）。 */
-const PATH_REF = /(?<![\w/.<>$%-])((?:docs|tests|scripts|bin|lib|skills|lang-packs|sandcastle|evals)\/[\w./-]*\.(?:md|mjs|mts|js|ts|txt|yml|yaml|json))/gu
+ *  静默漏扫（2026-10-17 自检抓到；R2 阈值当时抓不到，因为非行内引用仍够数）。
+ *  扩展名交替**必须带右边界 `(?!\w)`**（#117 实测踩中）：交替里 `js` 排在 `json`
+ *  前且正则不要求吃到词尾，`xx.json` 会被截成 `xx.js` 判死引用——首个 `.json`
+ *  fixture 引用（tests/fixtures/official-presets-roster-v1.json）触发的真实红。 */
+const PATH_REF = /(?<![\w/.<>$%-])((?:docs|tests|scripts|bin|lib|skills|lang-packs|sandcastle|evals)\/[\w./-]*\.(?:md|mjs|mts|js|ts|txt|yml|yaml|json)(?!\w))/gu
 const HOOK_REF = /(?<![\w/.<>$%-])(\.githooks\/[\w./-]+)/gu
 
 const refs = new Map()

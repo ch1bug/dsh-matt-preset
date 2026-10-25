@@ -1,0 +1,481 @@
+{
+  "meta": {
+    "what": "官方四档 preset roster 冻结快照 + matt↔官方登记差异面（#117 拍板 b：有据差异）",
+    "sourcePackage": "@deepseek-ai/dsh-web-app",
+    "sourceVersion": "0.2.1-rc.2",
+    "tarballUrl": "https://registry.npmjs.org/@deepseek-ai/dsh-web-app/-/dsh-web-app-0.2.1-rc.2.tgz",
+    "presetGlob": "package/presets/{standard,ptc,minimal,cordis}.patch.yml",
+    "capturedOn": "2026-10-25",
+    "recapture": "官方版本线移动时按 docs/preset-roster-alignment.md 的取证配方重取本快照（有意重取不是漂移，D48 先例）；registeredDiff 随读数重算",
+    "guard": "tests/verify-roster-alignment.mjs（唯一消费者；套件不联网对账官方移动版本线——冻结快照即离线事实源）"
+  },
+  "official": {
+    "standard": [
+      "preset-standard",
+      "persona",
+      "agent-instructions",
+      "time-context",
+      "tool-bash",
+      "tool-pwsh",
+      "tool-fs",
+      "tool-fs-search",
+      "tool-jobs",
+      "tool-schedule",
+      "skill-filesystem",
+      "tool-skill",
+      "command-goal",
+      "tool-goal",
+      "planning",
+      "plan-mode",
+      "compaction",
+      "compaction-basic",
+      "command-compact",
+      "tool-result-pruner",
+      "delegation",
+      "tool-subagent-control",
+      "tool-subagent-list-agents",
+      "tool-subagent",
+      "tool-subagent-fork",
+      "workflow-ptc",
+      "tool-workflow",
+      "tool-ask-user",
+      "tool-todo",
+      "tool-web",
+      "present",
+      "tool-plugin-manager",
+      "tool-plugin-market"
+    ],
+    "ptc": [
+      "preset-ptc",
+      "persona",
+      "agent-instructions",
+      "time-context",
+      "tool-bash",
+      "tool-pwsh",
+      "tool-fs",
+      "tool-fs-search",
+      "tool-jobs",
+      "tool-schedule",
+      "skill-filesystem",
+      "tool-skill",
+      "command-goal",
+      "tool-goal",
+      "planning",
+      "plan-mode",
+      "compaction",
+      "compaction-basic",
+      "command-compact",
+      "tool-result-pruner",
+      "delegation",
+      "tool-subagent-control",
+      "tool-subagent-list-agents",
+      "tool-subagent",
+      "tool-subagent-fork",
+      "workflow-ptc",
+      "tool-workflow",
+      "tool-ask-user",
+      "tool-todo",
+      "tool-web",
+      "tool-presentation",
+      "present",
+      "tool-plugin-manager",
+      "tool-plugin-market"
+    ],
+    "minimal": [
+      "preset-minimal",
+      "persona",
+      "tool-fs",
+      "compaction",
+      "compaction-basic",
+      "command-compact",
+      "persistent-shell",
+      "pty",
+      "terminal-bash",
+      "persistent-bash",
+      "terminal-pwsh",
+      "persistent-pwsh"
+    ],
+    "cordis": [
+      "preset-cordis",
+      "persona",
+      "agent-instructions",
+      "time-context",
+      "tool-bash",
+      "tool-pwsh",
+      "tool-fs",
+      "tool-fs-search",
+      "tool-jobs",
+      "tool-schedule",
+      "command-goal",
+      "tool-goal",
+      "planning",
+      "plan-mode",
+      "compaction",
+      "compaction-basic",
+      "command-compact",
+      "tool-result-pruner",
+      "delegation",
+      "tool-subagent-control",
+      "tool-subagent-list-agents",
+      "tool-subagent",
+      "tool-subagent-fork",
+      "workflow-ptc",
+      "tool-workflow",
+      "tool-ask-user",
+      "tool-todo",
+      "tool-web",
+      "tool-cordis",
+      "skill-filesystem",
+      "tool-skill",
+      "present",
+      "tool-plugin-manager",
+      "tool-plugin-market"
+    ]
+  },
+  "officialNameOf": {
+    "tool-plugin-manager": "@deepseek-ai/dsh-plugin-manager/tools",
+    "tool-plugin-market": "@deepseek-ai/dsh-plugin-market/tools"
+  },
+  "pairing": [
+    {
+      "matt": "dsh-matt-preset",
+      "carrier": "cordis.patch.yml",
+      "official": "standard"
+    },
+    {
+      "matt": "dsh-matt-preset-ptc",
+      "carrier": "presets/matt-ptc.patch.yml",
+      "official": "ptc"
+    },
+    {
+      "matt": "dsh-matt-preset-minimal",
+      "carrier": "presets/matt-minimal.patch.yml",
+      "official": "minimal"
+    },
+    {
+      "matt": "dsh-matt-preset-cordis",
+      "carrier": "presets/matt-cordis.patch.yml",
+      "official": "cordis"
+    }
+  ],
+  "reasons": {
+    "matt-workflow-core": "matt 特征面：ask-matt 工作流正文（骨架+七门）经 system-prompt/assemble 注入（#54/#99，ADR-0015）；官方 preset 无此形态",
+    "matt-workflow-enforcer": "matt 特征面：每 turn WORKFLOW GATES 提醒 + 高危 tool/call 即时追加（D21，docs/workflow-enforcer.md）",
+    "matt-lang-enforcer": "matt 特征面：语言知识包层——知识指针与流程门职责隔离（D31，docs/lang-enforcer.md）",
+    "matt-handoff-tool": "matt 特征面：/handoff 阶段边界执行器（初始 matt preset fc0c07e 起；会话级边界动作 agent 自身做不了）",
+    "matt-str-replace-editor": "matt 特征面：内建文件编辑器行（fc0c07e 起）；官方 preset 未挂、本仓工作流采用（拍板 b 保留增量）",
+    "matt-subagent-optional": "matt 特征面：可选 subagent provider 声明（常驻 disabled: true，opt-in 才激活；#92 常驻口径）",
+    "matt-tool-ralph": "matt 特征面：ralph 循环执行器（#92 常驻口径，ADR-0015 §4 明示不移出常驻）",
+    "minimal-full-roster": "拍板 b：matt-minimal =「正文更短」非「能力更少」——roster 与标准档同一基线（ADR-0015 §4），官方 minimal 裁掉的这些能力面本仓保留；描述已明示「能力面与标准档完全一致」",
+    "official-time-context": "不回补（#117 拍板 2026-10-24）：随 schedule-bundle 有意退役（ADR-0001），官方虽独立挂行，本仓维持退役口径",
+    "official-tool-schedule": "不追平（方向 b）：ADR-0001 退役同族；schedule_* 工具经 tool-schedule 行声明后才可用（服务层内建，ADR-0001 Considered Options 0.2.1 注）——本仓未声明 ⇒ matt 会话拿不到 schedule_*，拍板 b 有意接受该缺口",
+    "ptc-tool-presentation": "归 #116（方向 A 已拍：挂行；定序 #116 先交付，本票不重复实现）——SG10 已登记该承诺↔roster 缺口",
+    "minimal-terminal-family": "不追平（方向 b）：官方 minimal 以 terminal/persistent-shell 族替代 tool-bash/tool-pwsh 的极简 shell 形态；matt-minimal 保留全量能力面（tool-bash/tool-pwsh 走宿主沙箱路径），不引入第二套 shell 面"
+  },
+  "registeredDiff": {
+    "dsh-matt-preset": {
+      "added": [
+        {
+          "id": "workflow-core",
+          "why": "matt-workflow-core"
+        },
+        {
+          "id": "workflow-enforcer",
+          "why": "matt-workflow-enforcer"
+        },
+        {
+          "id": "lang-enforcer",
+          "why": "matt-lang-enforcer"
+        },
+        {
+          "id": "handoff-tool",
+          "why": "matt-handoff-tool"
+        },
+        {
+          "id": "str-replace-editor",
+          "why": "matt-str-replace-editor"
+        },
+        {
+          "id": "tool-subagent-codex",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-subagent-claude-code",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-ralph",
+          "why": "matt-tool-ralph"
+        }
+      ],
+      "omitted": [
+        {
+          "id": "time-context",
+          "why": "official-time-context"
+        },
+        {
+          "id": "tool-schedule",
+          "why": "official-tool-schedule"
+        }
+      ]
+    },
+    "dsh-matt-preset-ptc": {
+      "added": [
+        {
+          "id": "workflow-core",
+          "why": "matt-workflow-core"
+        },
+        {
+          "id": "workflow-enforcer",
+          "why": "matt-workflow-enforcer"
+        },
+        {
+          "id": "lang-enforcer",
+          "why": "matt-lang-enforcer"
+        },
+        {
+          "id": "handoff-tool",
+          "why": "matt-handoff-tool"
+        },
+        {
+          "id": "str-replace-editor",
+          "why": "matt-str-replace-editor"
+        },
+        {
+          "id": "tool-subagent-codex",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-subagent-claude-code",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-ralph",
+          "why": "matt-tool-ralph"
+        }
+      ],
+      "omitted": [
+        {
+          "id": "time-context",
+          "why": "official-time-context"
+        },
+        {
+          "id": "tool-schedule",
+          "why": "official-tool-schedule"
+        },
+        {
+          "id": "tool-presentation",
+          "why": "ptc-tool-presentation"
+        }
+      ]
+    },
+    "dsh-matt-preset-minimal": {
+      "added": [
+        {
+          "id": "workflow-core",
+          "why": "matt-workflow-core"
+        },
+        {
+          "id": "workflow-enforcer",
+          "why": "matt-workflow-enforcer"
+        },
+        {
+          "id": "lang-enforcer",
+          "why": "matt-lang-enforcer"
+        },
+        {
+          "id": "handoff-tool",
+          "why": "matt-handoff-tool"
+        },
+        {
+          "id": "str-replace-editor",
+          "why": "matt-str-replace-editor"
+        },
+        {
+          "id": "tool-subagent-codex",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-subagent-claude-code",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-ralph",
+          "why": "matt-tool-ralph"
+        },
+        {
+          "id": "agent-instructions",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-bash",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-pwsh",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-fs-search",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-jobs",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "skill-filesystem",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-skill",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "command-goal",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-goal",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "planning",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "plan-mode",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-result-pruner",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "delegation",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-subagent-control",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-subagent-list-agents",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-subagent",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-subagent-fork",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "workflow-ptc",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-workflow",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-ask-user",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-todo",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-web",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "present",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-plugin-manager",
+          "why": "minimal-full-roster"
+        },
+        {
+          "id": "tool-plugin-market",
+          "why": "minimal-full-roster"
+        }
+      ],
+      "omitted": [
+        {
+          "id": "persistent-shell",
+          "why": "minimal-terminal-family"
+        },
+        {
+          "id": "pty",
+          "why": "minimal-terminal-family"
+        },
+        {
+          "id": "terminal-bash",
+          "why": "minimal-terminal-family"
+        },
+        {
+          "id": "persistent-bash",
+          "why": "minimal-terminal-family"
+        },
+        {
+          "id": "terminal-pwsh",
+          "why": "minimal-terminal-family"
+        },
+        {
+          "id": "persistent-pwsh",
+          "why": "minimal-terminal-family"
+        }
+      ]
+    },
+    "dsh-matt-preset-cordis": {
+      "added": [
+        {
+          "id": "workflow-core",
+          "why": "matt-workflow-core"
+        },
+        {
+          "id": "workflow-enforcer",
+          "why": "matt-workflow-enforcer"
+        },
+        {
+          "id": "lang-enforcer",
+          "why": "matt-lang-enforcer"
+        },
+        {
+          "id": "handoff-tool",
+          "why": "matt-handoff-tool"
+        },
+        {
+          "id": "str-replace-editor",
+          "why": "matt-str-replace-editor"
+        },
+        {
+          "id": "tool-subagent-codex",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-subagent-claude-code",
+          "why": "matt-subagent-optional"
+        },
+        {
+          "id": "tool-ralph",
+          "why": "matt-tool-ralph"
+        }
+      ],
+      "omitted": [
+        {
+          "id": "time-context",
+          "why": "official-time-context"
+        },
+        {
+          "id": "tool-schedule",
+          "why": "official-tool-schedule"
+        }
+      ]
+    }
+  }
+}

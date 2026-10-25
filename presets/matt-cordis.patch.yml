@@ -354,6 +354,19 @@
             name: '@deepseek-ai/dsh-plugin-manager/tools'
             disabled: !!js "!ctx.get('profileContext')"
 
+          # `tool-plugin-market`（#117 Z1，折叠自 #97）：上游 standard/ptc/cordis 三档都在
+          # manager 紧后挂 market 行（`@deepseek-ai/dsh-plugin-market/tools`，顺序
+          # manager → market，上游同序）。`disabled` 永远与 manager **同款、逐份跟随**
+          # （standard/ptc/minimal 三份载体=字面 `true`；`matt-cordis` 载体由
+          # ROSTER_MUTATIONS 换成条件式，见 lib/bundle-patch.mjs）——上游从不给 market
+          # 单独设值，本仓亦然；
+          # 单独设值会重现「manager 活的、market 关着」的单边缺口（#97 立票论据，Z2）。
+          # 官方 minimal 无此行；matt 四档共用同一基线 roster（#117 拍板 b：正文差异化、
+          # 能力面不裁），故四档都挂。对齐登记与守卫：docs/preset-roster-alignment.md。
+          - id: tool-plugin-market
+            name: '@deepseek-ai/dsh-plugin-market/tools'
+            disabled: !!js "!ctx.get('profileContext')"
+
           # ── Matt workflow boundary plugins ──────────────────────────────────────────
           #
           # These close the session-level moves of Matt's phase-boundary tree that an

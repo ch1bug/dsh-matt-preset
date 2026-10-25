@@ -33,7 +33,7 @@
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
 - `cordis-plugin-timer`（`ctx.timeout/interval/debounce/throttle`，随 fiber 释放）可用于插件内定时。
-- 提醒/定时三分事实（0.2.1，#90 复核）：**服务层**——`dsh-schedule` + `ui-schedule` 由出货 `web-app` bundle 内建提供；**出货面**——`tool-schedule` 行由 `standard` / `ptc` / `cordis` 各自声明（`minimal` 不声明）；**本仓面**——本仓四档 preset 目前都未声明该行，matt 会话拿不到 `schedule_*` 工具（补行归 #117 roster 写域）。
+- 提醒/定时三分事实（0.2.1，#90 复核）：**服务层**——`dsh-schedule` + `ui-schedule` 由出货 `web-app` bundle 内建提供；**出货面**——`tool-schedule` 行由 `standard` / `ptc` / `cordis` 各自声明（`minimal` 不声明）；**本仓面**——本仓四档 preset 目前都未声明该行，matt 会话拿不到 `schedule_*` 工具（#117 拍板不回补：方向 b 有意接受该缺口，理由登记于官方 roster 快照 `tests/fixtures/official-presets-roster-v1.json` 的 `registeredDiff`）。
 - 宿主组成（base/web.cordis.yml）不可改：任何新能力只能进 preset 层。
 
 - `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。

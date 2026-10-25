@@ -125,9 +125,12 @@ if (pkg === null) {
  *
  *  Corroboration that this is a reader limitation, not a carrier defect:
  *  upstream's OWN `web-app/presets/cordis.patch.yml` throws the same way under
- *  `parsePlugins` — the shipped official cordis preset is equally unreadable
- *  through that path. So `matt-cordis` is homomorphic with upstream here, and
- *  the fix belongs in the reader.
+ *  `parsePlugins`. (#118 folded into #117, 2026-10-25: the official patch TEXT
+ *  itself is readable — npm tarball `@deepseek-ai/dsh-web-app@0.2.1-rc.2`,
+ *  recipe + version anchor in docs/preset-roster-alignment.md; the earlier
+ *  "equally unreadable" note overstated it. Unreadable was only this
+ *  evaluate-through-parsePlugins path, never the file.) So `matt-cordis` is
+ *  homomorphic with upstream here, and the fix belongs in the reader.
  *
  *  The `jsTag` below is the same dialect `parsePlugins` uses; it keeps `!!js`
  *  scalars as `{ __jsExpr }` nodes instead of resolving them. */

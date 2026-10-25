@@ -210,23 +210,43 @@ for (const preset of ALL_PRESETS) {
   } else {
     const cordisHasRow = hasRow(CORDIS_CARRIER, 'tool-cordis')
     const cordisDisabled = disabledValueOf(CORDIS_CARRIER, 'tool-plugin-manager')
-    if (cordisHasRow && cordisDisabled === CONDITIONAL) {
+    const cordisMarket = disabledValueOf(CORDIS_CARRIER, 'tool-plugin-market')
+    if (cordisHasRow && cordisDisabled === CONDITIONAL && cordisMarket === CONDITIONAL) {
       ok(`N11. ${CORDIS_CARRIER} reaches its own profile's tools`,
-        `tool-cordis present; tool-plugin-manager disabled=${cordisDisabled}`)
+        `tool-cordis present; tool-plugin-manager disabled=${cordisDisabled}; tool-plugin-market disabled=${cordisMarket}`)
     } else {
-      bad(`N11. ${CORDIS_CARRIER} must declare tool-cordis and keep tool-plugin-manager conditional`,
-        `tool-cordis=${cordisHasRow} disabled=${String(cordisDisabled)} want=${CONDITIONAL}`)
+      bad(`N11. ${CORDIS_CARRIER} must declare tool-cordis and keep tool-plugin-manager AND tool-plugin-market conditional`,
+        `tool-cordis=${cordisHasRow} manager=${String(cordisDisabled)} market=${String(cordisMarket)} want both=${CONDITIONAL}`)
     }
 
     // The other direction: every OTHER carrier must stay exactly as it was.
     for (const preset of ALL_PRESETS.filter((p) => p.file !== CORDIS_CARRIER)) {
       const strayRow = hasRow(preset.file, 'tool-cordis')
       const disabled = disabledValueOf(preset.file, 'tool-plugin-manager')
-      if (!strayRow && disabled === 'true') {
-        ok(`N11b. ${preset.file} stays unchanged`, `no tool-cordis; tool-plugin-manager disabled=true`)
+      const market = disabledValueOf(preset.file, 'tool-plugin-market')
+      if (!strayRow && disabled === 'true' && market === 'true') {
+        ok(`N11b. ${preset.file} stays unchanged`, `no tool-cordis; tool-plugin-manager disabled=true; tool-plugin-market disabled=true`)
       } else {
         bad(`N11b. ${preset.file} must NOT be differentiated`,
-          `tool-cordis=${strayRow} tool-plugin-manager disabled=${String(disabled)} want absent/true`)
+          `tool-cordis=${strayRow} tool-plugin-manager disabled=${String(disabled)} tool-plugin-market disabled=${String(market)} want absent/true/true`)
+      }
+    }
+
+    // N11c (#117 Z2, folded from #97): upstream NEVER sets `tool-plugin-market`
+    // apart from `tool-plugin-manager` — same order (manager → market), same
+    // `disabled` shape per carrier. A market row that drifts to its own value
+    // recreates the one-sided gap #97 was filed for ("manager alive, market
+    // shut"). Asserted on EVERY carrier, so a future fifth mode inherits the
+    // rule for free. The row ORDER half lives in roster-alignment A3 (which
+    // pins it against the frozen official snapshot).
+    for (const preset of ALL_PRESETS) {
+      const manager = disabledValueOf(preset.file, 'tool-plugin-manager')
+      const market = disabledValueOf(preset.file, 'tool-plugin-market')
+      if (manager !== undefined && market === manager) {
+        ok(`N11c. ${preset.file} keeps tool-plugin-market disabled identical to manager`, String(market))
+      } else {
+        bad(`N11c. ${preset.file} must set tool-plugin-market's disabled to manager's value, never its own`,
+          `manager=${String(manager)} market=${String(market)}`)
       }
     }
   }
