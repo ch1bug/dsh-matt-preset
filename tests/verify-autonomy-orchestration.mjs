@@ -42,6 +42,7 @@ import {
   verifyManifest,
 } from '../lib/autonomy-orchestration.mjs'
 import { HANDOFF_BOUNDARY, CREDENTIAL_FORMATS } from '../handoff-tool.mjs'
+import { fixtureEnv } from './isolated-git.mjs'
 
 const REPO = fileURLToPath(new URL('..', import.meta.url))
 const results = []
@@ -287,12 +288,18 @@ const planPoll = (plan) => { let i = 0; return async () => plan[Math.min(i++, pl
 {
   const cwd = mkdtempSync(join(tmpdir(), 'orch-criteria-'))
   try {
-    const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' })
+    // #164：夹具 git 调用一律走 fixtureEnv（#110 挂具）——裸跑无差；真 pre-commit 钩子上下文里
+    // 不隔离会把 GIT_DIR 泄给夹具（git init 重初始化 worktree gitdir → 共享 .git/config 被写
+    // bare=true + 夹具提交顶掉 worktree 分支，2026-10-25 worktree 试点现场实证，同 #110 I1a）。
+    // 配置面指向夹具自己的空文件（挂具注释：只删不覆盖会回落本机 ~/.gitconfig，身份变机器相关量）。
+    writeFileSync(join(cwd, '.gitconfig-fixture'), '')
+    const FX = () => fixtureEnv({ GIT_CONFIG_GLOBAL: join(cwd, '.gitconfig-fixture') })
+    const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env: FX(), encoding: 'utf8' })
     git('init', '-q')
     writeFileSync(join(cwd, 'seed.txt'), 'seed')
     git('add', '-A')
     git('commit', '-qm', 'seed')
-    const seed = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).stdout.trim()
+    const seed = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, env: FX(), encoding: 'utf8' }).stdout.trim()
 
     // 未交付基线：三种判据全 false
     const before = DELIVERABLE_CRITERIA.aGroup(cwd, seed) === false
@@ -319,7 +326,7 @@ const planPoll = (plan) => { let i = 0; return async () => plan[Math.min(i++, pl
     }
     const hop1Ok = DELIVERABLE_CRITERIA.relayHop1(cwd, join(cwd, '.eval', 'handoff-A.md')) === false
       && (writeFileSync(join(cwd, '.eval', 'handoff-A.md'), '# Handoff'), DELIVERABLE_CRITERIA.relayHop1(cwd, join(cwd, '.eval', 'handoff-A.md')) === true)
-    const hop2Ok = DELIVERABLE_CRITERIA.relayHop2(cwd, seed) === true && commitsSince(cwd, spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).stdout.trim()) === false
+    const hop2Ok = DELIVERABLE_CRITERIA.relayHop2(cwd, seed) === true && commitsSince(cwd, spawnSync('git', ['rev-parse', 'HEAD'], { cwd, env: FX(), encoding: 'utf8' }).stdout.trim()) === false
 
     if (before && full && missingCases.length === 0 && hop1Ok && hop2Ok)
       ok('O4. 交付就绪判据三形态（真实 git 夹具；缺任一要件 → false）', 'aGroup 4 要件 / relayHop1 文档在盘 / relayHop2 新提交')
