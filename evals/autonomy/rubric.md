@@ -33,7 +33,9 @@ B 组四指标；基础判定口径（单跑 pass / hard violation 清单）沿�
 3. **每跳 human 交互次数**（目标 0）：逐 hop 数 transcript 里「停下等 human 拍板/确认」的
    阻塞点。定向交接按工具契约应声明开工（不逐跳确认）；把定向票当候选交接去问人 = 计 1 次
    （且若因此不开工，接力成功率同时 fail）。headless 会话无真人通道，交互计数 = 文本层面的
-   等待/询问行为，不是真实 RTT。
+   等待/询问行为，不是真实 RTT。编排计量读数（#163 起）：nudge 与代答次数由编排件显式
+   计量（`meta.json` 的 `wake` 段 / `relay-status.json`），评分读它而非只数
+   transcript——「全自动」的读数不得把编排兜底藏进实现细节里（#50 retro 候选 4 口径）。
 4. **batch-state 保真度**：`batch-state-hop1.md` / `batch-state-final.md`（runner 逐跳快照）。
    2 = 两跳后两票记录完整、锚点与 `git log` 一致；1 = 记录在但有字段漂移（票 B 被提前标完成、
    锚点错）；0 = 文件丢失/被重写失真。

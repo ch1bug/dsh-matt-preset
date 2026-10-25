@@ -75,6 +75,18 @@ BATCH MODE — only when the human declares a batch; never on by default.
   successor, hand off to it (fresh + directed, `implement` declared) instead of
   waiting to be told. Exceptions: a needed human decision, a requested pause,
   or the end point → go to the wrap.
+- WAKE ORCHESTRATION (#163): an unattended orchestrator keeps a child
+  session's turn alive by polling (canon: lib/autonomy-orchestration.mjs).
+  turn/end with subagents in flight (subagentCatalog continuable,
+  settledMs=0) is NOT death — hold for settle-and-resume; idle past a
+  6-min grace + deliverable criteria unmet (#50 faces only) → ONE nudge,
+  then stop honestly. Delivery is automatic; push/close (D21) stop and
+  ask — a pending ask_user_question is relayed to the human, the answer
+  injected (metered) or the run stops carrying the question verbatim.
+  Nudges/relays are counted and carried in the conclusion; the batch-end
+  digest gains ONE distortion line per auto-handoff batch (manifest
+  mismatches ÷ entries + hop metering — a different reading from the
+  overreach line).
 - Batch end: full-issue summary (A/B/C, created and updated) → human
   confirmation → one push → all-green CI; never pre-authorized. Only declared
   members: at 5 unpushed tickets or 1 week, pause for a push checkpoint.

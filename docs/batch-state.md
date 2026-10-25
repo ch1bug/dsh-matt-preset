@@ -140,6 +140,24 @@ code / 证据路径）；免确认的改标/关票动作进 wrap 的自主 diges
 里带上偏好层提醒）且无偏好文件 → **一次性询问**是否按代笔纪律落盘；human 在任意场合显式
 说出授权口径而文件不存在时，提议记录一次；**其余时机不主动问**。
 
+## 批末异步审计位（#163 —— L2 批末读数面）
+
+跑过 auto-handoff 跳的批，批末 wrap 的 AUTONOMY DIGEST 段多记**一行失真率读数**
+（异步审计位；格式正典 = `lib/autonomy-orchestration.mjs` 的 `renderAuditReading`，
+本节只留指针不复述格式——与 #49 Q6「digest 不新增载体」同口径）：
+
+- **读数来源（机械面）**：编排器逐跳复核交接文档产物清单（claimed vs actual sha256，
+  `verifyManifest`）+ 该跳编排计量（nudge / 代答次数）。唤醒编排机制（轮询
+  `subagentCatalog` + 宽限 + 1 次 nudge + 应答通道）正典同在
+  `lib/autonomy-orchestration.mjs`（`runWakeLoop`），评测消费面
+  `evals/autonomy/runner.mjs` import 它、零内嵌副本。
+- **落点**：wrap 结论的 AUTONOMY DIGEST 段（`workflow-body.txt` `@@ batch-mode`）——
+  **与批末 retro 聚合面衔接不重复**：审计行进 digest，retro 候选不重复承载同一读数。
+- **分层边界**：B 侧校验命中（hop2 是否真做起手校验）是**评分面**（rubric），不进
+  digest——机械读数与评分读数分层，勿混。
+- **与越界率行的关系**：本行与 #49 的越界率行（`⚠` 段数 ÷ 自主动作总数）是**不同
+  读数、互不替代**；#135（L3）承接的是 `⚠` 段与 #49 行格式，不是本行。
+
 ## 收口记录（批次宣告前的那一步）
 
 宣告批次前先**收口**，并把这一步的读数写进状态文件（否则下一会话会把同一批冲突重新推导一遍）：

@@ -64,11 +64,16 @@ sha256 / 交接边界——边界段是 runner 内嵌副本，**mode b 启动时
 交接文档**原文**作为 hop2 子会话的第一条 prompt（模拟 handoff_tool 的 fresh + followup，
 零继承历史）→ hop2 承接票 B（slug-cli，依赖票 A 导出）。
 
-nudge 触发口径（宽限 6 分钟后交付**就绪判据**未满足才触发，最多 1 次，次数落
-`nudges.txt` 并计入每跳 human 交互）：A 组 = 提交 + `evidence/green.txt` +
+唤醒编排口径（#163 起正典 = [`lib/autonomy-orchestration.mjs`](../../lib/autonomy-orchestration.mjs)，
+runner import 消费、零内嵌副本）：宽限 6 分钟后交付**就绪判据**未满足才触发 nudge，最多
+1 次（次数落 `nudges.txt` 并计入每跳 human 交互）；子代理在飞（`subagentCatalog`
+continuable 且 settledMs=0）时 turn/end **不判死**（hold 到落定续跑，总超时兜底）。
+判据三形态照 #50：A 组 = 提交 + `evidence/green.txt` +
 `.eval/{delivery-comment,decision-gate}.md` 全在盘；hop1 = `.eval/handoff-A.md` 在盘；
-hop2 = 有新提交。判据外的「交付未齐」（如收尾问询等应答）不触发 nudge——chain3 hop2 的
-批末问询即因此被 45 分钟超时截断（见报告）。
+hop2 = 有新提交。判据外的「交付未齐」（如收尾问询等应答）不触发 nudge——chain3 hop2
+的批末问询如今走**应答通道**：runner 无应答方时把问题落 `pending-question.md` 并停在
+`awaiting-human`（不再被 45 分钟超时截断）；nudge/代答计量随 `meta.json` 的 `wake` 段
+与 `relay-status.json` 携带（批末审计读数行 = `relay-status.json` 的 `auditReading`）。
 
 产物：`.scratch/autonomy-runs/<label>/{hop1,hop2}/` + handoff-A.md 原件 +
 batch-state-{hop1,final}.md 逐跳快照 + manifest-check.json + relay-status.json。

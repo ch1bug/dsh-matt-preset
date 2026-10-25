@@ -30,7 +30,7 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 - **项目层（跨两仓）**：本工作区 = preset 仓 + 邻仓 `dsh-shell-host`；跨仓 tracker 路由、
   triage 标签映射、双域文档地图在 `.zcode/agents/`（项目作用域，git 排除，不进仓）
-- 决策与术语：`CONTEXT.md`（D1–D53）、`docs/adr/`
+- 决策与术语：`CONTEXT.md`（D1–D54）、`docs/adr/`
 - **会变的东西别抄当前值**：成员名单 / 当前读数 / 编号这类跨会话会变的东西，文档里写**现查命令**（或区间、
   指针），不抄当前值 —— 抄一份就是第二份清单，它一定会腐。现查命令的正则**照抄判据的正则**（手写简化
   版会静默漏报：#129 实测 `^ \* @slow` 比判据 `^[ \t]*\*[ \t]*@slow` 窄，标记写成 `  * @slow` 就漏掉）。

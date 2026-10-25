@@ -263,6 +263,38 @@ per-issue push rhythm.
   human confirmation → push). The child still starts with the directed
   "按交接开工 X" declaration; the human still switches in the sidebar —
   only the "please open the next ticket" round-trip is eliminated.
+- WAKE ORCHESTRATION (#163 — L2 first version = orchestrator polling;
+  #50 evidence base): an unattended batch orchestrator keeps a child
+  session's turn ALIVE by polling. The wake/deliverable/metering logic
+  is canonized in `lib/autonomy-orchestration.mjs` (single source; the
+  evaluation consumer `evals/autonomy/runner.mjs` imports it and carries
+  no embedded copy). Mechanics, all #50-measured: judge the turn by the
+  event stream's `turn/end`-after-`turn/start` seq order — NOT
+  `projections.running` (its shape lies mid-turn); while
+  `subagentCatalog` shows subagents in flight (`continuable` entries
+  with `subagentTiming.settledMs === 0`), a `turn/end` is NOT treated as
+  death — hold for the settle-and-resume (both measured chain breaks
+  were exactly this shape: the session ended its turn waiting on
+  parallel code-review subagents), the overall timeout stays the
+  backstop; once idle past a 6-minute grace with no subagent in flight
+  and the deliverable criteria unmet, ONE nudge fires (criteria faces,
+  #50 verbatim: A group = commit + evidence/green.txt +
+  .eval/{delivery-comment,decision-gate}.md; relay hop 1 = handoff doc
+  on disk; relay hop 2 = new commit — a nudge never covers a generic
+  "not done"); after MAX_NUDGE=1 it stops and reports honestly.
+  Metering is first-class (#50 retro candidate 4): every
+  orchestrator-proxied action — nudges, human relays — is counted and
+  carried in the conclusion; an autonomy reading never hides the
+  fallback inside implementation details.
+  Closing-step seam (#160: full-auto ends at the closing step): delivery
+  is automatic; push/close-ticket and other D21 external actions STOP
+  and ask. When the session asks (`ask_user_question` pending with no
+  later turn/start), the orchestrator RELAYS the question through its
+  `onAwaitingHuman` channel, injects the answer as the next prompt
+  (metered as a relay; one relay per pending question — never a
+  re-inject storm), or with no answerer stops at awaiting-human
+  carrying the question verbatim instead of letting the overall timeout
+  truncate it (the #50 chain3 break).
 - HANDOFF WRITING RULES (#159): a handoff document carries THIS SESSION'S
   facts + pointers — never a restatement of repo discipline. AGENTS.md and
   docs/agents/* are the single authority; a cached copy of a rule drifts
@@ -365,10 +397,19 @@ per-issue push rhythm.
   `⚠ 无授权依据的动作`) ÷ (total autonomous actions in the batch);
   completion quality reads the existing O5 fresh-subagent spot check
   after ticket closure; three batches' worth of these lines is the
-  production data AC③ asked for. Downstream seams, named so the readings
-  do not collide: #135 (L3 implementation) 承接 this line format — its
-  越界三步止损 rides the digest's `⚠ 无授权依据的动作` section and its
-  ticket-face preconditions read the same 批外票清单; #163's batch-end
+  production data AC③ asked for. Distortion readings (#163 batch-end
+  audit slot — async): a batch that ran auto-handoff hops records ONE
+  more line at close-out — per hop, the manifest re-verification
+  (claimed vs actual sha256) mismatches ÷ entries plus that hop's
+  orchestration metering (nudges, human relays); the line format is
+  canonized in `renderAuditReading` in `lib/autonomy-orchestration.mjs`
+  (single source — `docs/batch-state.md`「批末异步审计位」 carries the
+  slot, not a second copy of the format), and the B-side
+  verification-hit reading stays with the scoring face (rubric), not
+  the digest. Downstream seams, named so the readings
+  do not collide: #135 (L3 implementation) 承接 the #49 line format above —
+  its 越界三步止损 rides the digest's `⚠ 无授权依据的动作` section and
+  its ticket-face preconditions read the same 批外票清单; #163's batch-end
   audit slot (失真率 readings) is a DIFFERENT reading from this overreach
   line — neither replaces the other.
 - PUSH/COMMIT-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's

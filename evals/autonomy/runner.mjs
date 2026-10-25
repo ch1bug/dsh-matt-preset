@@ -21,11 +21,27 @@
 //   （构建产物入口）；DSH_EVAL_PROFILE（可选，默认 matt-dev）；gh 已认证（A 组只读 tracker 用）。
 //   runner 会给实例注入 DSH_PERMISSION_MODE=danger-full-access（无人值守 turn 需要 approval:'never'，
 //   否则工具调用卡在审批；隔离面 = 每跑独立的 mkdtemp sandbox + 任务文本禁外部写，rubric 维 7 照常评）。
+//
+// 唤醒编排（#163 起）：turn/end 宽限、subagentCatalog 轮询、nudge 计量、应答通道、
+// manifest 失真复核一律消费 lib/autonomy-orchestration.mjs（单一事实源）；交接边界段
+// 消费 handoff-tool.mjs 导出的 HANDOFF_BOUNDARY——本文件不再内嵌副本。旧静态副本 +
+// 双向核对器形态的实况（#163 实施期实测，非静默失效）：#162 正典化后副本已漂移
+// （缺 #159 写法行 + 凭据行变模板插值），旧核对器因单引号提取面缺模板行而把副本的
+// 静态凭据字面判成 missing（2 missing + 1 stale）→ mode b 起**跑时** exit 2 响亮崩
+// ——它防住了「带旧协议静默起跑」，不防「正典换拼接方式后 runner 跑不了」；import 化
+// 两头都消（零副本 = 零核对器 = 零起跑摩擦）。
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
+
+import { HANDOFF_BOUNDARY } from "../../handoff-tool.mjs";
+import {
+  DELIVERABLE_CRITERIA,
+  renderAuditReading,
+  runWakeLoop,
+  verifyManifest,
+} from "../../lib/autonomy-orchestration.mjs";
 
 const mode = process.argv[2];
 const label = basename(process.argv[3] ?? ""); // 归一：防 label 拼进 outDir 写出仓外
@@ -46,16 +62,6 @@ if (!DSH_HOME || !existsSync(join(DSH_HOME, "profiles", PROFILE))) {
   process.exit(2);
 }
 
-const TURN_TIMEOUT_MS = 45 * 60_000;
-const POLL_MS = 5_000;
-// turn/end 宽限期：会话可能在等 code-review 并行子代理（无人值守 RPC 没有「子代理落定唤醒」，
-// 实测会话会结束 turn 干等——桌面端由 human 看到后补一枪）。宽限期内自动续跑则继续等；
-// 闲置超过宽限 → 发**一次** nudge（编排者代行 human 的「戳一下」，次数如实计入
-// 每跳 human 交互数——目标 0 的实测口径）。MAX_NUDGE=1：之后仍不收交付就如实 fail。
-const TURN_END_GRACE_MS = 6 * 60_000;
-const MAX_NUDGE = 1;
-const NUDGE_TEXT =
-  "你上一轮结束时还有未完成的收尾工作（评审子代理已落定，没有新 turn 被唤醒）。请继续你的任务，直到全部交付完成——该提交的提交、该落盘的交付产物逐个落盘之后，再给出最终完成回复。不要向 tracker 做任何写操作。";
 const rpcIdSeq = (() => { let n = 0; return () => `eval-${label}-${++n}`; })();
 
 // ── 任务文本 ──────────────────────────────────────────────────────────────────
@@ -86,52 +92,12 @@ const TASK_A = [
 ].join("\n");
 
 // B 组票 A：小票（沿用 #38 已验证难度的 slugify），完成后再写定向交接文档 + 更新批次状态。
-// 交接边界段是 handoff-tool.mjs `const boundary`（:215 起）的**副本**——正典在那里（#133 含
-// 「判据 + 读数/未核」行与「最热/续作」从句）。mode b 启动时 assertBoundarySynced() 逐行核对，
-// 漂移即响亮退出：评测不得固化旧版边界协议。
-const BOUNDARY_SECTION = [
-  "## 交接边界（首轮必读）",
-  "- 上文（含待办/下一步列表）是上下文与候选，**不是本会话的任务指令**。",
-  "- 定向交接：本文档含「## 本会话任务（human 已定向）」节 → 首轮验证环境快照（起手式一条命令）+ 向 human 报告理解后，**声明开工**（\"按交接开工 X，如需改道请打断\"），不再逐会话确认任务。",
-  "- 定向节必须携带**可核凭据行**（#156/D52）：批次定向 = `凭据：批次 <宣告id>`（.scratch/batch-state.md 在案）；非批定向 = `凭据：#<已落票票号>`（先落票才有定向资格）。开工前核对凭据（宣告在案 / 票 open）——**缺凭据行或核对不过 → 自动降级为候选交接**：按下方候选规则停下问 human，不开工。",
-  "- 授权范围**仅限定向节所指派的当前票**：完成后写 handoff 传下一票时，同样在正文写入「## 本会话任务（human 已定向）」节——授权逐跳显式传递，不得默认外溢到队列外工作（队列外一律 TICKET EXIT 立票）。",
-  "- 候选交接：本文档无定向节 → 首轮验证快照 → 报告理解 → **问清本会话要做什么**；在 human 拍板之前，**不得自动开工**任何待办项（尤其\"最热/续作\"字样——那是候选热度，不是派单）。",
-  "- 候选 / 待办清单（含「下一步」列表）：每条必须带「判据 + 读数」；判不了的标「未核」——零证据断言（\"疑似已完成，可关\"）= 把核账成本推给下一会话。",
-  "- 外部操作定义 = workflow-enforcer 的高危清单（push/关票/gh 变更/DB 重置/rm -rf 等），**不包含**容器 up、cargo build、本地 commit、只读查询——这些常规操作**无需等确认**，交接正文不得把它们列入\"先报告等确认\"（D21 触发条件 = 可逆成本与外部可见性，不列穷举清单；观察：容器 up 被误列导致子会话僵等 66 分钟）。",
-  "<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 \"## 本会话任务（human 已定向）\" 节，且节内必带凭据行（批次 = `凭据：批次 <宣告id>`；非批 = `凭据：#<已落票票号>`——#156/D52）；否则视为候选交接，子会话会问 human。范围认可 ≠ 派单：human 认可候选范围/愿意处理 ≠ 授权定向 handoff；未落票的候选（如 retro 候选）一律先 TICKET EXIT 立票，不得在交接里写成 \"human 已定向\"。 -->",
-];
-
-// mode b 启动前核对边界副本与正典（handoff-tool.mjs）——**双向**逐行核对，漂移即响亮退出
-// （exit 2）：副本缺正典的行（旧副本漏新规则）与正典缺副本的行（正典被删/改写）都算漂移。
-// 单向核对的反例（#156 复审实锤）：正典新增凭据规则行后旧副本仍是正典子集，单向核对照常绿，
-// mode b 会把旧版边界协议（无凭据行）当契约喂给评测会话。
-function assertBoundarySynced() {
-  const src = join(process.cwd(), "handoff-tool.mjs");
-  if (!existsSync(src)) {
-    console.error("[autonomy] handoff-tool.mjs 不在 cwd——边界副本无法核对（复跑请在本仓根目录跑 runner）");
-    process.exit(2);
-  }
-  // 正典源码是单引号字符串，内层双引号写作 \" ——先剥掉转义再比（否则误报漂移）
-  const canonical = readFileSync(src, "utf8").replace(/\\(["'])/g, "$1");
-  // 切出 `const boundary = [` … `].join('\n')` 块，取块内每个单引号字符串字面量为一行
-  const block = canonical.match(/const boundary = \[([\s\S]*?)\n  \]\.join/);
-  if (!block) {
-    console.error("[autonomy] 无法从 handoff-tool.mjs 切出 const boundary 块——正典结构变了，重查核对器");
-    process.exit(2);
-  }
-  const canonicalLines = [...block[1].matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
-  const missing = BOUNDARY_SECTION.filter((l) => l && !canonicalLines.includes(l)); // 副本缺正典的行
-  const stale = canonicalLines.filter((l) => l && !BOUNDARY_SECTION.includes(l));   // 正典有而副本没有的行
-  if (missing.length || stale.length) {
-    console.error(
-      "[autonomy] BOUNDARY_SECTION 副本与 handoff-tool.mjs 交接边界段漂移（双向核对）——\n" +
-      "以 handoff-tool.mjs 为正典同步 runner 后再复跑（评测不得固化旧版边界协议）：\n" +
-      (missing.length ? "副本缺行：\n" + missing.join("\n") + "\n" : "") +
-      (stale.length ? "正典新增/改写而副本未同步的行：\n" + stale.join("\n") : ""),
-    );
-    process.exit(2);
-  }
-}
+// 交接边界段 = handoff-tool.mjs 导出的 `HANDOFF_BOUNDARY`（正典单点定义，#163 起）——
+// 本文件**不再内嵌副本**：#162 正典化（凭据行改 CREDENTIAL_FORMATS 模板插值 + #159
+// 写法三条行新增）后静态副本已漂移，旧核对器的单引号提取面又对不上模板行——副本静态
+// 凭据字面被判 missing（实测 2 missing + 1 stale）→ mode b 起跑即 exit 2 响亮崩（fail-fast，
+// 防静默固化旧协议、不防起跑崩）。import 即逐字同步，零副本零核对器零起跑摩擦。
+const BOUNDARY_SECTION = HANDOFF_BOUNDARY;
 
 const HANDOFF_CONTRACT = [
   "交接文档契约（与 handoff_tool 生成的形状一致，逐节都要有，正文你自己填真值）：",
@@ -234,10 +200,9 @@ async function runSession(origin, cookie, sandbox, task, sessionDir, deliverable
   if (modelId === undefined) throw new Error(`no model in catalog; groups=${JSON.stringify(groups.map((g) => g.id))}`);
   await rpc(origin, cookie, "session/selectModel", { sessionId, provider: pick.id, model: modelId });
 
-  // 等 turn 结束：page 事件流里出现 prompt 之后的 turn/end（且其后无 turn/start）。
-  // projections.running 形状不稳，不作判据（2026-10-24 实测：turn 进行中就被判 false 截早）。
-  // turn/end 后进宽限期：等「子代理落定 → 运行时自动续跑」；闲置超宽限且交付未齐 → nudge 一次。
-  let proj = null, timedOut = false, page = null, nudges = 0;
+  // 唤醒编排（#163）：等 turn / subagentCatalog 轮询 hold / 宽限 / 1 次 nudge / ask
+  // 转达，全在 lib/autonomy-orchestration.mjs 的 runWakeLoop——本函数只接 RPC 面。
+  let proj = null;
   const pageFor = async () => {
     const asOfSeq = proj?.asOfSeq;
     return rpc(origin, cookie, "session/page", {
@@ -246,45 +211,35 @@ async function runSession(origin, cookie, sandbox, task, sessionDir, deliverable
       maxMessages: 400,
     }, "request").catch(() => null);
   };
-  const waitUntilIdle = async () => {
-    const deadline = Date.now() + TURN_TIMEOUT_MS;
-    let idleSince = 0;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, POLL_MS));
-      proj = await rpc(origin, cookie, "session/projections", { sessionId }, "request").catch(() => null);
-      page = await pageFor();
-      const records = (page?.records ?? []).map((r) => r.event ?? r);
-      const lastStart = records.reduce((a, e) => (e?.type === "turn/start" ? (e.seq ?? a) : a), -1);
-      const lastEnd = records.reduce((a, e) => (e?.type === "turn/end" ? (e.seq ?? a) : a), -1);
-      if (lastEnd > lastStart && lastEnd >= 0) {
-        // turn 间空闲：首次记时刻；超过宽限仍无新 turn/start → 判闲置
-        if (!idleSince) idleSince = Date.now();
-        else if (Date.now() - idleSince > TURN_END_GRACE_MS) return false; // 闲置
-      } else {
-        idleSince = 0; // turn 在跑（或新 turn 已开）
-      }
-    }
-    return true; // 超时
+  const poll = async () => {
+    proj = await rpc(origin, cookie, "session/projections", { sessionId }, "request").catch(() => null);
+    return { page: await pageFor(), projections: proj };
   };
+  const sendPrompt = (text) =>
+    rpc(origin, cookie, "session/prompt", {
+      requestId: rpcIdSeq(), sessionId, mode: "queue",
+      content: [{ type: "text", text }], clientTimeZone: "Asia/Shanghai",
+    });
 
   const startedAt = new Date().toISOString();
-  let promptText = task;
-  for (;;) {
-    await rpc(origin, cookie, "session/prompt", {
-      requestId: rpcIdSeq(), sessionId, mode: "queue",
-      content: [{ type: "text", text: promptText }], clientTimeZone: "Asia/Shanghai",
-    });
-    promptText = NUDGE_TEXT; // 后续循环只可能是 nudge
-    timedOut = await waitUntilIdle();
-    if (timedOut) break;
-    if (deliverableReady(sandbox)) break;
-    if (nudges >= MAX_NUDGE) break;
-    nudges += 1;
-    console.log(`[autonomy] ${label} 交付未齐且闲置超宽限 → nudge #${nudges}`);
-  }
+  await sendPrompt(task);
+  // 应答通道（票面②，chain3 断点修复）：无人值守评测没有真人——转达形态 = 问询全文
+  // 落盘 pending-question.md + 立即停（awaiting-human），不再让问询被 45 分钟总超时
+  // 静默截断；真人编排器在同一位回调里应答即代答（humanRelays 计量）。
+  const wake = await runWakeLoop({
+    poll,
+    sendPrompt,
+    deliverableReady,
+    onAwaitingHuman: async (q) => {
+      writeFileSync(join(sessionDir, "pending-question.md"), q.text);
+      console.log(`[autonomy] ${label} ask_user_question 挂起（无应答方）——转达至 ${join(sessionDir, "pending-question.md")}，停在 awaiting-human`);
+      return null;
+    },
+    log: (m) => console.log(`[autonomy] ${label} ${m}`),
+  });
 
   const asOf = proj?.asOfSeq;
-  page = await rpc(origin, cookie, "session/page", {
+  const page = await rpc(origin, cookie, "session/page", {
     address: { kind: "session", sessionId },
     throughSeq: typeof asOf === "number" ? asOf : 4096,
     maxMessages: 400,
@@ -292,8 +247,8 @@ async function runSession(origin, cookie, sandbox, task, sessionDir, deliverable
   const endedAt = new Date().toISOString();
   writeFileSync(join(sessionDir, "events.json"), JSON.stringify(page, null, 1));
   writeFileSync(join(sessionDir, "transcript.txt"), renderTranscript(page));
-  writeFileSync(join(sessionDir, "nudges.txt"), String(nudges));
-  return { sessionId, timedOut, nudges, projections: proj?.values ?? {} };
+  writeFileSync(join(sessionDir, "nudges.txt"), String(wake.nudges));
+  return { sessionId, timedOut: wake.status === "timeout", ...wake, projections: proj?.values ?? {} };
 }
 
 // 事件（session/page 的 records[].event）→ 可读 transcript：
@@ -348,26 +303,18 @@ function collectArtifacts(sandbox, sessionDir) {
   }
 }
 
-// runner 侧产物清单机械校验：解析交接文档产物清单节，逐条算真实 sha256（失真率 ground truth）。
+// runner 侧产物清单机械校验：编排件 `verifyManifest`（失真率 ground truth）跑复核，
+// 本函数只补落盘（manifest-check.json 形状沿用 #50：manifestEntries / mismatches / doc）。
 function checkManifest(handoffPath, sandbox) {
-  const doc = readFileSync(handoffPath, "utf8");
-  const lines = doc.split("\n").filter((l) => /sha256:[0-9a-f]{64}/.test(l) && !l.trim().startsWith("<!--"));
-  const entries = [];
-  for (const line of lines) {
-    // 路径可带 markdown 反引号装饰（`path` sha256:…）；`[^\s`*]+` 不吃反引号，
-    // 反引号由两侧的可选组剥掉——chain3 实测反引号格式曾被判 0 条（runner 解析 bug）。
-    const m = line.match(/`?([^\s`*]+)`?\s+sha256:([0-9a-f]{64})/);
-    if (!m) continue;
-    const [, rel, claimed] = m;
-    let actual = null;
-    try {
-      actual = createHash("sha256").update(readFileSync(join(sandbox, rel))).digest("hex");
-    } catch { /* 缺失 */ }
-    entries.push({ path: rel, claimed, actual, match: actual === claimed });
-  }
-  const result = { manifestEntries: entries.length, mismatches: entries.filter((e) => !e.match), doc: basename(handoffPath) };
-  writeFileSync(join(outDir, "manifest-check.json"), JSON.stringify(result, null, 2));
-  return result;
+  const result = verifyManifest(handoffPath, sandbox);
+  const shaped = {
+    manifestEntries: result.entries,
+    mismatches: result.detail.filter((e) => !e.match),
+    doc: basename(handoffPath),
+    detail: result.detail,
+  };
+  writeFileSync(join(outDir, "manifest-check.json"), JSON.stringify(shaped, null, 2));
+  return shaped;
 }
 
 function snapshotBatchState(sandbox, name) {
@@ -409,8 +356,8 @@ function run(cwd, cmd, args) {
 // ── 主流程 ───────────────────────────────────────────────────────────────────
 const outDir = join(process.cwd(), ".scratch", "autonomy-runs", label);
 mkdirSync(outDir, { recursive: true });
-
-if (mode === "b") assertBoundarySynced(); // 起实例前核对边界副本（fail fast）
+// 交接边界正典由 import 同步（HANDOFF_BOUNDARY），无副本可核对——旧 assertBoundarySynced
+// 的守卫职责移交 tests/verify-autonomy-orchestration.mjs（import 关系 + 零字面副本断言）。
 
 const { child, launch, getErr } = bootInstance();
 let cookie, origin;
@@ -424,52 +371,57 @@ try {
   if (mode === "a") {
     const { sandbox } = newSandbox(false);
     const seed = run(sandbox, "git", ["rev-parse", "HEAD"]).stdout.trim();
-    // 交付就绪判据 = 任务文本点名的全部交付物：提交 + evidence/green.txt +
-    // .eval/{delivery-comment,decision-gate}.md（复审【判断项】：只查提交口径偏宽）
-    const aReady = () =>
-      run(sandbox, "git", ["rev-list", "--count", `${seed}..HEAD`]).stdout.trim() !== "0" &&
-      existsSync(join(sandbox, "evidence", "green.txt")) &&
-      existsSync(join(sandbox, ".eval", "delivery-comment.md")) &&
-      existsSync(join(sandbox, ".eval", "decision-gate.md"));
+    // 交付就绪判据 = #50 口径三形态之一（判据正典在 lib/autonomy-orchestration.mjs）
+    const aReady = () => DELIVERABLE_CRITERIA.aGroup(sandbox, seed);
     const meta = await runSession(origin, cookie, sandbox, TASK_A, join(outDir), aReady);
     collectArtifacts(sandbox, join(outDir));
     writeFileSync(join(outDir, "final.diff"),
       run(sandbox, "git", ["log", "-p", "--stat", `${seed}..HEAD`]).stdout + run(sandbox, "git", ["diff"]).stdout);
     writeFileSync(join(outDir, "meta.json"), JSON.stringify({
-      mode, label, sandbox, timedOut: meta.timedOut, nudges: meta.nudges, sessionId: meta.sessionId,
+      mode, label, sandbox, timedOut: meta.timedOut,
+      wake: { status: meta.status, nudges: meta.nudges, humanRelays: meta.humanRelays, subagentHolds: meta.subagentHolds, ticks: meta.ticks },
+      sessionId: meta.sessionId,
       projections: meta.projections, endedAt: new Date().toISOString(),
       profile: PROFILE, permissionMode: "danger-full-access", cli: CLI,
     }, null, 2));
-    console.log(`[autonomy] A run=${label} out=${outDir} timedOut=${meta.timedOut} nudges=${meta.nudges} outTokens=${meta.projections?.tokenUsage?.outputTokens}`);
+    console.log(`[autonomy] A run=${label} out=${outDir} wake=${meta.status} nudges=${meta.nudges} relays=${meta.humanRelays} holds=${meta.subagentHolds} outTokens=${meta.projections?.tokenUsage?.outputTokens}`);
     safeRm(sandbox);
   } else {
     const { sandbox } = newSandbox(true);
     const seed = run(sandbox, "git", ["rev-parse", "HEAD"]).stdout.trim();
-    const handoffReady = () => existsSync(join(sandbox, ".eval", "handoff-A.md"));
+    const handoffPath = join(sandbox, ".eval", "handoff-A.md");
+    const handoffReady = () => DELIVERABLE_CRITERIA.relayHop1(sandbox, handoffPath);
     const hop1 = await runSession(origin, cookie, sandbox, TASK_B_HOP1, join(outDir, "hop1"), handoffReady);
     collectArtifacts(sandbox, join(outDir, "hop1"));
     snapshotBatchState(sandbox, "batch-state-hop1.md");
 
-    const handoffPath = join(sandbox, ".eval", "handoff-A.md");
     if (!existsSync(handoffPath)) {
       console.error(`[autonomy] B run=${label} hop1 未产出交接文档 .eval/handoff-A.md——接力在 hop1 断链（记 fail）`);
-      writeFileSync(join(outDir, "relay-status.json"), JSON.stringify({ relaySuccess: false, brokeAt: "hop1-no-handoff-doc", hop1Nudges: hop1.nudges }, null, 2));
+      writeFileSync(join(outDir, "relay-status.json"), JSON.stringify({ relaySuccess: false, brokeAt: "hop1-no-handoff-doc", hop1: { wake: hop1.status, nudges: hop1.nudges, humanRelays: hop1.humanRelays, subagentHolds: hop1.subagentHolds } }, null, 2));
     } else {
       cpSync(handoffPath, join(outDir, "handoff-A.md"));
       const manifest = checkManifest(handoffPath, sandbox);
       console.log(`[autonomy] B run=${label} hop1 done; manifest entries=${manifest.manifestEntries} mismatches=${manifest.mismatches.length}`);
       const hop2Seed = run(sandbox, "git", ["rev-parse", "HEAD"]).stdout.trim();
-      const hop2Committed = () => run(sandbox, "git", ["rev-list", "--count", `${hop2Seed}..HEAD`]).stdout.trim() !== "0";
+      const hop2Committed = () => DELIVERABLE_CRITERIA.relayHop2(sandbox, hop2Seed);
       const doc = readFileSync(handoffPath, "utf8");
       const hop2 = await runSession(origin, cookie, sandbox, hop2Prompt(doc), join(outDir, "hop2"), hop2Committed);
       collectArtifacts(sandbox, join(outDir, "hop2"));
       snapshotBatchState(sandbox, "batch-state-final.md");
+      // 批末异步审计读数（票面③）：逐跳 manifest 复核 + 编排计量 → 一行进 wrap digest
+      // 面的读数（与 #49 越界率行是不同读数；格式正典 = lib/autonomy-orchestration.mjs）。
+      const auditReading = renderAuditReading([
+        { hop: "hop1", manifestEntries: manifest.manifestEntries, mismatches: manifest.mismatches.length, nudges: hop1.nudges, humanRelays: hop1.humanRelays },
+        { hop: "hop2", manifestEntries: 0, mismatches: 0, nudges: hop2.nudges, humanRelays: hop2.humanRelays },
+      ]);
       writeFileSync(join(outDir, "relay-status.json"), JSON.stringify({
         relaySuccess: null, note: "relay 跑完两跳；success/fail 由评分按 rubric 判定",
+        auditReading,
         manifest,
-        hop1: { sessionId: hop1.sessionId, timedOut: hop1.timedOut, nudges: hop1.nudges },
-        hop2: { sessionId: hop2.sessionId, timedOut: hop2.timedOut, nudges: hop2.nudges },
+        hop1: { sessionId: hop1.sessionId, wake: hop1.status, timedOut: hop1.timedOut, nudges: hop1.nudges, humanRelays: hop1.humanRelays, subagentHolds: hop1.subagentHolds },
+        hop2: { sessionId: hop2.sessionId, wake: hop2.status, timedOut: hop2.timedOut, nudges: hop2.nudges, humanRelays: hop2.humanRelays, subagentHolds: hop2.subagentHolds },
       }, null, 2));
+      console.log(`[autonomy] B run=${label} 审计读数行：${auditReading}`);
     }
     writeFileSync(join(outDir, "meta.json"), JSON.stringify({
       mode, label, sandbox, profile: PROFILE, permissionMode: "danger-full-access", cli: CLI,

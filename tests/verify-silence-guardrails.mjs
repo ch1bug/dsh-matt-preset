@@ -170,6 +170,12 @@ const NON_TOOL = new Map([
   ['set_bundle', '同上（plugin_manager 动作）'],
   ['list_plugins', '同上（plugin_manager 只读动作）'],
   ['list_bundles', '同上（plugin_manager 只读动作）'],
+  // #163：正文 WAKE ORCHESTRATION 条叙述应答通道时指名的**运行时事件**（编排件
+  // pendingHumanQuestion 的检测判据，chain3 实测形态）——它是编排器轮询面读到的
+  // 事件，不是本 preset 提供的模型工具；其判据行为由
+  // tests/verify-autonomy-orchestration.mjs O2c/O3e 钉（词形从提取面消失 →
+  // 白名单陈旧 → SG9 红，防腐口径同上）。
+  ['ask_user_question', '#163 唤醒编排检测的运行时事件名（编排件 pendingHumanQuestion 判据），非 preset 模型工具；行为由 verify-autonomy-orchestration O2c/O3e 钉'],
 ])
 
 /** persona prefix 文本（agent.cordis.yml 的 `prefix: |` 块）——B3 的 persona 提取面。 */
