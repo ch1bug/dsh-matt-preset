@@ -233,7 +233,7 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
 它只是**正交例外轴的可见标记**（插队输入判据见 #136），不改变 frontier 的成员判定，
 也不改变排序（仍按票号升序）。
 
-它只走 **GitHub 原生依赖边**（`.../issues/<n>/dependencies/blocked_by`）。两个读图陷阱：
+它只走 **GitHub 原生依赖边**（`.../issues/<n>/dependencies/blocked_by`）。读图陷阱（逐条并列，新增追加在后）：
 
 - `issue_dependencies_summary.blocked_by` **只计 open 阻塞**——已关闭的阻塞（历史边）读数是 0，
   但边仍在（看 `total_blocked_by`）。2026-10-16 曾据此把"已满足的历史边"误判成"缺边"。
@@ -245,6 +245,9 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
 - `gh issue view <n> --json blockedBy` **读空数组（假）**：2026-10-17 实测 #57 / #58 / #59 / #60 全返回 `[]`，
   同一时刻 REST `.../dependencies/blocked_by` 有值（`#59 ← [56,57,58]`）。查边一律走上面那条 REST 命令——
   别把空数组读成"边已掉"（gh 2.96 实测）。
+- **计数陷阱**：`gh issue list` **默认 `--limit 30`** —— 2026-10-19 实测 open 51 张，裸命令
+  `gh issue list --state open --json number --jq length` 只回 30，差点被判成"环境快照不符"而停工。
+  计数一律加 `--limit 200`（或 `gh api --paginate`）；裸命令回的 30 是**分页**，不是事实。
 
 纯逻辑（label 命中 / open 阻塞 / assignee / 大小写 state）由 `tests/verify-frontier.mjs`
 离线断言；CLI 那半截需要 PATH 上有已登录的 `gh`，任何 gh 失败都响亮退出——绝不把
