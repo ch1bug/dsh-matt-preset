@@ -105,7 +105,7 @@
 
 ## 3. standards 源（本仓）
 
-- [AGENTS.md](../AGENTS.md)（导航 + 沟通语言）、[CONTEXT.md](../CONTEXT.md)（决策 D1–D51 与术语）、
+- [AGENTS.md](../AGENTS.md)（导航 + 沟通语言）、[CONTEXT.md](../CONTEXT.md)（决策 D1–D53 与术语）、
   [docs/adr/](adr/)（尤其 0010 workflow-core、0011 profiles、0012 profiles-2）、[README.md](../README.md)（验证段 / 组件表）
 - 邻近文件的既有风格：`tests/*.mjs`（results 数组 + `ok()`/`bad()` + loud skip + 非零退出）、
   `bin/install.mjs` + `lib/*.mjs`、`workflow-core.mjs` 的重"为什么"文档头注

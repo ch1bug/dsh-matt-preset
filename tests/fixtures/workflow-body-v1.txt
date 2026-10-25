@@ -182,6 +182,34 @@ per-issue push rhythm.
     Comment-closing is still an external action (D21) — the authorization covers
     the DECLARED members only and NEVER carries into another batch.
   - PUSH: once, at the batch end, through the summary gate. Never per ticket.
+- STYLE PREFERENCE LAYER（风格偏好层, #49 — user preference, NOT a fifth
+  authorization column）: the confirmation TIMING of out-of-batch Bucket-B
+  tickets rides a user style preference file OUTSIDE the repo
+  (`<DSH_HOME>/batch-style-preference.md`; its SHAPE lives in
+  `docs/batch-state.md`「风格偏好层」— the single source for the shape —
+  and the tier ENUMERATION is pinned in `workflow-enforcer.mjs`
+  `STYLE_PREFERENCE.tiers`; its VALUES never enter the repo). No preference
+  file → the `保守` tier (the default: everything stays as declared —
+  in-batch four columns as declared, out-of-batch tickets confirmed one by
+  one). `标准` = `保守` + tickets registered in the batch state's 批外票清单
+  may be re-labelled and closed without per-ticket confirmation (the three
+  evidence elements required); registration is the HUMAN's call (at the
+  declaration, or an explicit later addition) — the agent never registers a
+  ticket into 批外票清单 itself, and a self-registered ticket has NO
+  authorization basis.
+  The tier names are an enumeration of exactly two (`保守`/`标准`); per-item
+  exceptions ride `加:` (allow beyond the tier) / `减:` (deny within it),
+  each with a one-line reason and a date. BOTH tiers exclude push. Like
+  in-batch pre-authorization, the preference changes WHEN a confirmation
+  happens, never the NATURE of the action — out-of-batch closing is still
+  an external action (D21). The preference file is HUMAN-write-only: the
+  agent may transcribe exactly the version the human approved VERBATIM,
+  then echo the written file in full + its absolute path, and treat it as
+  read-only from then on (Q4; same discipline as D51's "only touch what you
+  yourself created"). First batch declaration with no preference file →
+  ask ONCE whether to record it (the same `batchDeclare` face, zero new
+  hooks); a human stating an authorization preference anywhere with no file
+  on record → propose recording it once; never ask otherwise (Q5).
 - CLOSE-OUT STEP — BEFORE A BATCH IS DECLARED（收口步）: classify the open
   backlog (series / needs-triage / ready-for-human / standalone), MERGE the
   same-family tickets that one session or one edit would close together, and
@@ -322,6 +350,27 @@ per-issue push rhythm.
   missing any is BLOCKED, not done —
   this adds evidence, it does NOT relax the CI confirmation (DONE and
   the batch-end gate keep their full force).
+- AUTONOMY DIGEST (#49 Q6 — no new artifact, the wrap conclusion IS the
+  carrier): the wrap conclusion carries one fixed-format digest line per
+  autonomous action taken outside the declared batch authorization
+  (Bucket B / preference-tier moves):
+  `自主 <动作> · #<票号> · commit <sha> · 证据: <命令> → exit <code> · <输出路径>`.
+  In-batch actions are NOT re-copied into the digest — the batch-state
+  Progress rows already carry the three evidence elements; one pointer
+  line covers the batch. A digest line missing its evidence is marked
+  `未验证` and ESCALATED to an exception (D47), and a separate
+  `⚠ 无授权依据的动作` section lists every autonomous action that had no
+  authorization basis. Overreach/quality readings (#49 Q7 — no evaluation
+  rig): at each batch close-out, record one line — (count of
+  `⚠ 无授权依据的动作`) ÷ (total autonomous actions in the batch);
+  completion quality reads the existing O5 fresh-subagent spot check
+  after ticket closure; three batches' worth of these lines is the
+  production data AC③ asked for. Downstream seams, named so the readings
+  do not collide: #135 (L3 implementation) 承接 this line format — its
+  越界三步止损 rides the digest's `⚠ 无授权依据的动作` section and its
+  ticket-face preconditions read the same 批外票清单; #163's batch-end
+  audit slot (失真率 readings) is a DIFFERENT reading from this overreach
+  line — neither replaces the other.
 - PUSH/COMMIT-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
   richest retro material is the batch itself: many tickets, many
   sessions, usually rework and handoff loss. Two obligations, keyed on a

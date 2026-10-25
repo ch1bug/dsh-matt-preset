@@ -116,7 +116,7 @@ dsh-matt-preset/
 ├── sandcastle/                   # 沙箱批跑（opt-in）：模板 + 接入文档
 │   ├── README.md
 │   └── templates/                # Dockerfile / dsh.ts adapter / audit-ticket / run-ticket / night-run / lib / worker-context
-├── CONTEXT.md                    # 术语表 + 决策（D1–D51）
+├── CONTEXT.md                    # 术语表 + 决策（D1–D53）
 ├── AGENTS.md                     # steering 入口（导航指针）
 ├── docs/adr/                     # 架构决策记录
 ├── docs/agents/                  # issue-tracker / triage-labels / domain 约定

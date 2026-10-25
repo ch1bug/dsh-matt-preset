@@ -159,7 +159,27 @@ face is the text layer.
   `` `retro: done @ <commit>` completion marker `` at the batch end). Its shape is
   `docs/batch-state.md` — copy that template, do not invent fields. The `retro:`
   line is the **agent's** to write; this plugin only reads the marker and is
-  reminder-only (it writes no file).
+  reminder-only (it writes no file). The same reminder carries the
+  **style-preference layer** (#49): the confirmation timing of out-of-batch
+  Bucket-B tickets rides a user preference file OUTSIDE the repo
+  (`<DSH_HOME>/batch-style-preference.md`; shape in `docs/batch-state.md`
+  「风格偏好层」; values never enter the repo). No file → the `保守` tier
+  (default: everything stays as declared, out-of-batch tickets confirmed one
+  by one); `标准` = `保守` + tickets registered in the batch state's
+  批外票清单 may be re-labelled and closed without per-ticket confirmation
+  (three evidence elements required; registration is the HUMAN's call — the
+  agent never registers a ticket into it itself, a self-registered ticket
+  has no authorization basis). Exactly two tiers (`保守`/`标准`,
+  `STYLE_PREFERENCE.tiers`), both exclude push; the preference changes WHEN a
+  confirmation happens, never the NATURE of the action. The file is
+  HUMAN-write-only: the agent transcribes exactly the version the human
+  approved verbatim, echoes the written file in full + its absolute path, then
+  treats it as read-only. First batch declaration with no preference file →
+  ask ONCE whether to record it; a human stating an authorization preference
+  anywhere with no file on record → propose recording it once; never ask
+  otherwise. The plugin never reads or writes that file — the preference
+  text rides the batch-declaration reminder because its first trigger IS the
+  first batch declaration (Q5, zero new hooks).
 - A command that would **recursively delete a home directory** (#113, structured
   — see 判定面 below) gets a one-shot **Home-delete candidate** `⚠` reminder on
   the next assembly (consumed after firing): the target may only ever be a path
@@ -218,6 +238,7 @@ a reminder the model is supposed to obey.
 | **票生命周期 nudge**（关票 fresh-subagent 抽查 O5 / 建票 D20，`TICKET_LIFECYCLE`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（#82）：关票 = 命令位置词串 `gh issue close`；**关票的 API 形态**仍走 shell 的 `command` 字段，但其判定面**显式声明**为 `gh api`（命令位置 + 子命令）+ 声明的方法 flag（`-X`/`--method` = `PATCH`）+ 声明的载荷 flag（`-f`/`--raw-field`、`-F`/`--field` = `state=closed`）+ `issues/<n>` 路径 token；建票 = 命令位置词串 `gh issue create`。`write`/`edit`/`str_replace_editor` 正文、`echo`、commit 消息、`--grep`、`--body`/`--title` 里提到这些命令**永不** arm；`gh api` 的其余面显式不覆盖（`--input -` 读 stdin、非 `PATCH` 方法、其它字段、紧跟未声明 flag 的 endpoint——那个 token 可能是该 flag 的值——交 #71 事实探测） |
 | **#71 push 触发面**（retro：每票落盘 / 批末聚合，`RETRO_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**：push = 命令位置词串 `git push`（`RETRO_TRIGGER.push.words`），判定输入**恒为** `(toolName, argv)`；工具层 + 命令层都经 `matchesSurface`，与 ⚠ 门的 push 追随行**同一次判定、同一个声明**（两者不可能分歧）。**#121 commit 面**：`RETRO_TRIGGER.commit.words` = 命令位置词串 `git commit`，同一结构化核、同一个 `matchesSurface`；它**只 arm 落盘面**（聚合面仍只由真 push 驱动），consume 加「本会话在 `.scratch/retro/` 下尚无 `*-<session token>.md`」的**纯存在性** guard（token = `session-` 之后那 8 位 hex，**不是**整个 id 的前 8 位；完整 id 也接受；同会话多次 commit 含 amend 只提醒一次，**不解析** `batch-state.md`）。**声明边界（与 push 同核）**：选项在前的命令位置（`git -C <dir> commit` / `git -c k=v commit`）不覆盖；`git commit --dry-run/--help` 也命中（词串语义，成本一次本地提醒）。**文本事件层永不 arm push**（`assistant/message` / `user/message` / `text-chunks` / `agent/inbox/spliced` 结构上无动作字段；会话/思考里讨论"推送/push"、retro 文档、handoff 正文一律不触发——宁严勿宽）。**批宣告是唯一允许文本面的面**：`RETRO_TRIGGER.batchDeclare` 的关键词组（`攒批`/`批量模式`/`系列处理`/`大系列`/`这批攒批`）——宣告是**人说的话**，根本没有工具调用，文本层是它唯一可能的判定面（与 `BATCH_CLOSE_KEYWORDS` 同构），读成两个**存在性** marker——`RETRO_TRIGGER.retroMarker`（`retro:`）与 `RETRO_TRIGGER.aggregatedMarker`（`.scratch/retro/.aggregated`），都只判**存在性**、不解析任何表格/内容，两者组合决定落盘 vs 聚合（`retro:` 且无 `.aggregated` → 聚合；`retro:` 且有 `.aggregated` → 落盘，不聚合但不丢素材）。**探针失败是独立的响亮路径**：读 `` `.scratch/batch-state.md` `` 失败（非 `ENOENT`）走 `Batch-state probe FAILED` 节（**无 `⚠` 前缀**），绝不静默降级成"无 marker"。**声明不覆盖**：PTY 分片写（`pty_send`）、经脚本/`xargs`/`node deploy.mjs` 间接 push、其它工作区工具面（`write`/`edit` 无动作字段）一律不触发——与 #79 declared-not-covered 同口径，交**事实探测**兜底（`git log origin/<branch>..HEAD` / `git status -sb`），本插件**不为它长模糊匹配** |
 | **#113 home-delete 提醒面**（`HOME_DELETE_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（删除动词半边走 `matchesSurface`，与 ⚠ 门同一匹配器，故 `sudo rm …`、`cd x && rm …`、`bash -c "rm …"` 与其它面一致地免费覆盖），但判定是**组合**而非更长的词表：**删除动词**（`Remove-Item` / `ri` / `rm` / `rmdir` / `del` / `erase` / `rd`，取命令位置、经 `commandToken` 归一化）**且**该命令 argv 里有**home 形态目标**（`$env:DSH_HOME` / `$HOME` / `~/.dsh` / `%USERPROFILE%\.dsh`）。事故命令 `Remove-Item -Recurse -Force $env:DSH_HOME` 对旧 ⚠ 门**完全隐形**（cmdlet 形态不含任何门词），故新增此面。**两半必须落在同一条命令段**，这正是负例的判据：`echo "Remove-Item -Recurse $env:DSH_HOME"` 里 `echo` 占**命令位置**（删除动词只出现在 `echo` 的**参数**里，不是命令位置），`rm -rf ./dist` / `Remove-Item ./build` 无 home 目标 —— **均不触发**；`write`/`edit`/`pty_send` 正文结构上永不 arm。⚠ **token 口径**：本面读的是 `shellWords` 产出的 token，而该分词器（与 ⚠ 门共用）会**丢掉未加引号的 `$`**（`shellWords` 明文行为）——未加引号的 `$env:DSH_HOME` 到达时是 `env:DSH_HOME`、`$HOME` 是 `HOME`，加引号的 `"$HOME\.dsh"` 才保留 `$`；故 predicates 同时接受 shell 拼写与其分词残留（实测：只按 shell 拼写匹配会漏掉**全部未加引号形态**，正是事故命令那条）。目标里的 `$env:TEMP` / `%TEMP%` 之类**故意不匹配**（那是**安全**目标，提醒它等于教模型忽略本提醒）——变量名按**整 token** 匹配（`DSH_HOME`/`HOME`/`USERPROFILE`），不是"任意 `$env:` 展开"（第一版正是后者，实测 `$env:TEMP` 会触发）。**声明不覆盖**：选项在前的命令位置、PTY 分片、脚本间接触发一律不触发——与 #79 declared-not-covered 同口径，**不为它长模糊匹配** |
+| **#49 风格偏好层**（`STYLE_PREFERENCE`） | —（**零新判定面**：偏好层不是 tool/call 面，其提醒**复用** `RETRO_TRIGGER.batchDeclare` 的文本关键词面——首次触发 = 首次建批，Q5 拍板零新钩子；偏好文件在 `<DSH_HOME>` 仓外，本插件**从不读也从不写**它，只把契约写进批宣告注入） | 声明元素两枚：`tiers` = 恰好两档 `保守`/`标准`（**常量侧封闭**——改 `tiers` 数组加/减档 V37b 即红；**载体侧加未知第三档 declare not covered**，自由文本不可负向枚举，D16b 判据 ⇒ 交 code review）、`file` = `<DSH_HOME>/batch-style-preference.md`（**值不入库**；形状唯一事实源在 `docs/batch-state.md`「风格偏好层」）。两档都**不含 push**（push 预授权属 L3 门模型改造：决策 #51 已拍板、实现 #135）；偏好只改**确认时机**、不改动作性质（out-of-batch 关票仍是外部动作 D21）。写入权 human 独占：agent 只可代笔 human **逐字认可**的那一版，落盘后**回显全文 + 绝对路径、此后只读**。**登记写权同样在 human**：批外票清单由 human 批宣告时拍板登记（或事后显式追加），agent 不得自行登记——自行登记的票没有授权依据（进 digest `⚠` 段）。档名与例外（`加:`/`减:` 每条带一行理由与日期）由 agent 读写文件时遵守，enforcer 侧无第二份清单——本行只锚声明元素与契约句（V37c 多载体钉住） |
 | `write` / `edit` / `str_replace_editor` / `pty_send` / `pty_open` / `run_code` / 其它工作区工具面 | — | **显式不覆盖**：带正文、分片写入或**程序正文**的参数永不命中，不用模糊匹配弥补（PTC 下经 SDK 的嵌套调用是真实 `tool/call`，仍按该调用的动作字段照常判定） |
 
 Which flag values are executed is **declared** (`EXEC_FLAGS`: shell `-c`,
@@ -291,6 +312,27 @@ to cover them.
 > batch-close superset and the English waiting phrases hit the same arming),
 > and the negative (ordinary
 > progress text stays silent).
+> V37 pins #49's style-preference layer: the batch-declaration reminder
+> carries the preference contract on the RENDERED text, judged INSIDE the
+> injected section only (two tiers 保守/标准, both excluding push,
+> human-write-only with the verbatim-transcribe + echo-back-then-read-only
+> discipline, registration as the human's call, ask-once at the first batch
+> declaration — a drifted sentence inside the reminder reddens even though
+> the body carries similar wording). The tier enumeration is closed on the
+> CONSTANT: editing `STYLE_PREFERENCE.tiers` — a tier added or dropped —
+> reddens V37b (measured). Carrier texts are pinned for PRESENCE only (both
+> tier names, the whole paragraph, the registration rule); an UNKNOWN third
+> tier name added to a carrier is DECLARED NOT COVERED — free text cannot be
+> negatively enumerated (D16b), that side is code review's. The 判定面 row
+> above documents every declared element (the V23c/V34c discipline), and
+> every carrier that states the contract — the body's `@@ batch-mode`,
+> `docs/batch-state.md`「风格偏好层」, this doc, and CONTEXT D53 — stays
+> aligned (the V35h discipline). V37d pins the wrap
+> digest format (#49 Q6) in the body: the fixed line
+> `自主 <动作> · #<票号> · commit <sha> · 证据: <命令> → exit <code> · <输出路径>`,
+> the in-batch pointer rule (Progress rows already carry the three elements),
+> the `未验证` escalation, the separate `⚠ 无授权依据的动作` section, and the
+> #135/#163 downstream seams (distinct readings, no collision).
 
 ### Per-project override: `workflow-gates.yml`
 

@@ -4,8 +4,9 @@
  * ticket-lifecycle nudge arming added by #82 is V21–V23, V24 pins the doc's
  * 「What it injects」+ config block against `INJECTIONS`, the push-triggered
  * retro added by #71 is V25–V31, the home-delete reminder added by #113 is
- * V32–V34, the commit-armed landing added by #121 is V35, and the goal-sync
- * reminder added by #155 is V36).
+ * V32–V34, the commit-armed landing added by #121 is V35, the goal-sync
+ * reminder added by #155 is V36, and the style-preference layer riding the
+ * batch-declaration reminder (#49) is V37).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -2012,6 +2013,145 @@ const v36d = await render()
 if (!v36d.includes('GOAL STATE CHECK')) ok('V36d. ordinary progress text → no goal-sync reminder')
 else bad('V36d. goal-sync reminder leaked on benign text', v36d.slice(-200))
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── V37 (#49): the STYLE-PREFERENCE layer riding the batch-declaration
+// reminder. Q5's decision is ZERO NEW HOOKS: the preference contract rides
+// the SAME text-face reminder V28 tests, so its first trigger IS the first
+// batch declaration. What V37 pins:
+//   (a) the RENDERED declaration reminder carries the contract (V28d's
+//       discipline: read the rendered text, not the module source — a
+//       source-only assertion goes green on a dead branch or a comment);
+//   (b) the tier enumeration is EXACTLY the two declared in
+//       `STYLE_PREFERENCE.tiers` — a third tier or a dropped one reddens —
+//       and the 判定面 row documents every declared element (V23c/V34c);
+//   (c) every carrier that states the contract stays aligned (V35h's
+//       discipline): body `@@ batch-mode`, docs/batch-state.md「风格偏好层」,
+//       this doc, CONTEXT D53;
+//   (d) the wrap digest format (#49 Q6) is written in the body: the fixed
+//       line, the in-batch pointer rule, the 未验证 escalation, and the
+//       separate ⚠ 无授权依据的动作 section.
+// Non-vacuous: a sentence drifted OUT OF THE INJECTED SECTION reddens (a) —
+// judged inside the section precisely so the body cannot back it; editing
+// `STYLE_PREFERENCE.tiers` (a third name added, or one dropped) reddens (b,
+// measured); deleting the contract sentence from any carrier reddens (c);
+// deleting the digest block from the body reddens (d). DECLARED NOT COVERED
+// (D16b): an UNKNOWN third tier name ADDED to a carrier text (doc row /
+// body / batch-state) — carrier assertions pin PRESENCE, and free text
+// cannot be negatively enumerated, so no mechanical input reliably reddens
+// that direction; it is code review's to catch, while the closed
+// enumeration is pinned where it IS decidable — the constant (V37b).
+import { STYLE_PREFERENCE } from '../workflow-enforcer.mjs'
+
+// (a) a fresh declaration session → the rendered reminder carries the contract.
+//    Judged INSIDE the injected section only (from its 'Batch declared'
+//    anchor, which neither the body nor docs/batch-state.md carries — grep
+//    verified): the real matt mount renders the body's STYLE PREFERENCE
+//    LAYER paragraph in the same prompt, so a WHOLE-prompt contains would
+//    let the body back a sentence drifted out of the REMINDER (review
+//    finding: "dropped from the reminder reddens" was overclaimed while
+//    judged over the full prompt). Narrowing the judgement face makes the
+//    claim true: a drifted sentence inside the reminder reddens even when
+//    the body still carries similar wording.
+const styleRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-style-')))
+const handleStyle = await ctx.agents.create({
+  sessionId: SessionId('enforcer-style-pref'),
+  meta: { cwd: styleRoot },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcersmoke'),
+})
+await emitSessionEvent(ctx, handleStyle.agent.session, {
+  type: 'user/message',
+  data: { turn: 1, step: 401, source: { kind: 'user' }, message: { role: 'user', content: [{ type: 'text', text: '这批攒批，按偏好层口径开工' }] } },
+})
+const v37aFull = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(handleStyle.agent, signal)))
+const v37aAnchor = v37aFull.indexOf(RETRO_MARK.declare)
+const v37a = v37aAnchor >= 0 ? v37aFull.slice(v37aAnchor) : ''
+const V37A_CONTRACT = [
+  ['锚：Style preference', 'Style preference (#49)'],
+  ['档名 保守', '保守'],
+  ['档名 标准', '标准'],
+  ['登记面 批外票清单', '批外票清单'],
+  ['登记写权 human（agent 不得自行登记）', 'never registers a ticket'],
+  ['两档不含 push', 'both exclude push'],
+  ['只改时机不改性质', 'never the NATURE of the action'],
+  ['逐字代笔', 'verbatim'],
+  ['回显全文', 'echo the written file in full'],
+  ['此后只读', 'read-only'],
+  ['首次一次性询问', 'ask ONCE'],
+]
+const v37aMissing = V37A_CONTRACT.filter(([, s]) => !v37a.includes(s)).map(([n]) => n)
+if (v37aMissing.length === 0 && declareText(v37aFull) && v37aAnchor >= 0)
+  ok('V37a. declaration reminder carries the #49 preference contract (rendered, judged INSIDE the injected section)', `${V37A_CONTRACT.length} 条契约句`)
+else bad('V37a. preference contract missing from the rendered reminder',
+  `anchor: ${v37aAnchor >= 0 ? 'ok' : 'MISSING'} | missing: ${v37aMissing.join(', ') || '(declare text absent?)'}`)
+
+// (b) the tier enumeration is EXACTLY 保守/标准, and the 判定面 row documents
+// every declared element (the V23c/V34c doc↔code guard).
+const tiers = STYLE_PREFERENCE?.tiers
+const tiersOk = Array.isArray(tiers) && tiers.length === 2 && tiers[0] === '保守' && tiers[1] === '标准'
+const fileOk = typeof STYLE_PREFERENCE?.file === 'string' && STYLE_PREFERENCE.file.startsWith('<DSH_HOME>/')
+const docStyleRow = readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8')
+  .split('\n').find(l => l.includes('STYLE_PREFERENCE') && l.trimStart().startsWith('|')) ?? ''
+const styleElements = [...(tiers ?? []), ...(fileOk ? [STYLE_PREFERENCE.file] : [])]
+const styleElemsMissingInDoc = styleElements.filter(s => !docStyleRow.includes(s))
+if (tiersOk && fileOk && docStyleRow !== '' && styleElemsMissingInDoc.length === 0)
+  ok('V37b. tier enumeration closed ON THE CONSTANT (edit tiers → red, measured) + file anchor outside the repo; 判定面 row documents every element',
+    `tiers=${JSON.stringify(tiers)} file=${JSON.stringify(STYLE_PREFERENCE.file)}；载体侧加未知第三档 = declared not covered（D16b）`)
+else bad('V37b. style-preference declaration drift',
+  `tiers=${JSON.stringify(tiers)} fileOk=${fileOk} row=${docStyleRow !== '' ? 'ok' : 'MISSING'} missing: ${styleElemsMissingInDoc.join(', ') || '—'}`)
+
+// (c) every carrier that states the contract stays aligned (V35h discipline).
+const styleDoc = {
+  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+  batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
+  enforcer: readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8'),
+  context: readFileSync(new URL('../CONTEXT.md', import.meta.url), 'utf8'),
+}
+const STYLE_CARRIERS = [
+  ['body: STYLE PREFERENCE 条', /STYLE PREFERENCE LAYER/.test(styleDoc.body)],
+  ['body: 无文件按保守（缺省）', /No preference\s+file → the `保守` tier/.test(styleDoc.body)],
+  ['body: 标准 档名句式', /`标准` = `保守` \+/.test(styleDoc.body)],
+  ['body: 偏好只改时机不改性质', /changes WHEN a confirmation\s+happens, never the NATURE/.test(styleDoc.body)],
+  ['body: 档名枚举锚 STYLE_PREFERENCE.tiers', /STYLE_PREFERENCE\.tiers/.test(styleDoc.body)],
+  ['body: human 独占写权（verbatim + 只读）', /HUMAN-write-only/.test(styleDoc.body) && /read-only from then on/.test(styleDoc.body)],
+  ['body: 登记写权 human（agent 不得自行登记）', /registration is the HUMAN's call/.test(styleDoc.body) && /never registers a\s+ticket/.test(styleDoc.body)],
+  ['body: 首次建批一次性询问', /ask ONCE whether to record it/.test(styleDoc.body)],
+  ['body: 两档不含 push', /BOTH tiers exclude push/.test(styleDoc.body)],
+  ['body: #135/#163 下游衔接（不同读数不互替）', /#135/.test(styleDoc.body) && /#163/.test(styleDoc.body)],
+  ['batch-state: 风格偏好层节', /## 风格偏好层/.test(styleDoc.batchState)],
+  ['batch-state: 档名行两档', /档: 保守 \| 标准/.test(styleDoc.batchState)],
+  ['batch-state: 加/减例外行', /加:/.test(styleDoc.batchState) && /减:/.test(styleDoc.batchState)],
+  ['batch-state: 两档都不含 push（指向 #135）', /两档都不含 push/.test(styleDoc.batchState) && /#135/.test(styleDoc.batchState)],
+  ['batch-state: 批外票清单登记位（模板行）', /批外票清单/.test(styleDoc.batchState)],
+  ['batch-state: 登记写权 human', /登记写权在 human/.test(styleDoc.batchState) && /agent 不得[\s\S]*?自行登记/.test(styleDoc.batchState)],
+  ['batch-state: human 独占写权 + 回显', /human 独占写权/.test(styleDoc.batchState) && /回显写入后的全文 \+ 绝对路径/.test(styleDoc.batchState)],
+  ['enforcer doc: 批宣告条含偏好契约', /style-preference layer\*\* \(#49\)/.test(styleDoc.enforcer) && /批外票清单/.test(styleDoc.enforcer)],
+  ['enforcer doc: 登记写权 human', /registration is the HUMAN's call/.test(styleDoc.enforcer) && /登记写权同样在 human/.test(styleDoc.enforcer)],
+  ['CONTEXT: D53 记录本决策', /D53/.test(styleDoc.context) && /风格偏好层/.test(styleDoc.context)],
+  ['CONTEXT: D53 指针按落地日刷新（#163/#135）', /#163/.test(styleDoc.context) && /#135/.test(styleDoc.context)],
+]
+const styleCarriersMissing = STYLE_CARRIERS.filter(([, hit]) => !hit).map(([n]) => n)
+if (styleCarriersMissing.length === 0)
+  ok('V37c. preference contract written down in all four carriers (body / batch-state / enforcer doc / CONTEXT D53)', `${STYLE_CARRIERS.length} 条`)
+else bad('V37c. style-preference carrier drift', `missing: ${styleCarriersMissing.join(' / ')}`)
+
+// (d) the wrap digest format (#49 Q6) — the body is its single source; the
+// CONTEXT decision names it. docs/batch-state.md carries a POINTER only
+// (its 批外票清单 paragraph), never a second copy of the format.
+const DIGEST_LINE = /自主 <动作> · #<票号> · commit <sha> · 证据: <命令> → exit <code> · <输出路径>/
+const DIGEST_CARRIERS = [
+  ['body: digest 行格式', DIGEST_LINE.test(styleDoc.body)],
+  ['body: 批内不重抄（指针）', /In-batch actions are NOT re-copied into the digest/.test(styleDoc.body)],
+  ['body: 缺证据 → 未验证 + 升格异常（D47）', /未验证/.test(styleDoc.body) && /ESCALATED to an exception/.test(styleDoc.body)],
+  ['body: ⚠ 无授权依据的动作 段', /⚠ 无授权依据的动作/.test(styleDoc.body)],
+  ['body: 越界读数口径（Q7 每批一行）', /÷ \(total autonomous actions in the batch\)/.test(styleDoc.body)],
+  ['CONTEXT D53: digest 口径', /自主 <动作>/.test(styleDoc.context) && /无授权依据的动作/.test(styleDoc.context)],
+]
+const digestMissing = DIGEST_CARRIERS.filter(([, hit]) => !hit).map(([n]) => n)
+if (digestMissing.length === 0)
+  ok('V37d. wrap digest format pinned in the body + named by CONTEXT D53', `${DIGEST_CARRIERS.length} 条`)
+else bad('V37d. digest format drift', `missing: ${digestMissing.join(' / ')}`)
+
 // Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
@@ -2027,6 +2167,7 @@ await handleNM.dispose()
 await handleBE2.dispose()
 await handleDecl2.dispose()
 await handleDecl.dispose()
+await handleStyle.dispose()
 await handleBE.dispose()
 // #77: 临时根统一收尾 —— 失败全部保留现场并逐个响亮打印绝对路径，成功才全部清除。
 // 清单来自**创建即登记**的 `tmpRoots`（不再手抄；先前正是手抄漏了 batchRoot 那一项）。
@@ -2040,6 +2181,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V36) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V37) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

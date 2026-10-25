@@ -427,6 +427,32 @@ export const HOME_DELETE_TRIGGER = {
   targets: ['$env:DSH_HOME', '$HOME', '~/.dsh', '%USERPROFILE%\\.dsh'],
 }
 
+/** Style-preference declaration (#49): the batch style preference layer
+ * (风格偏好层) that decides the confirmation TIMING of out-of-batch
+ * Bucket-B tickets. TWO tiers, an enumeration of exactly 保守 / 标准 — never
+ * a third, never push in either (push pre-authorization belongs to the L3
+ * gate-model work: decision #51 closed, implementation #135).
+ *
+ * The enforcer NEVER reads or writes the preference file: it is
+ * reminder-only, the file lives OUTSIDE the repo (`<DSH_HOME>`), and its
+ * VALUES never enter the repo (AGENTS.md「个人 / 本机环境串不进仓」). The
+ * tier names have their single source HERE (`STYLE_PREFERENCE.tiers`):
+ * editing the array — a tier added or dropped — reddens V37b (measured). The
+ * file's SHAPE (档名行 + `加:`/`减:` 行，每条带理由与日期) lives in
+ * `docs/batch-state.md`「风格偏好层」— the single source for THAT.
+ *
+ * DECLARED NOT COVERED (D16b): an UNKNOWN third tier name ADDED to a carrier
+ * text (the doc's 判定面 row, the body, the injected reminder) does NOT
+ * redden — carrier assertions pin presence (both tier names + the whole
+ * paragraph), and a free-text tier name cannot be enumerated into a
+ * negative list, so no mechanical input reliably reddens that direction.
+ * That side is code review's to catch; the CLOSED enumeration itself is
+ * pinned where it is decidable — on this constant (V37b). */
+export const STYLE_PREFERENCE = {
+  tiers: ['保守', '标准'],
+  file: '<DSH_HOME>/batch-style-preference.md',
+}
+
 /** The field NAMES of `.scratch/batch-state.md` that this plugin's reminders
  * DEPEND on — the SUPERSET-free list, deliberately not a template.
  *
@@ -463,6 +489,9 @@ export const BATCH_STATE_TEMPLATE = [
   // #128: 批宣告还定死两件事 + 宣告前先收口。缺任一项就没有「授权范围」可判：
   // 关票方式未声明时正文默认最保守（响亮），越界写与批外关票都会被当成"批内例行"。
   '关票确认方式', '预授权清单', '收口记录',
+  // #49: 批外票清单 —— 偏好层登记位（模板「预授权清单」行里），`标准` 档下已登记票
+  // 可免确认改标 + 关票；批宣告注入的风格偏好段指名它。它是偏好层登记面，不是第五列授权。
+  '批外票清单',
 ]
 
 /** Keywords that mark a fold-in claim (lowercased match). */
@@ -1522,6 +1551,28 @@ async function reminderText(agent, config, ctx, assembled) {
       '`docs/batch-state.md` — copy that template, do not invent fields. Update it',
       'after every ticket; the `retro:` line is the agent\'s to write (this plugin',
       'only reads the marker).',
+      // #49: the style-preference layer rides the SAME declaration reminder (its',
+      // first trigger IS the first batch declaration — Q5, zero new hooks). The',
+      // tier names cite STYLE_PREFERENCE.tiers verbatim (single source, V37b).',
+      'Style preference (#49): the confirmation timing of out-of-batch Bucket-B',
+      'tickets rides the user preference file OUTSIDE the repo',
+      '(<DSH_HOME>/batch-style-preference.md; shape: docs/batch-state.md 风格',
+      '偏好层; values never enter the repo). No file → the 保守 tier (default:',
+      'everything stays as declared, out-of-batch tickets confirmed one by one).',
+      '标准 = 保守 + tickets registered in the batch state 批外票清单 may be',
+      're-labelled and closed without per-ticket confirmation (three evidence',
+      'elements required) — registration is the HUMAN\'s call (at declaration',
+      'or an explicit later addition): the agent never registers a ticket',
+      'into 批外票清单 itself; a self-registered ticket has NO authorization',
+      'basis and lands in the digest\'s ⚠ 无授权依据的动作 section.',
+      'Exactly two tiers (保守/标准), both exclude push; the',
+      'preference changes WHEN a confirmation happens, never the NATURE of the',
+      'action. The file is HUMAN-write-only: transcribe exactly the version the',
+      'human approved verbatim, echo the written file in full + its absolute',
+      'path, then treat it as read-only. First batch declaration with no',
+      'preference file → ask ONCE whether to record it; a human stating an',
+      'authorization preference anywhere with no file on record → propose',
+      'recording it once; never ask otherwise.',
     ].join(' '))
   }
   return parts.length > 0 ? sanitizePrompt(parts.join('\n\n')) : null

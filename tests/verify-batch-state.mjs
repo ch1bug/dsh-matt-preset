@@ -137,6 +137,9 @@ const REQUIRED_FIELDS = [
   ['关票确认方式', /关票确认方式/],
   ['预授权清单', /预授权清单/],
   ['收口记录', /收口记录/],
+  // #49：批外票清单 —— 预授权清单行里的偏好层登记位（标准档下已登记票可免确认改标 +
+  // 关票）。文档删掉这个字面量，标准档就失去唯一可辨认的登记面 → 免确认无据。
+  ['批外票清单', /批外票清单/],
 ]
 const missingFields = REQUIRED_FIELDS.filter(([, re]) => !re.test(DOC)).map(([name]) => name)
 if (missingFields.length === 0)
@@ -156,6 +159,7 @@ if (fenced !== null) {
     ['状态列完成标记 done', /`done`/],
     ['关票确认方式（三选一）', /关票确认方式[\s\S]*逐票确认[\s\S]*批内预授权[\s\S]*批末一次/],
     ['预授权清单（四列）', /预授权清单[\s\S]*写域[\s\S]*只建不关[\s\S]*push/],
+    ['批外票清单（偏好层登记位，#49）', /批外票清单/],
     ['收口记录', /收口记录/],
   ]
   const tmplMissing = wantInTemplate.filter(([, re]) => !re.test(tmpl)).map(([n]) => n)
@@ -244,7 +248,7 @@ else bad('C2a. enforcer 指针漂移', `workflow-enforcer.mjs 缺: ${missingPoin
 // 收敛成字段名清单后结构漂移无处可生）。两种形状都接受——本断言的**判据**本就是
 // 「字段名双向钉住」，数组更贴合其本意；覆盖面（TMPL_FIELD_WORDS 逐字全中）不放宽。
 const TMPL_FIELD_WORDS = ['成员', '结束点', '证明命令', 'exit code', '证据路径', 'lane', '后继票', 'retro:',
-  '关票确认方式', '预授权清单', '收口记录']
+  '关票确认方式', '预授权清单', '收口记录', '批外票清单']
 const TMPL = ENFORCER_MOD?.BATCH_STATE_TEMPLATE
 /** `string` 或 `string[]` → 一段可 `includes` 的声明文本（数组逐项拼回）。 */
 const tmplText = typeof TMPL === 'string' ? TMPL

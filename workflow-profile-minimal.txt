@@ -53,6 +53,16 @@ BATCH MODE — only when the human declares a batch; never on by default.
   state); closing per the mode chosen at declaration (default: per-ticket
   confirm; undeclared → loud line), never outside the declared members; one
   push at the batch end.
+- STYLE PREFERENCE (#49): out-of-batch Bucket-B confirmation timing rides the
+  user file <DSH_HOME>/batch-style-preference.md (shape: docs/batch-state.md).
+  No file → 保守 (default, everything as declared); 标准 = 保守 + tickets in
+  the batch state's 批外票清单 may be re-labelled and closed unconfirmed
+  (three evidence elements; registration is the human's call — the agent
+  never registers). Two tiers only, neither includes push; the
+  preference changes WHEN confirmation happens, never the action's nature.
+  HUMAN-write-only: transcribe verbatim what the human approved, echo it back
+  with the absolute path, then read-only; ask ONCE at the first declaration
+  with no file on record.
 - CLOSE-OUT STEP before declaring: classify the backlog, merge same-family
   tickets, drop done-but-unclosed tickets from the ready count, record it.
 - Batch = the issues the human names, plus the end point. Inside a batch: each
@@ -68,6 +78,12 @@ BATCH MODE — only when the human declares a batch; never on by default.
 - Batch end: full-issue summary (A/B/C, created and updated) → human
   confirmation → one push → all-green CI; never pre-authorized. Only declared
   members: at 5 unpushed tickets or 1 week, pause for a push checkpoint.
+- AUTONOMY DIGEST (#49): the wrap conclusion carries one line per autonomous
+  action outside the declared authorization — 自主 <动作> · #<票号> ·
+  commit <sha> · 证据: <命令> → exit <code> · <输出路径>; in-batch actions
+  stay as Progress-row pointers (not re-copied); a line missing evidence is
+  marked 未验证 and escalated (D47); a separate ⚠ 无授权依据的动作 section
+  lists unauthorized moves.
 - ISSUE DISCIPLINE: every discovery lands in the tracker, is processed, then
   the issue is updated with the fix and its evidence. Bucket A (blocks
   verification) pauses the batch for the human; B and C continue.
