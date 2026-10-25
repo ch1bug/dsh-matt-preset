@@ -292,8 +292,53 @@ node -e "const {rmSync,existsSync}=require('node:fs');const {join}=require('node
 tag `dsh-v<official>-r<N>` · npm `<official>-r<N>` · 产物 `dsh-matt-preset-<npm version>.tgz`
 ```
 
-不写：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作。本仓暂无
-CHANGELOG.md 文件——首个 tag（首次发版）时按本模板在仓库根创建。
+不写：分支迭代过程、重构史、已发布内容重写、未随本 tag 推送的工作。条目落点 =
+下一节「版本条目（Changelog 落地区）」，**不另建 CHANGELOG.md**（#91 起落点已选
+RELEASE.md 支，D40/ADR-0007 同步；一处落地区，避免第二份条目副本漂移）。
+
+## 版本条目（Changelog 落地区，ADR-0007/D40）
+
+> 落地时机 = 打 tag 时（不逐票更新，D40）。下方 `dsh-v0.2.1-rc.2-r1` 条目文本已备齐
+> （#91，2026-10-25，锚从 `package.json` 推导 = `0.2.1-rc.2`）；tag/push 属外部动作，
+> 由 human 执行。打 tag 时若树上又有升级用户可见的新变化，按同一收录标准补行。
+
+### dsh-v0.2.1-rc.2-r1（0.2.1-rc.2-r1）
+
+#### 注意到（升级用户视角）
+
+- **锚点变更（先升运行时）**：本 preset 锚定的 DSH 运行时从 `0.2.0-rc.2` 升到
+  `0.2.1-rc.2`（family scheme 见上文「版本锚定方案」）。升级 preset 前先把桌面端/
+  运行时升到 0.2.1-rc.2（守卫侧的锚不一致响亮退出见下方「开发者可见」条）。
+- **hero-chip 出现 4 个 matt 模式**（`Matt 工作流` / `· PTC` / `· 精简` / `· Cordis`，
+  #99 / ADR-0015）：一个插件、四份 preset patch，装一次全有、卸一次全清。**从 #99
+  之前的版本升级必须用 `upgrade` 重装一次**——`dsh.bundle.patch` 由单文件变数组属
+  载体形态变化，旧 profile 层缓存不会自己重新解析（见上文「桌面端」节）。
+- **破坏性：`tool-subagent` / `tool-subagent-fork` 的 `backgroundMode` 配置键删除**
+  （上游 0.2.1 契约，#89）：后台/延续语义由上游托管 activation 承担；配置里带该键的
+  行需删掉，无迁移路径（上游未提供等价键）。
+- **persona 导语变化（会话表面）**：上游 0.2.1 删除 `{{cwd}}` 变量，preset 导语随之
+  去掉「Your working directory is {{cwd}}.」子句（#89）——新会话系统提示不再含工作
+  目录展开值；在 persona 里自行写 `{{cwd}}` 会在渲染前报错（反向锚钉住）。
+- **桌面端重装行为变化（0.2.1 起）**：跑 HMR 的 profile 上 `install_bundle` 对**已装**包
+  直接失败（`already-installed`；旧版是 `restart-required` 后旧版本继续跑）——重装必须
+  先 `remove_bundle` 再 `install_bundle`，或直接 `node bin/install.mjs upgrade --profile
+  desktop`（见上文「桌面端」节）。
+- **桌面端更新会自动清理退休的 experimental bundle**：schedule 的实验档
+  （`dsh-experimental-…`）从 `dsh.profile.bundles` 消失、任务数据保留（上游行为，
+  2026-10-17 实机观测，#88）。
+- **安装方式收敛**（#41/#47/#86）：新用户一条命令
+  `npx --allow-git=all github:ch1bug/dsh-matt-preset install`；运行时不在 PATH 时用
+  `--dsh` / `--pnpm` 显式指路（探测顺序见上文「运行时从哪来」），桌面端一条命令
+  `install --profile desktop`。
+- **工作流面**：新增风格偏好层（保守/标准两档，存 `<DSH_HOME>` 仓外、human 独占
+  写权，#49）；测试分级与恢复纪律进工作流门禁（#36）；`wrap` 产出带自主 digest
+  格式（含「无授权依据」警示段，#49）。
+- **开发者可见：测试挂具接线守卫修复**（#88）：挂具链接指向其他检出时**重指并响亮
+  提示**（旧版报「已存在」蒙混）；`package.json` 锚 ≠ 运行时 `dsh-llm` 版本时直接
+  exit 1。验证入口收敛为 `node scripts/verify-all.mjs`（默认快集 / `--all` 全量，#129）。
+
+#### 锚
+tag `dsh-v0.2.1-rc.2-r1` · npm `0.2.1-rc.2-r1` · 产物 `dsh-matt-preset-0.2.1-rc.2-r1.tgz`
 
 ## 验证（本票 AC 证据，2026-10-09）
 
