@@ -150,6 +150,14 @@ mock 说 Anthropic SSE：`message_start` → `content_block_start`（`text` 或
   顺带：`Set-Content -NoNewline` 会把管道里的多行**拼成一行**（写旧版副本时会毁掉内容）。
 - **`gh api` 别忘了 `--paginate`**：不带它只有第一页。实测"30 条评论全绿"是假象——
   第 100+ 条里还有个人路径（见 [docs/agents/privacy.md](agents/privacy.md) §0）。
+- **改 goal 状态可能被运行器拒（观察项，#155）**：#127 会话实测，自动续跑轮内 agent
+  调 `update_goal` 暂停被拒，理由是「需要 top-level direct human turn」——即 goal
+  生命周期迁移可能只在 human 直发的那一轮被允许，agent 轮内调用会被拒。这是上游
+  DSH 工具契约的**待考古口径**（具体判定在运行器哪一层、版本锚，未核实——用前先对
+  当前运行时实测或读上游源码确认；版本锚见 [dev-environment.md](dev-environment.md)）。
+  agent 侧出口：工具拒绝后换最小输入重试或如实报告「goal 未同步」，不重复同型调用、
+  不伪报成功（#155 正文规约）。需 human 介入也可主动切 blocked（`blocked_reason` 写
+  阻塞事实/等待什么/解除条件）；真正完成应 complete，不用 blocked 代替。
 
 ## 权威来源（要更细就读这些）
 

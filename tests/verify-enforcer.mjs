@@ -4,7 +4,8 @@
  * ticket-lifecycle nudge arming added by #82 is V21–V23, V24 pins the doc's
  * 「What it injects」+ config block against `INJECTIONS`, the push-triggered
  * retro added by #71 is V25–V31, the home-delete reminder added by #113 is
- * V32–V34, and the commit-armed landing added by #121 is V35).
+ * V32–V34, the commit-armed landing added by #121 is V35, and the goal-sync
+ * reminder added by #155 is V36).
  *
  *  V1 mount smoke: a preset row mounting workflow-enforcer mounts clean.
  *  V2 baseline: every prompt assembly renders a WORKFLOW GATES section.
@@ -1963,6 +1964,54 @@ if (docHome !== '' && missingHomeInDoc.length === 0)
 else bad('V34c. home-delete doc/declaration drift',
   docHome === '' ? 'no 判定面 row mentioning HOME_DELETE_TRIGGER' : `missing from the row: ${missingHomeInDoc.join(', ')}`)
 
+// V36 (#155): a pause / waiting-on-human / close-out declaration in the
+// session text arms the one-shot GOAL STATE CHECK reminder (the goal/task-list
+// sync face; arming face = the same text event as `batchClose` — assistant/
+// user/inbox text, deliberately wide bare-substring matching). Reminder-only;
+// the task list has no stable one-shot trigger, so it stays in the workflow
+// body (#155's declared boundary).
+// (a) reach: a pause/waiting-on-human declaration fires the reminder.
+await emitSessionEvent(ctx, agent.session, {
+  type: 'assistant/message',
+  data: { turn: 9, step: 36, message: { role: 'assistant', content: [{ type: 'text', text: '验证遇到环境阻塞，先暂停等待 human 确认。' }] } },
+})
+const v36a = await render()
+if (v36a.includes('GOAL STATE CHECK'))
+  ok('V36a. pause/waiting-on-human declaration → GOAL STATE CHECK reminder (one-shot)')
+else bad('V36a. goal-sync reminder missing', v36a.slice(-240))
+// (b) content contract: the reminder carries the ticket's hard rules
+// (same-turn sync, honest rejection report, no same-shaped retry, complete ≠
+// unfinished).
+if (v36a.includes('SAME turn') && v36a.includes('NOT-synced') && v36a.includes('same-shaped') && v36a.includes('Never mark complete'))
+  ok('V36b. the goal-sync reminder carries the #155 hard rules (same-turn / honest rejection / no same-shaped retry / complete gate)')
+else bad('V36b. hard-rules contract missing from the reminder', v36a.slice(-240))
+// (c) consumed after firing (no repeat).
+const v36c = await render()
+if (!v36c.includes('GOAL STATE CHECK')) ok('V36c. goal-sync reminder consumed after firing (no repeat)')
+else bad('V36c. goal-sync reminder repeated', v36c.slice(-160))
+// (d) declared reach: the batch-close phrase (via the BATCH_CLOSE_KEYWORDS
+// superset) and the English waiting phrase hit the SAME goalSync arming —
+// the face is not bound to the one Chinese keyword of V36a.
+await emitSessionEvent(ctx, agent.session, {
+  type: 'assistant/message',
+  data: { turn: 9, step: 38, message: { role: 'assistant', content: [{ type: 'text', text: '#500 本地闭环完成，will wait for the human to confirm.' }] } },
+})
+const v36e = await render()
+if (v36e.includes('GOAL STATE CHECK')) ok('V36e. batch-close + english waiting phrases reach the goalSync face (declared reach)')
+else bad('V36e. superset reach missing', v36e.slice(-200))
+const v36f = await render()
+if (!v36f.includes('GOAL STATE CHECK')) ok('V36f. V36e reminder consumed (one-shot still holds)')
+else bad('V36f. goal-sync reminder repeated', v36f.slice(-160))
+// (g) negative: ordinary progress text with no pause/wait/close-out declaration
+// stays silent — the keyword face is not a per-turn nag.
+await emitSessionEvent(ctx, agent.session, {
+  type: 'assistant/message',
+  data: { turn: 9, step: 37, message: { role: 'assistant', content: [{ type: 'text', text: '步骤完成，继续跑下一组用例。' }] } },
+})
+const v36d = await render()
+if (!v36d.includes('GOAL STATE CHECK')) ok('V36d. ordinary progress text → no goal-sync reminder')
+else bad('V36d. goal-sync reminder leaked on benign text', v36d.slice(-200))
+
 // Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
@@ -1991,6 +2040,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V35) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V36) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

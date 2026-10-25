@@ -204,6 +204,13 @@ const ticketCreated = new WeakMap()
  * say so). */
 const batchClose = new WeakMap()
 
+/** Sessions whose latest assistant text declares a pause / waiting-on-human /
+ * close-out checkpoint (#155). Armed by the same text event that arms
+ * `batchClose`, consumed by the next assemble, which then attaches the
+ * goal-state check reminder: sync the goal + task list in the same turn,
+ * report a tool rejection honestly, never mark complete when unfinished. */
+const goalSync = new WeakMap()
+
 /** Sessions in grill/triage interview mode. Armed by a skill-tool call in
  * the grill family (grilling / grill-with-docs / grill-me / triage) or by
  * user/inbox text containing a /grill or /triage prompt prefix. Sticky for
@@ -475,6 +482,29 @@ export const FOLD_KEYWORDS = [
 export const BATCH_CLOSE_KEYWORDS = [
   '本地闭环完成', '本地闭环', '本会话收尾', '会话收尾', '票完成', '本票交付',
   'batch 收尾', '批 A 收尾', '收尾报告',
+]
+
+/** Keywords that mark a goal-sync checkpoint — the moment a session declares
+ * a pause / hands off to the human / reports a close-out (#155): the
+ * auto-resume goal's lifecycle and the task list must be synced in the SAME
+ * turn, or the mismatch reported honestly. Superset of `BATCH_CLOSE_KEYWORDS`
+ * (收尾 is a sync checkpoint too), plus the waiting-on-human / pause
+ * declarations that leave a controllable goal running while the session stops.
+ * Arming face = the SAME text event as `batchClose` (assistant/user/inbox
+ * text, see the session/event hook) — so a human remark containing 暂停/paused
+ * arms once too; that wide-match is deliberate (deliberately bare-substring,
+ * no word boundaries), bounded by the one-shot consume model (at most one
+ * extra reminder per mention). Reminder-only: it never inspects the goal
+ * state itself. */
+export const GOAL_SYNC_KEYWORDS = [
+  ...BATCH_CLOSE_KEYWORDS,
+  // Deliberately wide: '暂停'/'paused' already cover '暂停等待'/'暂停 goal'/'goal
+  // paused' as substrings — do NOT re-add the longer forms (a second spelling of
+  // the same list; brief §3.2). '等待 human' is matched with the space; the
+  // '等待human' variant covers the no-space spelling.
+  '等待 human', '等待human', '等待人工', '等待确认', '等待用户',
+  'wait for human', 'wait for confirmation', 'wait for the human',
+  '暂停', 'paused',
 ]
 
 /** The agent's working directory: header carries it (session.meta is not
@@ -1235,6 +1265,10 @@ export const INJECTIONS = [
   // #113 — the home-delete reminder. Reminder-only, on its own knob: a project
   // that wants this face silent can switch it off without touching the ⚠ gate.
   { id: 'home-delete', marker: 'Home-delete candidate', config: 'homeDeleteCheck' },
+  // #155 — the goal/task-list sync reminder. One-shot text-layer observation
+  // (same arming shape as `batchClose`), on its own knob. Fires when the
+  // agent's text declares a pause / waiting-on-human / close-out checkpoint.
+  { id: 'goal-sync', marker: 'GOAL STATE CHECK', config: 'goalSyncCheck' },
 ]
 
 /** The reminder section text for one request, or null when nothing applies. */
@@ -1340,6 +1374,22 @@ async function reminderText(agent, config, ctx, assembled) {
         'BLOCKED, not done.',
       ].join(' '))
     }
+  }
+  if (goalSync.get(agent.session) === true && config.goalSyncCheck !== false) {
+    goalSync.delete(agent.session) // consume: one reminder per checkpoint
+    parts.push([
+      'GOAL STATE CHECK — if this turn declares a pause, hands off to the',
+      'human, or reports done, the auto-resume goal and the task list must be',
+      'synced in the SAME turn: pause or block the goal (blocked_reason states',
+      'what is being waited for and the release condition), close finished',
+      'steps, flag new blockers. A tool rejection (e.g. the runner requires a',
+      'top-level direct human turn) is reported honestly — the goal stays',
+      'NOT-synced; retry with a minimal input or report, never repeat the',
+      'same-shaped call, never claim success. Never mark complete when work',
+      'is unfinished; blocked is not a substitute for complete. Updating one',
+      'state surface (batch-state / progress / task list) ≠ the goal is',
+      'updated too.',
+    ].join(' '))
   }
   if (config.retroTriggerCheck !== false && retroPush.get(agent.session) === true) {
     retroPush.delete(agent.session) // consume: one retro reminder per push
@@ -1575,6 +1625,9 @@ export function apply(ctx, config = {}) {
     text = text.toLowerCase()
     if (FOLD_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) foldIntent.set(session, true)
     if (BATCH_CLOSE_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) batchClose.set(session, true)
+    // #155: pause / waiting-on-human / close-out declarations arm the goal-sync
+    // reminder (same text-layer face as `batchClose`; see GOAL_SYNC_KEYWORDS).
+    if (GOAL_SYNC_KEYWORDS.some(kw => text.includes(kw.toLowerCase()))) goalSync.set(session, true)
     // Batch declaration (#71): judge it HERE and ONLY here — a declaration is
     // something the HUMAN SAYS ("这批攒批 / 系列处理 / 大系列"), it has no tool
     // call to judge, so the text layer is its only possible face (the exact

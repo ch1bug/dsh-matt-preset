@@ -31,7 +31,7 @@ everywhere, or change `marker:`.
 
 ## What it injects
 
-Twelve sections, each with its own switch in the per-row config below (the ⚠ line
+Thirteen sections, each with its own switch in the per-row config below (the ⚠ line
 has none; the three #71 retro faces share one). The baseline and the grill
 contract re-render on every assembly; the rest fire once and are consumed.
 **Seven judge an action** through the structured 判定面 below — the ⚠ high-risk
@@ -39,9 +39,10 @@ line, the ticket close, the ticket create, #71's three retro faces (the
 per-ticket 落盘 reminder — armed by a real push **or a real commit**, the
 batch-end aggregation when the batch already carries the `retro:` marker, the
 loud probe-failure report when that file could not be read), and #113's
-home-delete reminder — while **four are conversation observations** armed by
+home-delete reminder — while **five are conversation observations** armed by
 text keywords (batch close-out, fold-in/capacity evidence, grill/triage mode,
-and the batch declaration), so those never fire from a tool call **alone**; the
+the batch declaration, and #155's goal-sync checkpoint), so those never fire
+from a tool call **alone**; the
 baseline is unconditional. The split is deliberate, not incidental: a
 push / commit **has** a `(toolName, argv)` action surface, so it is judged
 there and only there (the text layer is structurally excluded — 宁严勿宽,
@@ -171,6 +172,21 @@ face is the text layer.
   hand-writing the sandbox. **Reminder-only — nothing is intercepted** (a
   repository-side guard cannot physically stop a shell command the agent is
   about to write; that is #113's declared boundary).
+- A pause / waiting-on-human / close-out declaration in the conversation
+  (#155; 关键词: 收尾 phrases (`BATCH_CLOSE_KEYWORDS`) plus 等待
+  human/确认/暂停/paused…, see `GOAL_SYNC_KEYWORDS`) gets a one-shot
+  **GOAL STATE CHECK** reminder (consumed after firing): the auto-resume
+  goal and the task list must be synced in the SAME turn as the declaration —
+  pause or block the goal (`blocked_reason` states what is waited for and the
+  release condition), close finished steps, flag new blockers. A tool
+  rejection (e.g. the runner requires a top-level direct human turn) is
+  reported honestly — the goal stays NOT-synced; retry with a minimal input
+  or report, never repeat the same-shaped call, never claim success. Never
+  mark complete when work is unfinished (blocked is not a substitute for
+  complete); updating one state surface (batch-state / progress / task list)
+  ≠ the goal is updated too. Reminder-only — it never inspects the goal
+  state itself; the task list has no stable one-shot trigger, so it lives in
+  the workflow body only (#155's declared boundary).
 
 ## Gate list
 
@@ -267,7 +283,14 @@ to cover them.
 > commit + push in one assembly fires the push face once and the commit landing
 > on the NEXT assembly (the arm is not swallowed), and that all five carriers
 > (enforcer doc / batch-state / body / CONTEXT D49 / ADR-0002) name the face and
-> write the landing-only + per-session contract.
+> write the landing-only + per-session contract. V36 pins #155's goal-sync
+> checkpoint: the positive (a pause / waiting-on-human declaration fires the
+> one-shot GOAL STATE CHECK reminder), the content contract (same-turn sync,
+> honest rejection report with the goal NOT-synced, no same-shaped retry,
+> complete ≠ unfinished), the consume-once behaviour, the declared reach (the
+> batch-close superset and the English waiting phrases hit the same arming),
+> and the negative (ordinary
+> progress text stays silent).
 
 ### Per-project override: `workflow-gates.yml`
 
@@ -303,6 +326,7 @@ config:
   retroTriggerCheck: true        # #71/#121: per-ticket 落盘 (real push OR commit) / batch-end aggregation (push only) (default true)
   batchDeclareCheck: true        # #71: batch-state.md initialization on a batch declaration (default true)
   homeDeleteCheck: true          # #113: home-delete candidate warning after a delete-verb + home-target call (default true)
+  goalSyncCheck: true            # #155: goal/task-list sync check after a pause / waiting-on-human / close-out declaration (default true)
   gatesFile: workflow-gates.yml  # project file name/path (default)
   includeDefault: false          # merge project file with the default list
   extraExternal: ["./release.sh"]
@@ -321,6 +345,7 @@ config:
   e.g. `~/.dsh/node_modules`): `npm install --prefix ~/.dsh yaml`.
 - Hooks: `session/event` (`tool/call`) + `system-prompt/assemble` (prepend).
   A filter bug degrades to no-reminder, never breaks a request. The same hook
-  also arms the **text-layer** observations — the batch declaration (#71) joins
-  `foldIntent` / `batchClose` there; that is the *only* text-layer face in this
+  also arms the **text-layer** observations — the batch declaration (#71) and
+  the goal-sync checkpoint (#155) join `foldIntent` / `batchClose` there;
+  that is the only text-layer arming face in this
   plugin, and it never decides a push (see 判定面).
