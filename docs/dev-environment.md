@@ -367,6 +367,23 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   （那面靠 `docs/batch-state.md` 的批次登记）；本仓无 CI，分支隔离不自动带来验证
   ——合并前仍需本地 `node scripts/verify-all.mjs --all`（AGENTS.md「验证」）。
 
+### 编排集成分支：develop + 合并闸口（#161，与一票一分支是两个层次）
+
+上面的一票一分支是**检出版内**的工作分支纪律（哪个会话在自己的检出里开分支、防
+`add -A` 互吞）；批编排层（`docs/batch-state.md` 的批次宣告）另有 **develop 集成分支**
+（#161，2026-10-25 拍板）：
+
+- **批内逐票 commit 落 develop**：编排会话 = 宣告的唯一写者，按下面的暂存/提交纪律
+  （§0.4 的三条：逐项归属 + 提交面对账 + 复审修复的未申报文件并入提交面）逐票 pathspec 提交；
+  develop 上的提交**不豁免** §0.4 三条。
+- **develop→main 只经合并闸口** = 批末全量 `node scripts/verify-all.mjs --all` 绿 +
+  retro/总结 + human 确认 → merge develop→main + push（push 授权仍逐批；merge main
+  不在批内预授权内）。main 只收闸口后的内容。
+- **两个层次不冲突、不互斥**：一票一分支管「同一检出上多个写者怎么隔离」（检出版内），
+  develop 管「批次提交怎么汇进 main」（编排层）；worktree 级的一票一分支隔离拆出票
+  #164（状态见票面）。develop 初期无 `origin/develop` 时的对账口径（C9 loud SKIP）见
+  `docs/batch-state.md` 的「取数命令契约」节。
+
 ### 暂存/提交纪律（三条，含「唯一写者」判据）
 
 1. **暂存前**：先 `git status --short` 看清有哪些文件；**不属于本次改动的一律不收**。

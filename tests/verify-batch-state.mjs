@@ -30,6 +30,17 @@
  *            替代"再加一条正则守文案"（D15：追开放集是无收敛军备竞赛）
  *   C9c      取数命令契约在场**且判据只认节内命中**（`headingSection` 切出契约节再匹配）
  *
+ * #161 新增（develop 口径收窄 —— 批跑在 develop 集成分支上，main 只经合并闸口收内容）：
+ *   C9-live  对账前先 `git rev-parse --verify --quiet origin/<branch>` 探测**对账基准**：
+ *            origin ref 不存在（develop 初期：分支自 origin/main 建出、首次推送前）→
+ *            **loud SKIP**（D47 响亮缺席 —— 不误报红把快集打红，也不静默绿）；
+ *            取数面其它失灵（rev-parse 128 / rev-list 失败 / 输出非数字）照旧 ✗。
+ *            三态分类提为纯函数 `classifyCountAttempt`。
+ *   C9g      三态分类自检（5 组构造输入钉边界；扰动「absent 也当 ✗」→ 红 —— 非空洞，
+ *            票面要求给红读数）
+ *   C1c      模板 develop 三条款在场守卫（develop 集成分支 / 合并闸口 / 提交前 git status
+ *            对账；模板被改回旧口径、删任一条款句 → 红）
+ *
  * #119 新增（**护栏的单位面** —— C9-live 对的是**笔**，护栏却是**票**）：
  *   C9-guardrail  护栏两侧**同为票**：票数 = 成员表「状态」列首词 `done` 的行数（**结构解析**，
  *            不新增手抄字段 —— 手抄会静默漂，正是 #115 治过一次的病）；判据 = **票数 > 5** 才喊
@@ -153,6 +164,32 @@ if (fenced !== null) {
   else bad('C1b. 模板骨架缺元素', tmplMissing.join(', '))
 } else {
   bad('C1b. 模板骨架', 'docs/batch-state.md 里找不到 ```markdown 模板块')
+}
+
+// ── C1c: 模板 develop 三条款在场（#161 —— 非空洞：删任一条款句 → 红）──────────────
+// 为什么单列：#161 把批次口径从「main 直做 + 批末一次 push」演进为「develop 集成分支 +
+// develop→main 合并闸口」，落点是模板的模式行 / 结束点行。模板被悄悄改回旧口径（三条款句
+// 被删）时，后续批照旧口径跑，而活文件（本批宣告）已按新口径写——判据只认**模板块内**
+// 命中（`fenced[1]`，同 C1b 的域）：散文/字段表里提到 develop 不算数，模板必须可直接复制。
+// 三条款 = ① 批内逐票 commit 落 develop（集成分支）② develop→main 只经合并闸口
+// （批末全量 --all 绿 + retro/总结 + human 确认 → merge → push；push 授权仍逐批）
+// ③ 提交前 git status 对账（复审修复的未申报文件并入提交面，155族 5/5 已验证）。
+const DEV_TERMS = [
+  // 判据不钉「（#161 拍板）」一类来源标注字面量（复核修复：标注不是口径本体，将来
+  // 只改措辞不动语义的调整不该在这里假红）——锚的是条款语义句本身。
+  ['条款①：模式行 develop 集成分支（全程在 develop 上干活）', /develop 集成分支[\s\S]*?全程在 `develop` 上干活/],
+  ['条款①：pathspec 逐票 commit 落 develop', /pathspec 逐票 commit \*\*落 develop\*\*/],
+  ['条款②：develop→main 只经合并闸口（批末全量 --all 绿 + human 确认 merge → push；push 授权仍逐批）',
+    /只经合并闸口\*\* = 批末全量 `--all` 绿[\s\S]*?human 确认 → merge develop→main \+ push（push 授权仍逐批/],
+  ['条款③：提交前 git status 对账（未申报文件并入提交面）', /提交前 git status 对账\*\*[\s\S]*?并入提交面\*\*/],
+  ['结束点：批末全量（develop 上）+ 未合并对账 main..develop + 闸口 merge',
+    /verify-all\.mjs --all` 绿（develop 上）[\s\S]*?main\.\.develop[\s\S]*?闸口：merge develop→main \+ push/],
+]
+if (fenced !== null) {
+  const devMissing = DEV_TERMS.filter(([, re]) => !re.test(fenced[1])).map(([n]) => n)
+  if (devMissing.length === 0)
+    ok('C1c. 模板含 develop 集成分支三条款（develop / 合并闸口 / 对账）', `${DEV_TERMS.length} 条判据 / 模板块内命中`)
+  else bad('C1c. develop 口径条款缺失（模板被改回旧口径？）', `模板块缺: ${devMissing.join(' / ')}`)
 }
 
 // ── C10: 「缺字段必红」判据自检（#128 —— 非空洞，brief §3.1「守卫」面）─────
@@ -416,7 +453,9 @@ if (PERSONA_FIXTURE === null) {
 const COUNT_CMD = ['rev-list', '--count']
 const COUNT_LABEL = 'git rev-list --count origin/<branch>..HEAD'
 
-/** **测试缝**（扰动用例专用，见下方 `git()`）：覆盖 C9 的两个读数面。
+/** **测试缝**（扰动用例专用，见下方 `git()`）：覆盖 C9-live 的**全部 git 读数面**——
+ *  #161 三态化后共三个：count（伪造值）/ branch（伪造值）/ 对账基准探测（seam 生效时
+ *  视为在场，见 C9-live 的 refCheck）。
  *  变量名带 `DSH_MATT_BATCHSTATE_` 前缀，不与任何真实环境变量撞；不设 = 零影响。
  *  为什么需要缝：扰动要在**镜像副本**上造"声称 ≠ 实测 / ≥5 笔 / 取数不可用"，而改调用方
  *  仓库的 origin/main 是破坏性的（本仓禁止）；"PATH 前置假 git"在 Windows 下也不通 ——
@@ -513,6 +552,24 @@ function parseTickets(live) {
  *  （5 不喊 / 6 喊）钉成可跑事实，防后人悄悄改回 `>=` 或改回按笔判断。 */
 const overGuardrail = (tickets) => tickets > 5
 
+/** #161：笔数对账读数的**三态分类**（纯函数，不碰真 git —— C9g 用构造输入钉边界）。
+ *  为什么提出来：批跑在 develop 集成分支上时，develop 初期（分支自 origin/main 建出、
+ *  首次推送前）`origin/develop` 不存在，`rev-list` 对缺席 ref 报 128 —— 这**不是**防线
+ *  失灵，而是**对账基准缺席**：按 D47 响亮缺席处置（loud SKIP），不误报红把快集打红、
+ *  也不静默绿。三态：
+ *   'origin-absent'   → C9-live loud SKIP（不产 ✗）；
+ *   'ref-check-failed' / 'count-failed' → ✗（探测/取数面失灵 = 防线缺席，照旧响亮）；
+ *   { count }         → 正常对账。
+ *  `rev-parse --verify --quiet` 的 exit 语义：0 = ref 在场，1 = 不存在，其它 = git 失灵
+ *  （非仓 / 非法 ref 名 —— 分支不可知的场景已被更早的 loud SKIP 拦下，走到这里的非 0/1
+ *  一律响亮，不猜）。 */
+function classifyCountAttempt(refCheck, rev) {
+  if (refCheck.status === 1) return { status: 'origin-absent' }
+  if (refCheck.status !== 0) return { status: 'ref-check-failed' }
+  if (rev.status !== 0 || !/^\d+$/.test(rev.out)) return { status: 'count-failed' }
+  return { status: 'ok', count: Number(rev.out) }
+}
+
 /** 由**解析出来的票数**产出护栏读数。
  *  **输入形状本身就是一道结构防线**（第 1 轮复核 D6/C9f 实测：光靠 `fired === overGuardrail(done)`
  *  自洽，在"活文件 0 票 / 2 笔"时与"把笔数接进来"同值 ⇒ 那道判据是**数据依赖**的）。
@@ -552,13 +609,33 @@ if (LIVE === null) {
         : `判据命中 ${claimCount} 条（>1）—— 不一致的文件形态；先修状态文件写法（见 docs/batch-state.md 模板）`)
   } else {
     const CLAIMED = Number(CLAIM[1])
+    // #161（develop 口径首跑）：先探测**对账基准**在场性，再取数。develop 初期
+    // `origin/develop` 尚不存在（分支自 origin/main 建出、首次推送前）时 rev-list 报 128 ——
+    // 基准缺席按 D47 **响亮缺席**处置（loud SKIP），不再一律 ✗ 把快集打红；
+    // 探测/取数面的其它失灵照旧 ✗。三态边界由 C9g 钉住（扰动「absent 也当 ✗」→ 红）。
+    // ⚠ 缝生效时基准**视为在场**（{status: 0}，真 rev-parse 不跑）——三态化后 C9-live 的
+    // git 读数面有三个（count / branch / 基准探测），缝必须全盖：否则在 origin ref 缺席的
+    // 检出上伪造的 count 会被 absent 分支吞掉（伪造无效），而 seamUsed 已置位 → 汇总区
+    // 喊「实测值不是真 git 读数」的**矛盾读数**（改前实测：SKIP 与 SEAM 喊行同屏）。
+    const refCheck = COUNT_OVERRIDE !== undefined
+      ? { status: 0 }
+      : git(['rev-parse', '--verify', '--quiet', `origin/${branch}`])
     const rev = git([...COUNT_CMD, `origin/${branch}..HEAD`])
-    if (rev.status !== 0 || !/^\d+$/.test(rev.out)) {
-      // 「确定无法判」**不是**「锻炼出结论」：C9 的取数命令跑不动 = 防线缺席，必须响亮。
+    const attempt = classifyCountAttempt(refCheck, rev)
+    if (attempt.status === 'origin-absent') {
+      console.log(`  ⚠ C9-live SKIP (loud). origin/${branch} 不存在（develop 初期：分支自 origin/main 建出、首次推送前）—— ` +
+        `笔数对账的**基准缺席**，跳过（D47 响亮缺席：不误报红、不静默绿）；` +
+        `分支首推后按 ${COUNT_LABEL} 常态对账；批内「未合并进 main」的闸口读数用 ` +
+        `git rev-list --count main..develop（见 docs/batch-state.md 取数命令契约节）`)
+    } else if (attempt.status === 'ref-check-failed') {
+      // 「确定无法判」**不是**「锻炼出结论」：探测命令跑不动 = 防线缺席，必须响亮。
+      bad('C9-live. 对账基准探测可用', `git rev-parse --verify --quiet origin/${branch} → exit ${refCheck.status} —— ` +
+        'git 失灵（非法 ref 名？），防线缺席必须响亮')
+    } else if (attempt.status === 'count-failed') {
       bad('C9-live. 取数命令可用', `${COUNT_LABEL} → exit ${rev.status}${rev.out ? ` / ${rev.out}` : ''} —— ` +
         'origin ref 可能未取回（git fetch 后重跑）')
     } else {
-      unpushed = Number(rev.out)
+      unpushed = attempt.count
       // 缝生效过就在**每一条** C9-live 读数里标注：读者看到的"实测 Y"不是真 git 读数。
       const seam = seamUsed ? '【⚠ SEAM：实测值来自 DSH_MATT_BATCHSTATE_COUNT，真 git 未跑】' : ''
       if (CLAIMED === unpushed) {
@@ -706,6 +783,31 @@ if (LIVE === null) {
     `活文件 ${guardrailReading.done}/${guardrailReading.total} 票 → fired=${guardrailReading.fired}` +
     `（== parseTickets(LIVE)）；fixture：${SHAPE_CASES.map(([n]) => n).join(' / ')}；裸 number/字符串被入口拒掉`)
 }
+
+// ── C9g: origin ref 缺席三态分类自检（#161 —— 非空洞：absent→SKIP 被删/改回 ✗ → 红）──
+// 为什么需要：C9-live 的 SKIP 分支只在「真的跑在无 origin ref 的分支上」才被走到（develop
+// 首推前的窗口期），活文件一常态它就沉寂 ——「absent → SKIP」被后人删掉（改回一律 ✗）时，
+// 若无常驻夹具，谁都不会发现，develop 初期的每一批都会把快集打红。五组构造输入把三态
+// 边界钉成不依赖活文件、不依赖分支形态的可跑事实（同 C9d/C9e 的先例：判据自检夹具化）。
+const ABSENT_CASES = [
+  ['rev-parse exit 1（origin ref 不存在，develop 初期）→ loud SKIP',
+    { status: 1 }, { status: 128, out: '' }, { status: 'origin-absent' }],
+  ['rev-parse exit 0 + rev-list 正常 → 对账路径（count 透传）',
+    { status: 0 }, { status: 0, out: '3' }, { status: 'ok', count: 3 }],
+  ['rev-parse exit 0 + rev-list 失败 → ✗（取数失灵仍是防线缺席，不因 #161 放宽）',
+    { status: 0 }, { status: 128, out: '' }, { status: 'count-failed' }],
+  ['rev-parse exit 128（git 失灵 / 非法 ref 名）→ ✗（不静默）',
+    { status: 128 }, { status: 128, out: '' }, { status: 'ref-check-failed' }],
+  ['rev-list 输出非数字 → ✗（不猜）',
+    { status: 0 }, { status: 0, out: 'x' }, { status: 'count-failed' }],
+]
+const absentFailures = ABSENT_CASES
+  .filter(([, refCheck, rev, want]) => JSON.stringify(classifyCountAttempt(refCheck, rev)) !== JSON.stringify(want))
+  .map(([name]) => name)
+if (absentFailures.length === 0)
+  ok('C9g. origin ref 缺席三态分类自检（absent→loud SKIP；失灵→✗；正常→对账）',
+    `${ABSENT_CASES.length} 个边界：${ABSENT_CASES.map(([n]) => n).join(' / ')}`)
+else bad('C9g. 三态分类自检失败（absent→SKIP 的判据被改动？）', absentFailures.join(' | '))
 
 // ── C9b: 计数机制的**机械演示夹具**（#115 的非空洞硬要求 + D15 的结构性防线）────────
 // 为什么是夹具而不是"再加一条正则守文案"：D15 —— 用更宽的正则去追下一个反例是无收敛军备竞赛。
