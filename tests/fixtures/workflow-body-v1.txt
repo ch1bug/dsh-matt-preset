@@ -235,6 +235,22 @@ per-issue push rhythm.
   human confirmation → push). The child still starts with the directed
   "按交接开工 X" declaration; the human still switches in the sidebar —
   only the "please open the next ticket" round-trip is eliminated.
+- HANDOFF WRITING RULES (#159): a handoff document carries THIS SESSION'S
+  facts + pointers — never a restatement of repo discipline. AGENTS.md and
+  docs/agents/* are the single authority; a cached copy of a rule drifts
+  the moment they change (a real handoff carried 11 restated rules — most
+  already had an authoritative home). Three rules: (a) write only what
+  THIS session produced — commands actually run and their results,
+  environment anomalies, faces not verified (or not verifiable here),
+  implementation judgments the ticket did not specify, with the reason;
+  (b) every discipline is a pointer ("见 AGENTS.md / docs/agents/issue-tracker.md 等"),
+  never the rule text; (c) the handoff ends with a 「未验面」 section.
+  Skeleton (5-10 lines, expand each heading with session-local facts only):
+  ## 现场事实（本会话产生） — commands run + results, anomalies, blockers;
+  ## 票面没写的实现判断（+理由） — decisions only this session knows;
+  ## 未验面 — what was not run / not verifiable here and why;
+  ## 指针 — discipline pointers (AGENTS.md / docs/agents/issue-tracker.md 等), not
+  restated rules.
 - Batch end: after the summary gate, push all commits in one go; remote
     CI all-green is the completion gate — red means unfinished batch work,
     fix and re-verify.

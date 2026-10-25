@@ -47,6 +47,7 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - 源码部署 / 运行时可达性（`dsh` 从哪来；PATH 无 dsh ≠ 运行时缺席）/ **读上游源码查契约与先例**（系统提示里的 `app.asar\dsh\` 读不了；可读检出与 live 面的第二个 DSH_HOME 见 §3.1）/ 隔离契约 / 构建坑（ucrt64、宿主锚、clean、端口冲突）：`docs/dev-environment.md`
 - 驱动实例 / 读耐久证据 / RPC 参数名 / mock LLM：`docs/dsh-runtime-cheatsheet.md`
 - 沙箱批跑（opt-in）：`sandcastle/README.md`
+- **handoff 写法**：只写本会话现场事实 + 指针，不复述仓库纪律——写法三条与骨架见 workflow-body.txt「HANDOFF WRITING RULES」节（#159）
 
 ## home 安全（硬规则）
 
