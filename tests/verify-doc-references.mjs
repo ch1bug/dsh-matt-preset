@@ -1,5 +1,5 @@
 /**
- * verify-doc-references.mjs — 文档引用腐烂守卫（R1–R3）。
+ * verify-doc-references.mjs — 文档引用腐烂守卫（R1–R4）。
  *
  * Why（邻仓 #93/#94 的同族机械面，2026-10-17 对齐）：文档里的**仓内路径指针**是纯手写的，
  * 文件被改名/删除后没人管 —— 本会话已经手工撞过两条同类（全局 handoff 技能里裸 `#83`、
@@ -9,6 +9,9 @@
  *   R1 每个带前缀的仓内路径引用都存在（当前实测 0 条死引用）
  *   R2 扫描面自检：见到的引用数 ≥ 20 —— 防"匹配式静默失效"把红变成假绿
  *   R3 扫描面自检：实际扫到的文档数 ≥ 20
+ *   R4 三处手抄的 D 区间指针（AGENTS.md / README.md / docs/code-review-brief.md 的
+ *      「D1–D<n>」）逐字相等，且上限 == CONTEXT.md 实测最大 D 号（#166：#156 落 D52 时
+ *      三处全部漏同步、#49 落 D53 才一并修正 —— 散文区间指针此前不在任何守卫覆盖内）
  *
  * 为什么**不**守裸文件名（邻仓 #94 那一半）：2026-10-17 勘察本仓 11 个"裸名不存在"候选，
  * **没有一个是烂引用** —— 它们分别是 skill 文件（`~/.dsh/skills/**`）、运行时文件
@@ -84,6 +87,51 @@ else bad('R2. 引用数低于阈值 —— 匹配式可能静默失效', String(
 if (docs.length >= 20) ok('R3. 扫描面自检：文档数达阈值（≥20）', String(docs.length))
 else bad('R3. 扫描到的文档数低于阈值', String(docs.length))
 
-console.log('\n=== DOC REFERENCES VERIFY (R1–R3) ===')
+// R4（#166）：三处手抄的 D 区间指针一致性。匹配式是票面判据 `D1–D5\d` 的超集
+// （`D1–D\d+`：D 号过 59 仍跟随，守卫不随 D 号增长自己腐烂）；某文件 0 命中同样红
+// （S1 缺席必响亮 —— 写成 hyphen「D1-D53」一类形态漂移在这里现形，而非静默漏扫）。
+const POINTER_DOCS = ['AGENTS.md', 'README.md', 'docs/code-review-brief.md']
+const D_RANGE = /D1–D\d+/gu
+/** CONTEXT.md 决策条目形态：行首 `- **D48（2026-10-17，…）**`（#166 落地实测 53 条、
+ *  D1–D53 连续无跳号、无字母后缀编号）。 */
+const D_ENTRY = /^- \*\*D(\d+)（/gm
+/** 声明例外（与上面 ALLOW 同口径：可 review 的允许清单，不是放宽匹配）——
+ *  code-review-brief.md 的 `D1–D51` 是 D16b 行的历史叙述（#143 时刻「CONTEXT.md 决策
+ *  编号已占 D1–D51」的读数），不是当前区间指针。例外值从文件里消失 → 死例外 → 红。 */
+const RANGE_ALLOW = new Map([
+  ['docs/code-review-brief.md::D1–D51', '#143 历史叙述（D16b 行「已占 D1–D51」时刻读数），非当前区间指针'],
+])
+{
+  const pointers = new Map()
+  let r4bad = false
+  for (const doc of POINTER_DOCS) {
+    const hits = [...readFileSync(join(REPO, doc), 'utf8').matchAll(D_RANGE)].map(m => m[0])
+    const allowedHere = [...RANGE_ALLOW.keys()].filter(k => k.startsWith(doc + '::')).map(k => k.split('::')[1])
+    for (const v of allowedHere) {
+      if (!hits.includes(v)) { bad(`R4. ${doc} 的区间例外 ${v} 已不在文件里（死例外，请清理 RANGE_ALLOW）`); r4bad = true }
+    }
+    const unexpected = [...new Set(hits.filter(v => !allowedHere.includes(v)))]
+    if (unexpected.length === 0) { bad(`R4. ${doc} 缺 D 区间指针（0 命中 —— 形态漂移还是真丢了？）`); r4bad = true; continue }
+    if (unexpected.length > 1) { bad(`R4. ${doc} 内区间值不止一个`, `${unexpected.join(' / ')} —— 新值是指针更新还是历史叙述？二选一：改指针或进 RANGE_ALLOW`); r4bad = true; continue }
+    pointers.set(doc, unexpected[0])
+  }
+  if (!r4bad) {
+    const distinct = [...new Set(pointers.values())]
+    if (distinct.length !== 1) {
+      bad('R4. 三处 D 区间指针不一致（#156 式漏同步）', [...pointers.entries()].map(([d, v]) => `${d}=${v}`).join(' | '))
+    } else {
+      const dNums = [...readFileSync(join(REPO, 'CONTEXT.md'), 'utf8').matchAll(D_ENTRY)].map(m => Number(m[1]))
+      if (dNums.length === 0) bad('R4. CONTEXT.md 决策条目解析面失效（D_ENTRY 0 命中 —— 条目形态变了？）')
+      else {
+        const maxD = Math.max(...dNums)
+        const cap = Number(distinct[0].split('–')[1].slice(1))
+        if (cap === maxD) ok('R4. D 区间指针三处一致且上限 == CONTEXT.md 最大 D 号', `${distinct[0]}（CONTEXT.md 实测最大 D${maxD}，声明例外 ${RANGE_ALLOW.size} 条）`)
+        else bad('R4. 区间上限与 CONTEXT.md 实测最大 D 号不符', `三处均为 ${distinct[0]}，但 CONTEXT.md 最大 D${maxD} —— 新决策落地漏同步区间指针（#156 同族）`)
+      }
+    }
+  }
+}
+
+console.log('\n=== DOC REFERENCES VERIFY (R1–R4) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
