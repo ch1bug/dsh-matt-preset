@@ -61,6 +61,23 @@ else bad('F8. 默认 label', DEFAULT_LABEL)
 
 eq('F9. parseArgs 解析 --repo/--label/--json', parseArgs(['--repo', 'o/r', '--label', 'ready-for-human', '--json']), { repo: 'o/r', label: 'ready-for-human', json: true })
 
+// F10（#142）：P0 可见标记——`p0` 字段只反映标签存在与否，且不改变排序/成员判定。
+// 非空洞对照：把 #10 的 P0 摘掉必须真红（p0 翻 false）。
+const p0Issues = [
+  { ...ISSUES[0], labels: ['enhancement', 'ready-for-agent', 'P0'] },
+  { ...ISSUES[1], labels: ['bug', 'ready-for-agent'] },
+  { ...ISSUES[2], labels: ['ready-for-agent', 'P0'] },
+  { number: 2, title: 'p0-earlier', labels: ['ready-for-agent', 'P0'], assignees: [], state: 'open' },
+  // 非 P0 夹层：若排序被改成「P0 优先再按票号」，输出会变 [2,10,5]——F10c 因此可红（byNumber 恒 [2,5,10]）
+  { number: 5, title: 'not-p0', labels: ['ready-for-agent'], assignees: [], state: 'open' },
+]
+const p0Run = readyFrontier(p0Issues, OPEN_BLOCKERS)
+eq('F10a. frontier 项带 p0=true（挂 P0）', p0Run.frontier.map(i => [i.number, i.p0]), [[2, true], [5, false], [10, true]])
+eq('F10b. gated 项也带 p0 标记', p0Run.gated.map(i => [i.number, i.p0]), [[11, false], [12, true]])
+eq('F10c. P0 不驱动排序——非 P0 的 #5 夹在两张 P0 票之间，仍按票号升序', p0Run.frontier.map(i => i.number), [2, 5, 10])
+const noP0Run = readyFrontier([{ ...ISSUES[0], labels: ['enhancement', 'ready-for-agent'] }], OPEN_BLOCKERS)
+eq('F10d. 摘掉 P0 后 p0=false（探针可红）', noP0Run.frontier.map(i => i.p0), [false])
+
 console.log('\n=== FRONTIER VERIFY (offline, pure) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

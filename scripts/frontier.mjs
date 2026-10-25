@@ -51,7 +51,9 @@ export function readyFrontier(issues, openBlockers, { label = DEFAULT_LABEL } = 
     else frontier.push(issue)
   }
   const byNumber = (a, b) => a.number - b.number
-  return { frontier: frontier.sort(byNumber), gated: gated.sort(byNumber) }
+  // P0 可见标记（#142）：正交例外轴，只作标记——排序维持票号升序（byNumber），不驱动排序。
+  const mark = (issue) => ({ ...issue, p0: issue.labels.includes('P0') })
+  return { frontier: frontier.sort(byNumber).map(mark), gated: gated.sort(byNumber).map(mark) }
 }
 
 /** 解析 CLI 参数（--repo/--label/--json/--help）。 */
@@ -125,7 +127,7 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   console.log(`\n=== ready frontier（${label} · open · 无 open 阻塞 · 无 assignee）: ${frontier.length} ===`)
-  for (const issue of frontier) console.log(`  #${issue.number}  ${issue.title}`)
+  for (const issue of frontier) console.log(`  ${issue.p0 ? '[P0] ' : ''}#${issue.number}  ${issue.title}`)
   console.log(`\n=== 被 gate（${label} 但有 open 阻塞 / assignee）: ${gated.length} ===`)
   for (const issue of gated) {
     const reasons = [

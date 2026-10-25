@@ -229,6 +229,10 @@ node scripts/frontier.mjs --label ready-for-human
 node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理由)
 ```
 
+`P0` 票的读法（#142）：人读输出的 **frontier 段**带 `[P0]` 前缀（gated 段只印票号+理由，不带），`--json` 的条目带 `p0: true/false` 字段——
+它只是**正交例外轴的可见标记**（插队输入判据见 #136），不改变 frontier 的成员判定，
+也不改变排序（仍按票号升序）。
+
 它只走 **GitHub 原生依赖边**（`.../issues/<n>/dependencies/blocked_by`）。两个读图陷阱：
 
 - `issue_dependencies_summary.blocked_by` **只计 open 阻塞**——已关闭的阻塞（历史边）读数是 0，
