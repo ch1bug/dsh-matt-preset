@@ -16,6 +16,11 @@ profile affected), then WAIT for confirmation, exactly as with a push. Reading
 is routine: `list_plugins` / `list_bundles` need no confirmation; only mutations
 gate. Disabling a plugin that is already installed still mutates the live
 profile.
+Those names are the plugin-manager tool surface, which this mode's roster mounts
+behind the host's profile context; on a host without it the row is disabled and the
+same changes run through the host CLI (`dsh plugin`) instead — report the exact
+target and wait for confirmation exactly as above, so the gate's meaning survives
+the missing surface.
 @@ creator-inspect-first after=creator-gate-extension
 CREATOR INSPECT-FIRST — the live registry, not memory, is the contract source.
 Before writing or editing plugin code: `cordis_inspect_list` to see what
@@ -26,3 +31,9 @@ Cite the queried contract in the plan; a guessed name, signature or slot path is
 a defect, not a shortcut. Inspection is READ-ONLY: it never invokes a business
 Service and never mutates the runtime, so it neither satisfies nor triggers any
 gate.
+These two tools come from the tool-cordis row, which this mode's roster mounts
+(the official cordis preset mounts the same); when the current host exposes no
+inspect provider and the tools are absent, read the package's own published
+contract instead — the plugin's README and Config schema, or the upstream source
+checkout — and cite that source in the plan exactly as you would the queried
+contract.

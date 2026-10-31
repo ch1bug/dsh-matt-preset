@@ -30,6 +30,15 @@ implement（内嵌 tdd）→ code-review**，配 handoff 工具
 > 曾试验两阶段 bootstrap（梁神模式，`tool-bootstrap.mjs`）：实测仅对 DeepSeek V4 Pro
 > 有效，对其他模型（含 V4 Flash）是副作用，已取消（见 `CONTEXT.md` D17），恢复全量表面。
 
+## 工具依赖面（#105：开发机 ≠ 用户环境）
+
+常驻 roster 每个 row 引用的包按出货面出处归档（core / in-box opt-in / non-in-box /
+in-repo），机械守卫 = `tests/verify-row-deps.mjs`。两个非 core 的常驻行前提：
+**`tool-ralph`** 依赖 `dsh-experimental-ralph-bundle`——随默认安装已装、默认未启用，
+在 Plugins 页启用即得；缺席时只少 ralph 循环执行器，工作流其余部分不受影响。
+**`str-replace-editor`** 是 core 包 + opt-in row，本 preset 有意常驻挂载（#117 拍板 b）。
+判据、归类与缺席退化路径的单一事实源见 [docs/preset-runtime-deps.md](docs/preset-runtime-deps.md)。
+
 ## 安装（bundle patch 装载，#28）
 
 DSH 0.2.0-rc 起的 preset 注册表**不做目录扫描**——放进 `.agent-presets/` 不会再被
