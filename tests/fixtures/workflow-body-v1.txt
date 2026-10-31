@@ -314,7 +314,12 @@ per-issue push rhythm.
   The appended 环境快照 git values and 产物清单 sha256 entries are machine-filled by
   the handoff tool at generation time (git probes / hashing over the declared artifact
   paths, #168) — the parent session never hand-fills them, and the manifest section
-  exists only when artifacts are declared (no placeholder lines).
+  exists only when artifacts are declared (no placeholder lines). Directed handoffs
+  whose credential is a ticket number additionally get a 票面回读 section: the tool
+  reads title/state/labels from the tracker at generation time (#172) — transcribed
+  ticket fields lose to that section, and fields it cannot know are marked 生成后漂移
+  (the child re-reads the tracker; a failed read is marked loudly, never downgraded
+  to the transcribed values).
 - Batch end: after the summary gate, push all commits in one go; remote
     CI all-green is the completion gate — red means unfinished batch work,
     fix and re-verify.

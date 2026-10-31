@@ -58,8 +58,10 @@ node evals/autonomy/runner.mjs b chain3
 
 链形状：hop1 会话做票 A（slugify）→ 写定向交接文档 `.eval/handoff-A.md`（形状契约 =
 handoff_tool 的五节：`# Handoff` / 本会话任务（human 已定向）/ 环境快照 / 产物清单
-sha256 / 交接边界——边界段是 runner 内嵌副本，**mode b 启动时逐行核对正典
-`handoff-tool.mjs` 交接边界段，漂移即响亮退出**，评测不固化旧版边界协议）+ 更新
+sha256 / 交接边界——边界段 runner 经 import 消费正典 `handoff-tool.mjs`
+`HANDOFF_BOUNDARY`（#163 起零内嵌副本），**mode b 启动时逐行核对正典，漂移即响亮退出**，
+评测不固化旧版边界协议；#172 起真 tool 面凭据为票号时另有**票面回读**条件节——本评测
+凭据是批次型不触发，不手写，见 runner `HANDOFF_CONTRACT` 的豁免句）+ 更新
 `.eval/batch-state.md` → 会话结束；runner 机械复核产物清单（`manifest-check.json`）后把
 交接文档**原文**作为 hop2 子会话的第一条 prompt（模拟 handoff_tool 的 fresh + followup，
 零继承历史）→ hop2 承接票 B（slug-cli，依赖票 A 导出）。

@@ -295,6 +295,24 @@ try {
       const ackNotDispatch = pText.includes('范围认可 ≠ 派单')
       const markerPassed = pText.includes('## 本会话任务（human 已定向）')
       const skillPinned = pText.includes('/implement')
+      // #172 item1：票号凭据 → tool 在拼装前真调 gh 回读（缺省 reader，本挂具 cwd = 仓根）
+      // ——产出必须含「票面回读」节：值行要么 tracker 实值、要么「回读失败：<原因>」（两态
+      // 都响亮、零空壳；断言不钉 tracker 内容逐字值——那属于守卫注入面 tests/verify-handoff-tool.mjs
+      // T9，钉在这里会随 tracker 内容演进把执行面打成假红）。
+      {
+        const tStart = pText.indexOf('## 票面回读')
+        const tEnd = tStart < 0 ? -1 : pText.indexOf('\n## ', tStart)
+        const ticketSection = tStart < 0 ? '' : pText.slice(tStart, tEnd < 0 ? pText.length : tEnd)
+        const contentLines = ticketSection.split('\n').filter((l) => l.trim() !== '' && !l.trim().startsWith('<!--'))
+        const allFilled = contentLines.length >= 3 && contentLines.slice(1).every((l) => /^- .+[:：]\s*\S/.test(l))
+        const twoStates = (ticketSection.includes('- 标题: ') && ticketSection.includes('以本节为准') && ticketSection.includes('生成后漂移'))
+          || (ticketSection.includes('- 回读失败：') && ticketSection.includes('实读'))
+        if (allFilled && twoStates) {
+          ok('A3b. ticket-credential handoff carries the tracker read-back section (#172): tracker values or loud 回读失败 — zero silent shells', ticketSection.split('\n').find(l => l.startsWith('- 标题') || l.startsWith('- 回读失败'))?.slice(0, 90))
+        } else {
+          bad('A3b. tracker read-back section (#172)', JSON.stringify({ tStart, allFilled, twoStates, sample: ticketSection.slice(0, 200) }))
+        }
+      }
       if (dualRule && scoped && credentialed && ackNotDispatch && markerPassed && skillPinned) {
         ok('A3. boundary carries D35 dual rules + D37 scope + #156 credential rule; 定向 marker passes through; /implement pinned', JSON.stringify(pText.slice(idxP, idxP + 120)))
       } else {

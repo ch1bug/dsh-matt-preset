@@ -196,6 +196,14 @@ subagent 没有你的上下文（不会自带基线）。别复述成一句话�
 
 两个 subagent **同时**发（一条消息两个调用），各给"diff 命令 + 提交列表 + 该轴材料 + 它的 brief"：
 
+**等待 = 收信，不是轮询**（**#172**，批E/F 实测）：两轴 subagent 不是 Team member——
+`wait_agent` 对它们**恒返回 noProgress**，轮询只会空转（批E #1539 ×5 轮；批F 同象 count 3，
+父会话空转约 20 分钟，中途 `send_message` 催报报 "active teammate not found"）。固定模式 =
+**并行独立工作 + 下一轮收信**：两个调用同一条消息发出后**本轮到此结束**，运行时会在下一轮
+把两份报告投递回来；报告未齐不聚合、缺哪轴下轮补读，等待期间不重发 prompt、不 poll
+`wait_agent`（wait_agent 的这个限制是 harness 运行时行为，本仓修法是指引层，与 #163 的
+WAKE ORCHESTRATION in-repo 编排器划界——那边管编排器轮询/宽限，这边管交互式双轴 review 的等待）。
+
 - **两轴都要真跑被测用例**：reviewer 收到 diff、没有探索成本，正是该自己确认"这条断言非空洞"的一轴。
   `node tests/<file>.mjs`。依赖接线锚在 **`tests/node_modules/`**（`@deepseek-ai` junction → 本机 dsh
   安装；一条 `node scripts/link-runtime-deps.mjs` 补齐，D43）——仓根 `node_modules` 只有 `yaml`，

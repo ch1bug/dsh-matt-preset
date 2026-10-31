@@ -39,6 +39,17 @@
  * 不留空壳）；产物清单 = 有声明才生成整节，sha256 由 tool 对声明 path 现算，
  * 占位行字面从产出物绝迹。拼装面抽成可导入的 `assembleHandoffDocument`（守卫
  * tests/verify-handoff-tool.mjs 与 #172 的 tracker 回读面都落在它上面）。
+ *
+ * #172 item1（tracker 单源回读）：定向节凭据为票号（`凭据：#<票号>`）时，tool 在拼装前
+ * 经 `gh issue view` 回读票面实值（标题/状态/标签/URL）生成「票面回读」节——定向节里经
+ * 转抄的票面字段（标签笔误 / 计数漂移 / 哈希软化，IRIS #1539/#1546/#1532）从此有机械
+ * 判据裁定：与本节不符以本节为准。回读失败写「回读失败：<原因>」响亮标记，不静默降级为
+ * 转抄值；票面正文内的计数/哈希等生成后仍会漂移的字段，节内显式标「生成后漂移，子会话
+ * 以实读为准」。gh 回读器的 env 经 `readerEnv` 过滤（剥 GIT_* 与 GH_REPO，#110 同族——
+ * 复审①：GH_REPO 命中时是静默读到别的 tracker 的同号票并顶着机械背书，不是回读失败）。
+ * 守卫：tests/verify-handoff-tool.mjs T9 族（注入 reader，不打真网；T9d 钉 readerEnv
+ * 过滤面与源码消费锚——真 execFile 的 env 子进程传递不在守卫断言面，显式声明）+
+ * tests/verify.mjs Track A（真挂具，成功/失败两态都响亮断言）。
  */
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -233,17 +244,135 @@ async function buildManifestSection(artifacts, cwd) {
   ].join('\n')
 }
 
+// ── #172 item1：tracker 单源回读（票面回读节）──────────────────────────────────
+// 定向交接里经转抄的票面字段会与 tracker 漂移（标签笔误 / 计数漂移 / 哈希软化——
+// IRIS #1539/#1546/#1532 三实锤）：转抄值此前没有任何机械判据可裁定，靠自由文本豁免。
+// 本节让 tool 在拼装前自己读 tracker（gh issue view 一族，只读），转抄字段从此有单源。
+
+/** 定向节凭据行的票号提取（非批定向 = `凭据：#<票号>`，#156/D52 的票号形态）。批次凭据
+ *  （`凭据：批次 <宣告id>`）与凭据行缺失都不匹配 → 无 tracker 回读对象，整节缺席。
+ *  模块内单点：提取行为由 tests/verify-handoff-tool.mjs T9（reader 调用观察）钉住，
+ *  暂无第二消费者——等真消费者出现再导出（#172 复审④ 裁决：不预置 API 面）。 */
+const TICKET_CREDENTIAL_RE = /凭据[:：]\s*#\s*(\d+)/
+
+const GH_TICKET_TIMEOUT_MS = 10_000
+
 /**
- * 拼装交接文档（#168 起从 executeHandoff 提出的**可导入面**）：作者正文 + 自动快照节 +
- * （有声明才有的）产物清单节 + 交接边界段。守卫 tests/verify-handoff-tool.mjs 直接测它；
- * #172 item1（tracker 回读）在本函数面上继续扩「机械填」的清单。
+ * gh 回读器的 env 过滤（#110 同族纪律，与上方 git 探针剥 `GIT_*` 同一动机）：继承的
+ * GIT_DIR / GIT_WORK_TREE 会把 gh 内部的 git remote 解析劫持到别的仓，GH_REPO 会**静默**
+ * 覆盖 gh 沿 cwd 的仓库定位（gh 优先级 -R > GH_REPO > cwd git remote）——命中时回读器
+ * 不会失败，而是读到**别的 tracker 的同号票**，回读节照样顶着「tracker 实值」背书
+ * 「以本节为准」：恰是 #172 要消灭的静默错值背书形态（#1532 哈希软化同类）。认证面
+ * GH_TOKEN / GH_HOST 等保留（没有它们 gh 读不到私有仓）。
+ * 复审①（2026-10-31）拍板：GH_REPO 一并剥——凭据票号属于父会话 cwd 所在仓，剥离即
+ * 强制沿 cwd 解析，与凭据语义一致。
+ */
+export function readerEnv(base) {
+  const env = {}
+  for (const key of Object.keys(base)) {
+    if (key.startsWith('GIT_')) continue
+    if (key === 'GH_REPO') continue
+    env[key] = base[key]
+  }
+  return env
+}
+
+/**
+ * 缺省回读器：`gh issue view <票号> --json`（只读）。`cwd` 与 git 探针同基准
+ * （父会话 header.cwd）——gh 沿它解析所在仓的 origin，无 -R 硬编。env 走 readerEnv
+ * 过滤（#110 同族）。失败**不抛**：返回失败原因，由回读节写成「回读失败：<原因>」
+ * 响亮标记（不留空壳、不静默降级）。
+ */
+function ghTicketReader(ticket, cwd) {
+  return new Promise((resolveRead) => {
+    execFile(
+      'gh',
+      ['issue', 'view', String(ticket), '--json', 'number,title,state,labels,url'],
+      // `env: readerEnv(process.env)` 同时是 tests/verify-handoff-tool.mjs T9d 的源码消费锚
+      { timeout: GH_TICKET_TIMEOUT_MS, windowsHide: true, cwd, env: readerEnv(process.env) },
+      (error, stdout, stderr) => {
+        if (error != null) {
+          const firstLine = String(stderr || error.message || error).trim().split('\n')[0]
+          const reason = (error.killed && firstLine === ''
+            ? `gh 回读超时（${GH_TICKET_TIMEOUT_MS}ms）`
+            : firstLine === '' ? String(error.code ?? 'gh 回读失败') : firstLine
+          ).slice(0, 200)
+          return resolveRead({ ok: false, reason })
+        }
+        try {
+          const parsed = JSON.parse(stdout)
+          const labels = Array.isArray(parsed.labels) ? parsed.labels.map((l) => String(l?.name ?? '')).filter((n) => n !== '') : []
+          // 空壳值行判据（#168 同族）：字段缺失/为空要显式说，不许渲染成空值行。
+          const orUnknown = (v, kind) => (v === undefined || v === null || String(v).trim() === '' ? `（tracker 未返回${kind}）` : String(v))
+          resolveRead({
+            ok: true,
+            fields: {
+              number: orUnknown(parsed.number, '票号'),
+              title: orUnknown(parsed.title, '标题'),
+              state: orUnknown(parsed.state, '状态'),
+              labels: labels.length > 0 ? labels.join(', ') : '（无标签）',
+              url: orUnknown(parsed.url, 'URL'),
+            },
+          })
+        } catch (parseError) {
+          resolveRead({ ok: false, reason: `gh 输出非 JSON：${String(parseError?.message ?? parseError).slice(0, 160)}` })
+        }
+      },
+    )
+  })
+}
+
+/**
+ * 票面回读节（#172）：定向节凭据为票号时，tool 生成时经回读器取 tracker 实值——
+ * 转抄字段与本节不符时以本节为准（产出以回读值为准并标记）；票面正文内的计数/哈希/AC
+ * 勾选态等生成后仍会漂移，节内显式标「生成后漂移，子会话以实读为准」。回读失败 =
+ * 「回读失败：<原因>」响亮行 + 实读规约，**不静默降级为转抄值**。无票号凭据（候选 /
+ * 批次定向）→ 返回 ''（整节缺席，与 #168 产物清单同构：没有 tracker 对象就不造该节）。
+ */
+async function buildTicketSection(directedSection, cwd, reader) {
+  const ticket = TICKET_CREDENTIAL_RE.exec(directedSection)?.[1]
+  if (ticket === undefined) return ''
+  const read = await (reader ?? ghTicketReader)(ticket, cwd)
+  const header = [
+    '## 票面回读（tracker 实读，#172）',
+    '<!-- 本节由 handoff_tool 生成时经 `gh issue view` 回读 tracker 实值（转抄字段不手填）。定向节与正文里经转抄的票面字段（标题/标签/计数/哈希）若与本节不符，以本节为准。 -->',
+  ]
+  if (!read.ok) {
+    return [
+      ...header,
+      `- 票号: #${ticket}`,
+      `- 回读失败：${read.reason}`,
+      '<!-- 回读失败面：本节无 tracker 实值，正文转抄字段不做机械背书——子会话开工前必须实读 `gh issue view <票号>`，转抄与实读不符以实读为准。 -->',
+    ].join('\n')
+  }
+  const f = read.fields ?? {}
+  return [
+    ...header,
+    `- 票号: #${f.number ?? ticket}`,
+    `- 标题: ${f.title ?? '（tracker 未返回标题）'}`,
+    `- 状态: ${f.state ?? '（tracker 未返回状态）'}`,
+    `- 标签: ${f.labels ?? '（tracker 未返回标签）'}`,
+    `- URL: ${f.url ?? '（tracker 未返回 URL）'}`,
+    '- 回读时刻: ' + new Date().toISOString(),
+    '<!-- 票面正文内的计数/哈希/AC 勾选态在生成后仍会漂移（本节不背书）——生成后漂移，子会话以实读 `gh issue view <票号>` 为准。 -->',
+  ].join('\n')
+}
+
+/**
+ * 拼装交接文档（#168 起从 executeHandoff 提出的**可导入面**）：作者正文 + （票号凭据才有的）
+ * 票面回读节 + 自动快照节 + （有声明才有的）产物清单节 + 交接边界段。守卫
+ * tests/verify-handoff-tool.mjs 直接测它；#172 item1（tracker 回读）在本函数面上继续扩
+ * 「机械填」的清单。
  *
  * 定向/候选的门（凭据行、skill 声明）也在这里：它们管的是文档形状，且拒绝必须发生在
- * 写文件 / 建子会话之前（Track A4/A5 的执行面断言依赖这一顺序）。
+ * 写文件 / 建子会话之前（Track A4/A5 的执行面断言依赖这一顺序）。回读同样发生在拼装前：
+ * reader 先行 await，回读结果在拼节时已在场（失败面写响亮标记，不静默降级为转抄值）。
  *
  * @param {string} document 父会话写的正文（`# Handoff` 标题去重、focus 前缀在此处理）
- * @param {{focus?: string, skill?: string, artifacts?: string[], cwd?: string}} [opts]
- *   `cwd` = 探针与哈希的基准目录（生产 = 父会话 header.cwd；缺省 process.cwd()）
+ * @param {{focus?: string, skill?: string, artifacts?: string[], cwd?: string,
+ *          trackerReader?: (ticket: string, cwd?: string) => Promise<object>}} [opts]
+ *   `cwd` = 探针/哈希/gh 回读的基准目录（生产 = 父会话 header.cwd；缺省 process.cwd()）；
+ *   `trackerReader` = 回读器注入面（守卫用，注入假 reader 不打真网；缺省 = 内置 gh 实现）
  * @returns {Promise<string>} 完整交接文档（节间空行分隔；页脚注释由执行面追加）
  */
 export async function assembleHandoffDocument(document, opts = {}) {
@@ -283,14 +412,15 @@ export async function assembleHandoffDocument(document, opts = {}) {
     )
   }
   const invocation = isAssignment && skill !== 'none' ? `/${skill}` : ''
-  const [snapshot, manifest] = await Promise.all([
+  const [snapshot, manifest, ticketSection] = await Promise.all([
     buildSnapshotSection(cwd),
     buildManifestSection(opts.artifacts, cwd),
+    buildTicketSection(directedSection, cwd, opts.trackerReader),
   ])
   const boundary = HANDOFF_BOUNDARY.join('\n')
   // 节间空行分隔。旧实现的 '' 分隔符被 filter(Boolean) 整个吞掉，节与节之间只有单换行
   //（2026-10-31 基线实测 .scratch/verify168/baseline-assembly.mjs）——顺手修正为可读形状。
-  return [invocation, prefix, body, snapshot, ...(manifest !== '' ? [manifest] : []), boundary]
+  return [invocation, prefix, body, ticketSection, snapshot, ...(manifest !== '' ? [manifest] : []), boundary]
     .filter((part) => part !== '')
     .join('\n\n')
 }
@@ -302,7 +432,7 @@ const handoffSchema = {
     document: {
       type: 'string',
       description:
-        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). Session-local content lives HERE: confirmed decisions, next steps (every candidate/pending item with 判据 + 读数, unverifiable ones marked 未核 — the appended boundary enforces this), and environment claims each as a `命令 → 输出` line (a bare environment claim once shipped a false verdict — D26). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section. The tool machine-fills the appended sections — 环境快照 (git probe values, #168), 产物清单 (only when `artifacts` is declared; sha256 computed by the tool), and 交接边界 — do not duplicate or hand-fill them.',
+        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). Session-local content lives HERE: confirmed decisions, next steps (every candidate/pending item with 判据 + 读数, unverifiable ones marked 未核 — the appended boundary enforces this), and environment claims each as a `命令 → 输出` line (a bare environment claim once shipped a false verdict — D26). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section. The tool machine-fills the appended sections — 环境快照 (git probe values, #168), 产物清单 (only when `artifacts` is declared; sha256 computed by the tool), 票面回读 (only when the directed credential is a ticket number `凭据：#<票号>`; the tool reads title/state/labels from the tracker via `gh issue view` at generation time and the section, not the transcribed values, is authoritative — #172), and 交接边界 — do not duplicate or hand-fill them. Transcribed ticket fields that the tool cannot know (counts, hashes inside the ticket body) are marked 生成后漂移 — the child session re-reads the tracker for those.',
     },
     artifacts: {
       type: 'array',

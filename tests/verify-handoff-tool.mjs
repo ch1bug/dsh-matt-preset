@@ -17,19 +17,28 @@
  *   T6  status 短读数随树态变化（干净 → untracked×1）
  *   T7  凭据 / skill 门经新拼装面照常响亮（拒绝发生在写盘/建子会话之前）
  *   T8  定向 invocation 钉首行 + 交接边界段照常携带
+ *   T9  #172 票面回读（注入 reader，不打真网）：票号凭据 → 节内 = reader 实值 +
+ *       「以本节为准」规约 + 「生成后漂移」标记；T9b 失败面响亮零空壳、不造转抄实值行；
+ *       T9c 批次凭据 / 候选 → 整节缺席且 reader 零调用
+ *   T9d #172 复审①：gh 回读器 env 过滤（GIT_* 与 GH_REPO 剥离、认证面/PATH 保留）+
+ *       源码消费锚；真 execFile 的 env 子进程传递显式声明不在断言面
  *
  * git 隔离：夹具仓走 `tests/isolated-git.mjs` 挂具（`fixtureEnv` + `gitIn`，`git -C` 定位、
  * env 剥 `GIT_*`）—— 与被测探针（`git -C` + 剥 `GIT_*`）同一套定位语义，夹具读数与探针
- * 读数因此可比。探针失败分支用**真非仓目录**实测，不注入假探针。
+ * 读数因此可比。探针失败分支用**真非仓目录**实测，不注入假探针。#172 的 tracker 回读器
+ * 反之**一律注入**（T8/T9 族）：守卫不打真网，缺省 gh 实现的两态语义由 tests/verify.mjs
+ * Track A 在真挂具上断言（成功实值 / 失败原因都响亮）。
  *
- * 扰动真红（非空洞记录，字节级还原后零残留）：`.scratch/verify168/perturbation.md`。
+ * 扰动真红（非空洞记录，字节级还原后零残留）：`.scratch/verify168/perturbation.md`、
+ * `.scratch/verify172/perturbation.md`（#172）。
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 
-import { assembleHandoffDocument, CREDENTIAL_FORMATS, HANDOFF_BOUNDARY, inject, name } from '../handoff-tool.mjs'
+import { assembleHandoffDocument, CREDENTIAL_FORMATS, HANDOFF_BOUNDARY, inject, name, readerEnv } from '../handoff-tool.mjs'
 import { fixtureEnv, gitIn } from './isolated-git.mjs'
 
 const results = []
@@ -50,6 +59,8 @@ const OLD_SHELL_LABELS = ['- 关键文件状态: ', '- 环境结论（', '- 已�
 /** 旧模板的占位行字面（#168 绝迹清单）。 */
 const PLACEHOLDER_LITERALS = ['替换本行', 'sha256:0000', '无产物 → 删除本节']
 const sha256Of = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 const tmpRoot = mkdtempSync(join(tmpdir(), 'verify-handoff-tool-'))
 try {
@@ -250,11 +261,11 @@ try {
     }
   }
 
-  // ── T8：定向 invocation 钉首行 + 定向节透传 ──────────────────────────────────
+  // ── T8：定向 invocation 钉首行 + 定向节透传（注入 reader：守卫不打真网）───────
   {
     const doc8 = await assembleHandoffDocument(
       '定向验证正文。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- 凭据：#168（已落票，票 open）',
-      { skill: 'implement', cwd: repoDir },
+      { skill: 'implement', cwd: repoDir, trackerReader: async () => ({ ok: false, reason: 'T8 注入 reader：不回读' }) },
     )
     docs.push(doc8)
     const passThrough = doc8.includes('## 本会话任务（human 已定向）') && doc8.includes('凭据：#168')
@@ -265,11 +276,110 @@ try {
       bad('T8. 定向 invocation / 定向节透传', JSON.stringify({ pinned, passThrough, head: doc8.slice(0, 60) }))
     }
   }
+
+  // ── T9：#172 票面回读（注入 reader，不打真网）────────────────────────────────
+  // T9  成功面：票号凭据 → 节内值行 = reader 实值（转抄值被规约行裁定：以本节为准）+
+  //          「生成后漂移」标记在场；tool 不改正文（转抄行透传，判定交给节）。
+  // T9b 失败面：「回读失败：<非空原因>」响亮标记 + 实读规约，零空壳、不造转抄实值行。
+  // T9c 无对象面：批次凭据 / 候选交接 → 整节缺席，且 reader **零调用**（reader 被调即炸）。
+  {
+    const reads = []
+    const fakeReader = async (ticket, cwd) => {
+      reads.push({ ticket, cwd })
+      return {
+        ok: true,
+        fields: {
+          number: ticket,
+          title: '回读实值标题（tracker 单源）',
+          state: 'OPEN',
+          labels: 'enhancement, ready-for-agent',
+          url: 'https://tracker.invalid/issues/' + ticket,
+        },
+      }
+    }
+    const doc9 = await assembleHandoffDocument(
+      '定向验证正文（#172 回读）。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n'
+      + '- 转抄标签：P0, ready-for-human（与 tracker 相反的转抄——扰动面）\n- 凭据：#171（已落票，票 open）',
+      { skill: 'implement', cwd: repoDir, trackerReader: fakeReader },
+    )
+    docs.push(doc9)
+    {
+      const section = sectionOf(doc9, '票面回读（tracker 实读，#172）')
+      const afterDirected = doc9.indexOf('## 票面回读') > doc9.indexOf('## 本会话任务（human 已定向）')
+      const beforeSnapshot = doc9.indexOf('## 票面回读') < doc9.indexOf('## 环境快照')
+      const valuesFromReader = section.includes('- 标题: 回读实值标题（tracker 单源）')
+        && section.includes('- 状态: OPEN')
+        && section.includes('- 标签: enhancement, ready-for-agent')
+        && section.includes('- URL: https://tracker.invalid/issues/171')
+      const transcriptionRuled = !section.includes('P0, ready-for-human') && doc9.includes('转抄标签：P0, ready-for-human')
+        && section.includes('以本节为准')
+      const driftMarked = section.includes('生成后漂移') && section.includes('以实读')
+      const readerCalled = reads.length === 1 && reads[0].ticket === '171' && reads[0].cwd === repoDir
+      if (section !== '' && afterDirected && beforeSnapshot && valuesFromReader && transcriptionRuled
+        && driftMarked && readerCalled && emptyShells(section).length === 0) {
+        ok('T9. 票号凭据 → 票面回读节 = reader 实值（转抄值被「以本节为准」裁定，正文透传）+ 生成后漂移标记 + 节序在定向节后快照前',
+          `ticket=#${reads[0].ticket}`)
+      } else {
+        bad('T9. 票面回读成功面', JSON.stringify({ section: section.slice(0, 240), afterDirected, beforeSnapshot, valuesFromReader, transcriptionRuled, driftMarked, readerCalled }))
+      }
+    }
+    const doc9b = await assembleHandoffDocument(
+      '定向验证正文（回读失败面）。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- 凭据：#42（已落票，票 open）',
+      { skill: 'implement', cwd: repoDir, trackerReader: async () => ({ ok: false, reason: '（注入）tracker 不可达' }) },
+    )
+    docs.push(doc9b)
+    {
+      const section = sectionOf(doc9b, '票面回读（tracker 实读，#172）')
+      const loud = section.includes('- 回读失败：（注入）tracker 不可达')
+        && section.includes('实读') && section.includes('不做机械背书')
+      // 失败面不造实值：转抄值不冒充回读值（不静默降级）
+      const noFakeValues = !section.includes('- 标题: ') && !section.includes('- 标签: ')
+      if (section !== '' && loud && noFakeValues && emptyShells(section).length === 0) {
+        ok('T9b. 回读失败 → 「回读失败：<非空原因>」响亮标记 + 实读规约，零空壳、不造转抄实值行')
+      } else {
+        bad('T9b. 票面回读失败面', JSON.stringify({ section: section.slice(0, 240), loud, noFakeValues }))
+      }
+    }
+    {
+      let calls = 0
+      const explodingReader = async () => { calls += 1; throw new Error('无票号凭据不得触发回读') }
+      const batchDoc = await assembleHandoffDocument(
+        `定向验证正文（批次凭据）。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- ${CREDENTIAL_FORMATS.batch}（.scratch/batch-state.md 在案）`,
+        { skill: 'implement', cwd: repoDir, trackerReader: explodingReader },
+      )
+      docs.push(batchDoc)
+      const candidateDoc = await assembleHandoffDocument(BODY, { cwd: repoDir, trackerReader: explodingReader })
+      docs.push(candidateDoc)
+      if (!batchDoc.includes('票面回读') && !candidateDoc.includes('票面回读') && calls === 0) {
+        ok('T9c. 批次凭据 / 候选交接 → 回读节整节缺席且 reader 零调用（无 tracker 对象不造该节）')
+      } else {
+        bad('T9c. 无票号凭据面', JSON.stringify({ batch: batchDoc.includes('票面回读'), candidate: candidateDoc.includes('票面回读'), calls }))
+      }
+    }
+    // T9d（#172 复审①）：gh 回读器的 env 过滤面——GIT_*（GIT_DIR/GIT_WORK_TREE 会劫持 gh
+    // 内部 git remote 解析）与 GH_REPO（静默覆盖 gh 仓库定位 → 读到别的 tracker 的同号票
+    // 还顶着机械背书）必须被剥；认证面 GH_TOKEN/GH_HOST 与 PATH 必须保留。
+    // 断言两级：① readerEnv 函数本身（真函数真行为）；② 源码消费锚 `env: readerEnv(process.env)`
+    // 在 ghTicketReader 的 execFile options 里（同 O7b 钉 HANDOFF_BOUNDARY 消费的手法）。
+    // ⚠ declare：真 execFile 把过滤后 env 传给子进程这一层不在守卫断言面（守卫注入 reader
+    // 不走真 execFile）——靠源码锚 + 函数级断言组合钉住，不是「已完整验证子进程 env」。
+    {
+      const filtered = readerEnv({ GIT_DIR: 'x', GIT_WORK_TREE: 'y', GIT_INDEX_FILE: 'z', GH_REPO: 'o/r', GH_TOKEN: 't', GH_HOST: 'h', PATH: 'p', HOME: 'hd' })
+      const stripped = !('GIT_DIR' in filtered) && !('GIT_WORK_TREE' in filtered) && !('GIT_INDEX_FILE' in filtered) && !('GH_REPO' in filtered)
+      const kept = filtered.GH_TOKEN === 't' && filtered.GH_HOST === 'h' && filtered.PATH === 'p' && filtered.HOME === 'hd'
+      const consumed = readFileSync(join(REPO, 'handoff-tool.mjs'), 'utf8').includes('{ timeout: GH_TICKET_TIMEOUT_MS, windowsHide: true, cwd, env: readerEnv(process.env) }')
+      if (stripped && kept && consumed) {
+        ok('T9d. gh 回读器 env 过滤（#110 同族，复审①）：GIT_*/GH_REPO 剥离、GH_TOKEN/GH_HOST/PATH 保留 + 源码消费锚在场')
+      } else {
+        bad('T9d. gh 回读器 env 过滤', JSON.stringify({ stripped, kept, consumed }))
+      }
+    }
+  }
 } finally {
   // 只删本守卫自建的 mkdtemp 路径（home 安全判据：删除目标 = 本条命令自己建出来的路径）
   rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 3 })
 }
 
-console.log('\n=== HANDOFF-TOOL VERIFY (T0–T8) ===')
+console.log('\n=== HANDOFF-TOOL VERIFY (T0–T9) ===')
 console.log(results.join('\n'))
 process.exit(results.some((r) => r.startsWith('  ✗')) ? 1 : 0)
