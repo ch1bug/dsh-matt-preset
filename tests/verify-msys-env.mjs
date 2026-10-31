@@ -1,8 +1,9 @@
 /**
  * verify-msys-env.mjs —— `scripts/msys-env.sh` 的**输入契约**守卫（M1–M6；#107）。
  *
- * 为什么存在：该脚本此前把**本机安装布局**写死在里面（`/c/Program Files/nodejs`、
- * （票面点名的四条 + 一条 triage 漏掉的厂商目录）—— 本仓是 PUBLIC 仓，那些字面量**在 origin/main 上**
+ * 为什么存在：该脚本此前把**本机安装布局**写死在里面（`/c/<标准根>/nodejs` 一族——
+ * 字面形态按 #120 口径 B 也不再复述；票面点名的四条 + 一条 triage 漏掉的厂商目录）
+ * —— 本仓是 PUBLIC 仓，那些字面量**在 origin/main 上**
  * （#107 复验：远端文件与本地逐字节一致）。脱敏的形态是：安装根改为**可覆盖的输入契约**，
  * 缺输入时**响亮说明并跳过那一项**。但"脱敏"这个动作本身极容易**退化**：
  *   · 有人图省事把某一根重新写死（回到本票要治的形态）；
@@ -159,7 +160,7 @@ const STRIP = [
 
 /**
  * 干净基 PATH：**只含一个可辨识的哨兵目录**。判据 = "脚本 prepend 了哪一截"（见 `probe`）。
- * ⚠ 不能继承真机的 PATH —— 它本身含真实安装根（`/mnt/c/Program Files/nodejs` 一族），
+ * ⚠ 不能继承真机的 PATH —— 它本身含真实安装根（WSL 挂载形下的 `/mnt/<盘符>/<标准根>/nodejs` 一族），
  * 会让"加了前缀"与"本来就有"不可区分（本用例第二版实测的假红）。
  * ⚠ 也不能只留 `/usr/bin:/bin` —— Windows 上 bash 靠继承的 PATH 才找得到（会把 bash 自身弄丢）。
  * 故：把哨兵放在**继承 PATH 之前**，脚本 prepend 的段就落在 `%` 截断出来的那截里。
@@ -223,8 +224,8 @@ function probe(script, extraEnv = {}) {
   for (const k of STRIP) delete env[k]
   env.HOME = '/home/probe' // 头注承诺"不覆盖 HOME"：给一个可辨认的值，M6 才能判
   // ⚠ **PATH 判据的坑（本用例第二版栽在这）**：不能靠"掐掉 `:/usr/bin*` 之后看剩下什么"——
-  // 本机 WSL bash 的**继承 PATH 本身**就含真实安装根（`/mnt/c/Program Files/nodejs`、
-  // （WSL 挂载形下的真实安装根 …），于是"脚本加了前缀"与"PATH 本来就有那段"
+  // 本机 WSL bash 的**继承 PATH 本身**就含真实安装根（WSL 挂载形下的 `/mnt/<盘符>/<标准根>/…`），
+  // 于是"脚本加了前缀"与"PATH 本来就有那段"
   // **产生同样的读数**，M3/M4 全部假红。判据改为**前缀差分**：给一个**可辨识的干净基 PATH**，
   // 只回显"基 PATH 之前那一截"（脚本 prepend 的部分）。
   env.PATH = `${MSYS_USR_BIN}:${BASELINE_PATH}`

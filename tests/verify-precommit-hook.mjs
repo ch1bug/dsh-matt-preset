@@ -37,6 +37,16 @@
  *      FIXTURE's hook copy — the real hook is never touched) to prove H7 is
  *      not vacuous: without the unset, the temp index leaks and the probe
  *      inside the stub checker fails the same way #158 measured.
+ *   H8/H8c/H8b (#120 口径 B) node resolution is an INPUT CONTRACT now: the
+ *      literal `Program Files` candidate is gone, so the hook resolves node as
+ *      process env `DSH_MATT_NODE` → repo-root `.env.local` → PATH → msys-own
+ *      locations → loud skip. H8 pins the file channel (a fake node written by
+ *      `.env.local` actually runs verify-all), H8c pins env-over-file priority
+ *      (the decision record's read order), H8b pins the broken-key face: a key
+ *      pointing nowhere must announce loudly and fall through to PATH probing
+ *      (no silent fallback, no stuck commit). The fake nodes are sh scripts
+ *      writing a DISTINGUISHABLE marker tag ('envfile-node' / 'processenv-node')
+ *      — the JS stub writes 'ran', so the three cannot be confused.
  */
 import { mkdtemp, mkdir, writeFile, copyFile, rm, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -222,6 +232,61 @@ try {
     bad('H6. marker scope too wide (docs blocked)', `exit=${h6.status} checkerRan=${existsSync(marker)} | ${tail(h6)}`)
   }
 
+  // H8/H8c/H8b (#120 口径 B)：node 解析是**输入契约**——字面 `Program Files` 候选已删，
+  // 解析顺序 = 进程环境 `DSH_MATT_NODE` → 仓根 `.env.local` → PATH → msys 自有位置 → 响亮跳过。
+  // fake node 是 sh 脚本，被钩子当 verify-all 调时写**可区分的** marker 内容
+  // （JS stub 写 'ran'，fake 写自己的标签——同一位上不可混淆）。
+  // ⚠ `.env.local` **不入 index**（untracked）：check ① 只看 tracked 未暂存改动，
+  // untracked 不拦；用后即删，别给后面的 H7 留一条指向 fake 的解析路径。
+  const fakeNode = async (name, tag) => {
+    const p = join(out, name)
+    await writeFile(p, `#!/bin/sh\necho '${tag}' > '${marker.replaceAll('\\', '/')}'\nexit 0\n`, { mode: 0o755 })
+    return p.replaceAll('\\', '/')
+  }
+  const envLocalSet = async (value) => {
+    await writeFile(join(root, '.env.local'), `DSH_MATT_NODE=${value}\n`)
+  }
+  const envLocalClear = async () => { await rm(join(root, '.env.local'), { force: true }) }
+  const markerTag = async () => (existsSync(marker) ? (await readFile(marker, 'utf8')).trim() : '<none>')
+
+  // H8: `.env.local` 提供 node → 钩子用它跑 verify-all（fake 被调、标签可辨、提交落）。
+  await diverge('h8a\n', 'h8a\n')
+  await envLocalSet(await fakeNode('fake-node-file', 'envfile-node'))
+  await rm(marker, { force: true })
+  const h8 = run(['commit', '-m', 'h8'])
+  if (h8.status === 0 && await markerTag() === 'envfile-node') {
+    ok('H8. .env.local 的 DSH_MATT_NODE → 钩子用它跑 verify-all（marker 标签可辨，#120 输入契约）')
+  } else {
+    bad('H8. 类 ENV 文件里的 node 未被钩子采用', `exit=${h8.status} marker=${await markerTag()} | ${tail(h8)}`)
+  }
+  await envLocalClear()
+
+  // H8c: 进程环境优先于 .env.local（两个 fake 都在，marker 标签必须来自进程环境那个）。
+  await diverge('h8c\n', 'h8c\n')
+  await envLocalSet(await fakeNode('fake-node-file2', 'envfile-node'))
+  await rm(marker, { force: true })
+  const h8c = run(['commit', '-m', 'h8c'], { DSH_MATT_NODE: await fakeNode('fake-node-env', 'processenv-node') })
+  if (h8c.status === 0 && await markerTag() === 'processenv-node') {
+    ok('H8c. 进程环境 DSH_MATT_NODE 优先于 .env.local（决策记录的读取优先级：env → file）')
+  } else {
+    bad('H8c. env→file 优先级不符', `exit=${h8c.status} marker=${await markerTag()} | ${tail(h8c)}`)
+  }
+  await envLocalClear()
+
+  // H8b: 键指到不存在的路径 → 响亮说明 + 按 PATH 探测继续（真 node 跑 JS stub，提交落）。
+  // 不静默回退（stderr 有点名），也不把提交卡死（响亮跳过是既有语义，#120 边界）。
+  await diverge('h8b\n', 'h8b\n')
+  await envLocalSet('/dsh-verify120/no-such-node')
+  await rm(marker, { force: true })
+  const h8b = run(['commit', '-m', 'h8b'])
+  const h8bout = tail(h8b)
+  if (h8b.status === 0 && existsSync(marker) && h8bout.includes('不可执行')) {
+    ok('H8b. 键指到不可用路径 → 响亮说明后按 PATH 探测继续（不静默回退、不卡提交）')
+  } else {
+    bad('H8b. 坏键的失败面不符（应响亮点名 + PATH 兜底）', `exit=${h8b.status} marker=${existsSync(marker)} | ${h8bout}`)
+  }
+  await envLocalClear()
+
   // H7 (#158 AC3): pathspec 提交 —— §0.4 共享树纪律的形态(`git commit -- <paths>`)。
   // git 给钩子挂**绝对路径的临时 index**(GIT_INDEX_FILE 指向它):钩子前段两项检查
   // 需要它(判的就是"本次提交的面"),但 verify-all 及其套件 spawn 的 git 若继承它,
@@ -276,6 +341,6 @@ try {
   await rm(out, { recursive: true, force: true })
 }
 
-console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H7) ===')
+console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H8) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

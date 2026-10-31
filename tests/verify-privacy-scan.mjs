@@ -7,7 +7,8 @@
  * 真实仓里一旦有人提交个人 / 本机环境串，这一行就红（本会话前车之鉴：77 个提交带个人路径，
  * 无人拦）。F14 用**运行时身份**（`homedir()` / `userInfo().username`）构造夹具，换台机器照样有效。
  * F16–F18 是 **#107 扩的那条规则**（本机安装布局）的三面：红场景（票面原字的形态，含带空格的
- * 目录段）/ 豁免面（标准安装点与占位符不被误伤）/ 边界（URL、相对路径、仅盘符根不误报）。
+ * 目录段；#120 拍 B 后 `Program Files` 一族字面形态也归这一面）/ 豁免面（OS 标准面
+ * `msys64`·`WINDOWS` 与占位符不被误伤）/ 边界（URL、相对路径、仅盘符根不误报）。
  *
  * 夹具是临时真仓库，用完即删（本仓有临时目录泄漏的教训 #77：不清理的挂具不写）。
  */
@@ -211,9 +212,9 @@ try {
   // F16 **本机安装布局**（#107 扩的那条规则）：票面的真实形态逐条报红 + 整段打码。
   // 红场景就是票面本体（`scripts/msys-env.sh` 修掉的那 3 行）——把它们的**原始字面形态**
   // 放进夹具，规则若被删掉/收窄（如目录段不许空格）**这一条必红**。
-  // ⚠ 夹具里**故意**同时放标准根与自定义根：这不是装饰，是**口径本身**（human 2026-10-18 拍 Q3=A）
-  // —— 生态标准根（`Program Files`）**豁免**、本机自定义根（`Other_Program_Files`）**命中**。
-  // 两者同处一个 fixture，F16 才同时钉住"规则活着"与"豁免面没被顺手删掉"。
+  // ⚠ 夹具里**故意**同时放标准根与自定义根：#120 拍 B 后**两者都命中**（字面安装路径一律
+  // 不写死，标准点也不例外——工具链地址依赖走 ENV 键），同处一个 fixture 才同时钉住
+  // "规则活着"与"#120 的收窄没有被顺手回滚"。
   {
     const root = fixture({ files: { 'scripts/env.sh': [
       'PREFIX=""',
@@ -224,16 +225,17 @@ try {
     ].join('\n') + '\n' } })
     const { findings } = scanRepo({ root, tokens: [] })
     const hits = findings.filter(f => f.kind === KINDS.installRoot)
-    // 自定义根那一行必须红；标准根那一行必须**不**红（同 fixture 内的双向判据）
+    // 两行都必须红（#120 拍 B：标准根 `Program Files` 不再豁免）
     const hitLines = new Set(hits.map(h => h.line))
-    if (hitLines.has(4) && !hitLines.has(3))
-      ok('F16. 本机安装布局：自定义安装根命中 / 生态标准根（带空格目录段）豁免', `installRoot 命中行=${[...hitLines].join(',')}`)
-    else bad('F16. 本机安装布局判据不符（规则被删？豁免面被删？目录段收窄到不含空格？）', JSON.stringify(findings))
+    if (hitLines.has(3) && hitLines.has(4))
+      ok('F16. 本机安装布局：自定义安装根与生态标准根（带空格目录段）**都**命中（#120 拍 B）', `installRoot 命中行=${[...hitLines].join(',')}`)
+    else bad('F16. 本机安装布局判据不符（规则被删？#120 收窄被回滚（标准根又不报了）？目录段收窄到不含空格？）', JSON.stringify(findings))
     // ⚠ 上面那句**证明不了**"带空格的目录段仍被规则认得"：把目录段的字符类收窄到不含空格后，
-    // `Program Files` 压根不再匹配——可它在豁免面里，于是**不红也不绿，两种原因都让 `has(3)===false`**
-    // （本探针实测：P2 扰动下 F16 仍绿 —— 这正是 D2「锁是空的」）。故**另加一条直接判据**：
-    // 让规则**只**在"真的匹配到了带空格目录段"时才可能命中：把同一形态放进**非豁免**的目录名变体
-    // （`Program Files 2`），它必须命中。这一条能区分"匹配了但被豁免"与"根本没匹配"。
+    // `Program Files` 压根不再匹配——拍 B 后豁免已不存在，标准根那一行暗掉**只剩"规则没匹配"
+    // 一种原因**（收窄被回滚的红面归 F17b）；本探针实测：P2 扰动下 F16 仍绿 —— 这正是
+    // D2「锁是空的」。故**另加一条直接判据**：把同一带空格形态放进**必命中**的目录名变体
+    // （`Program Files 2`），它必须命中——F16c 区分"没匹配"与"匹配了"，F17b 区分
+    // "没匹配"与"被豁免（收窄回滚）"。
     {
       const probeRoot = fixture({ files: { 'docs/spaced.md': '安装根变体：C:\\Other Program Files 2\\bin\\x.exe\n' } }) // pii-allow: 守卫自身的红场景夹具（带空格且非豁免）
       const spaced = scanRepo({ root: probeRoot, tokens: [] }).findings.filter(f => f.kind === KINDS.installRoot)
@@ -246,21 +248,37 @@ try {
     else bad('F16b. 输出泄露安装根名（前缀或整串）', JSON.stringify(hits))
   }
 
-  // F17 扩规则的**豁免面**（不误伤）：标准安装点 / OS 面 / 占位符 / 安全反例 → clean。
+  // F17 扩规则的**豁免面**（不误伤）：OS 标准面 / 占位符 / 安全反例 → clean。
   // ⚠ 这里**绝不能**给夹具行加 `pii-allow`：那会让整行被跳过，于是"clean"来自豁免标记而**不是**
   // 来自豁免面——本行就退化成同义反复（本仓 D2 的"锁是空的"）。它 clean 的唯一合法理由是
-  // `ALLOWED_INSTALL_ROOTS` 真的放行了这些形态；拿掉表里任一项（如 `program files`）本行即红。
+  // `ALLOWED_INSTALL_ROOTS` 真的放行了这些形态。
+  // ⚠ `Program Files` 一族**原在本夹具的 clean 面**（2026-10-18 拍 Q3=A），#120 拍 B 后**移出**
+  // —— 它的红面归 F17b（本票原命中的形态）；拿掉表里任一项（F17 注释当年预言的
+  // "如 `program files`"）本行即红的机制由 F17b 兑现。
   {
     const root = fixture({ files: { 'docs/ports.md': [
       'msys2 标准点：C:/msys64/usr/bin/bash.exe 与 /c/msys64/home/<user>',
-      '生态标准根：C:\\Program Files\\Git\\cmd（Windows 上人人都有这个）',
       'OS 面：C:\\WINDOWS\\system32\\bash.exe',
       '占位符：link:C:/x/matt',
       '安全反例（前缀比较会放过它）：C:\\Temp\\..\\..\\Users',
     ].join('\n') + '\n' } })
     const { findings } = scanRepo({ root, tokens: [] })
-    if (findings.length === 0) ok('F17. 豁免面：标准安装点 / OS / 占位符 / 安全反例 → clean')
+    if (findings.length === 0) ok('F17. 豁免面：OS 标准面（msys64/WINDOWS）/ 占位符 / 安全反例 → clean')
     else bad('F17. 豁免面被误伤', JSON.stringify(findings))
+  }
+  // F17b `Program Files` 一族的**红面**（#120 拍 B）：字面安装路径即使落在生态标准点也必须命中。
+  // 夹具形态取本票实测的两条原命中（pre-commit 的 POSIX 形 / e2e 的 Windows 正斜杠形）——
+  // 收窄被回滚（`program files` 回到豁免表）时本行必红。
+  {
+    const root = fixture({ files: { 'docs/candidates.md': [
+      'node 候选：/c/Program Files/nodejs/node.exe', // pii-allow: 守卫自身的红场景夹具（#120 原命中形态，POSIX 形）
+      'bash 候选：C:/Program Files/Git/bin/bash.exe', // pii-allow: 同上（Windows 正斜杠形）
+    ].join('\n') + '\n' } })
+    const { findings } = scanRepo({ root, tokens: [] })
+    const hitLines = new Set(findings.filter(f => f.kind === KINDS.installRoot).map(h => h.line))
+    if (hitLines.has(1) && hitLines.has(2))
+      ok('F17b. `Program Files` 一族字面候选 → 命中（POSIX 形与 Windows 形两态，#120 拍 B）', `installRoot 命中行=${[...hitLines].join(',')}`)
+    else bad('F17b. 标准点字面路径未命中（收窄被回滚？）', JSON.stringify(findings))
   }
 
   // F18 扩规则的**假阳性边界**：它不是"任何绝对路径"。URL / 相对路径 / 仅盘符根 / 正则字面量
@@ -281,6 +299,6 @@ try {
   disposeAll()
 }
 
-console.log('\n=== PRIVACY-SCAN VERIFY (F1–F18) ===')
+console.log('\n=== PRIVACY-SCAN VERIFY (F1–F18b) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

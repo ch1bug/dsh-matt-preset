@@ -38,15 +38,32 @@ if [ -n "$MARKERS" ]; then
   exit 1
 fi
 
-# 找 node：PATH → 常见安装位（msys 的 bash 与 Windows 侧 node 各自 PATH 不同，
-# 缺工具链时**响亮跳过**而不是阻断提交 —— 与套件的 loud-skip 惯例一致）。
-NODE=$(command -v node 2>/dev/null)
-for c in "/c/Program Files/nodejs/node.exe" "/ucrt64/bin/node.exe" "/usr/bin/node"; do
+# 找 node：DSH_MATT_NODE（进程环境 → 仓根 .env.local）→ PATH → msys 自有位置。
+# #120 口径 B（决策记录 2026-10-19）：字面安装路径一律不写死 —— Program Files 一族候选已删，
+# 地址依赖由类 ENV 文件承载：键名+说明入库（.env.example），值在 .env.local（.gitignore 挡住，
+# 永不进仓）。缺输入时**响亮跳过**并给可行动指令，绝不猜一条本机凑巧存在的路径（D47）。
+env_file_get() {
+  [ -f .env.local ] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env.local | head -n 1 | tr -d '\r'
+}
+NODE=""
+if [ -n "${DSH_MATT_NODE:-}" ]; then
+  NODE="$DSH_MATT_NODE"
+else
+  NODE=$(env_file_get DSH_MATT_NODE)
+fi
+if [ -n "$NODE" ] && [ ! -x "$NODE" ]; then
+  echo "pre-commit: DSH_MATT_NODE=$NODE 不可执行 —— 修正进程环境 / .env.local 里的该键；本轮先按 PATH 探测继续"
+  NODE=""
+fi
+[ -n "$NODE" ] || NODE=$(command -v node 2>/dev/null)
+for c in "/ucrt64/bin/node.exe" "/usr/bin/node"; do
   [ -n "$NODE" ] && break
   [ -x "$c" ] && NODE="$c"
 done
 if [ -z "$NODE" ]; then
   echo "pre-commit: 找不到 node —— 跳过 verify-all（本次提交未经验证）"
+  echo "  修复（任一）：把 node 加进 PATH；或设 DSH_MATT_NODE=<node 可执行文件路径>（进程环境或仓根 .env.local，键说明见 .env.example）"
   exit 0
 fi
 

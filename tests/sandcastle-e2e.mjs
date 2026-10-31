@@ -125,8 +125,9 @@ ${mode === "fail" ? `  console.error("STUB MUST NOT BE CALLED — idempotency br
 const BASH_CANDIDATES = [
   process.env.SANDCASTLE_E2E_BASH, // env 覆盖优先
   "bash",                          // PATH（当前会话若已正确前置）
-  "C:/msys64/usr/bin/bash.exe",    // msys2 标准安装点（/ucrt64/bin 有 gcc）
-  "C:/Program Files/Git/bin/bash.exe", // Git bash（本测通常 gcc 缺失，探针会淘汰）
+  "C:/msys64/usr/bin/bash.exe",    // msys2 标准安装点（/ucrt64/bin 有 gcc；#120 ④ 单独确认保留）
+  // #120 口径 B：Git bash 的字面安装路径（Program Files 一族）不写死——该位候选已删；
+  // 机器上 bash 不在标准点时设 SANDCASTLE_E2E_BASH（键说明见 .env.example）。
 ].filter(Boolean);
 // 能力探针：gcc 在 PATH 上，或 msys2 fallback /ucrt64/bin/gcc.exe 存在。
 const bashCapable = (bash) =>

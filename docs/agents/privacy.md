@@ -124,20 +124,40 @@ python -m git_filter_repo --force \
 - `scripts/privacy-scan.mjs`：
   ① 本机运行时身份（`userInfo().username` + `homedir()` 两形）；② 四种布局形态
   （`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`、**本机安装布局** `<盘符>:/<目录>/<再一级>`；
-  **标准安装点保留** —— `C:/msys64` 与 `Program Files` 一族都在豁免表里）；
+  **字面安装路径一律命中（#120 拍 B）** —— `Program Files` 一族已移出豁免表，
+  `msys64` / `WINDOWS` 等 OS 标准面仍在豁免表里）；
   ③ `<DSH_HOME>/privacy-denylist.txt`；④ 发布面全扫（tracked 内容 / 全部提交消息 / 身份 / ref /
   拟提交消息），`--gh` 再加 issue 正文与评论。大小写不敏感，**整行打码**不回显 token。
-  验收 = `tests/verify-privacy-scan.mjs`（F1–F18：夹具红/绿两面 + 真实仓常驻行），
+  验收 = `tests/verify-privacy-scan.mjs`（F1–F18b：夹具红/绿两面 + 真实仓常驻行），
   随 `node scripts/verify-all.mjs` 进 pre-commit；确属误报才在该行内联 `pii-allow` 并写理由
   （比整仓 `SKIP_HOOKS=1` 细一档，且例外留在 diff 里可 review）。
   - **② 的「本机安装布局」这一条（#107）为什么是"形状"而不是"词表"**：把 `Program Files`
     写进词表只能抓住标准根，而票面点名的四条里恰有两条是**同一台机器的自定义安装根**
     （`Other_Program_Files`、`Cadence`）——按词表追就是 D15 记的"无收敛军备竞赛"。
     故判据取**形状**：`<盘符>:/<目录>/<再一级>`，一级目录落进 `ALLOWED_INSTALL_ROOTS` 的不报。
-  - **豁免面 `ALLOWED_INSTALL_ROOTS` 的判据 = "换台机器它还在不在"**：在（`Program Files` /
-    `msys64` / `WINDOWS` / 占位符 `x`·`me`·`u`…）就不是身份；不在（`Other_Program_Files` /
+  - **豁免面 `ALLOWED_INSTALL_ROOTS` 的判据 = "换台机器它还在不在"**：在（`msys64` /
+    `WINDOWS` / 占位符 `x`·`me`·`u`…）就不是某台机器的身份；不在（`Other_Program_Files` /
     `Cadence` / `D:\Tools`）就是。它与 `ALLOWED_USERS` 同性质——**豁免面必须显式**，
     否则守卫会把自己与邻仓的合法写法判红。
+  - **「不是身份」≠「可以进仓」（#120 拍 B，2026-10-19）**：`Program Files` 一族按
+    "换台机器还在"判原是标准点，但作为**工具链地址依赖**的字面安装路径一律不写死——
+    键名 + 说明入库，值不入库（机制见下）。故 `program files` / `program files (x86)`
+    两条已从豁免表删除：字面形态**即命中**（除非行内 `pii-allow`）。
+    **declare 边界（#120 复审，扩面另立票）**：规则只认 `C:\` / `C:/` / `/c/` 三种
+    **单分隔符**形；JS 源码**转义形**（字节面 `C:\\…` 双反斜杠）结构性不命中
+    （文件探针 `.scratch/verify120/probe-escaped-form.mjs` 实测，2026-10-31）——仓内转义形
+    现存字面经 grep 复查全是测试夹具与占位符（无活体），规则扩到转义形按 D13/D15 另立票。
+    `msys64` 经 #120 ④ 按 §6 判据单独确认保留（e2e 的兜底候选按决策记录显式保留）。
+- **类 ENV 文件（地址依赖的载体，#120）**：键名 + 用途入库（`.env.example`），实际值放在
+  `.env.local`（`.gitignore` 挡住，永不进仓）或进程环境。读取优先级 =
+  **进程环境 → `.env.local` → 响亮跳过/失败**（D47），绝不静默回退到写死路径
+  （`.githooks/pre-commit` 的 PATH / msys 自有位探测在 env/file 全缺时仍在兜底，
+  完整探测顺序见 `.env.example`）。
+  现有键（说明详情见 `.env.example` 与各消费点的头注释）：
+  - `DSH_MATT_NODE` —— `.githooks/pre-commit` 找 node；缺它则 verify-all 响亮跳过（提交未经验证）。
+  - `SANDCASTLE_E2E_BASH` —— `tests/sandcastle-e2e.mjs` 选 msys bash（进程环境覆盖优先）。
+  - `MSYS_ENV_WIN_PROGRAM_FILES` / `MSYS_ENV_WIN_NODE_DIR` / `MSYS_ENV_WIN_GIT_ROOT` ——
+    `scripts/msys-env.sh` 的安装根输入契约（说明在该文件头注释，#107 先例）。
 - `AGENTS.md` 的硬规则 + 指针；`sync-skills.{ps1,sh}` 的上游目录改 `SYNC_SKILLS_UPSTREAM`
   **必填**（本机路径不再写死，缺失即响亮报错）。
 - **跨仓口径**：邻仓同一脚本，改判据时两边一起看（`dsh-shell-host/docs/agents/privacy.md`）。

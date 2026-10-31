@@ -14,9 +14,9 @@
  *   1. **本机运行时身份**：`userInfo().username` / `homedir()`（反斜杠与正斜杠两形）——
  *      不写死名单，换台机器就守那台机器的身份；
  *   2. **本机布局形态**：`<盘符>:\dsh-*`、`/<盘符>/dsh-*`、`<盘符>:\Work\`、**本机安装布局**
- *      （`<盘符>:/<目录>/<再一级>`，#107；`C:/msys64` 与 `Program Files` 等**生态标准安装点**、
- *      以及占位符面都在豁免表 `ALLOWED_INSTALL_ROOTS` 里，保留）——本文用中性写法描述形态，
- *      避免守卫自指命中；
+ *      （`<盘符>:/<目录>/<再一级>`，#107；`msys64` 等 OS 标准面与占位符面在豁免表
+ *      `ALLOWED_INSTALL_ROOTS` 里，保留；**`Program Files` 一族已按 #120 拍 B 移出豁免表**
+ *      —— 字面安装路径一律走 ENV 键不写死）——本文用中性写法描述形态，避免守卫自指命中；
  *   3. **denylist**：`<DSH_HOME>/privacy-denylist.txt`（一行一个 token、`#` 注释，**永不进仓**）
  *      —— 运行时推不出来的那类（呼号、旧机用户名、个人邮箱、内网 host/IP、旧布局根）。
  *   4. 本仓扩展面：tracked 内容 / 全部提交消息 / 提交身份 / ref 名 / `.git/COMMIT_EDITMSG`，
@@ -66,16 +66,26 @@ const DYNAMIC_USER = /[$%{}()+*]/
  *  三类，各有出处：
  *    · 家目录面 —— `users` / `home`：**已有专门规则承担**（`homePath`）。这里再报一次
  *      只会让同一个身份出两条 kind（判定点重复，D6），所以交出去。
- *    · 标准安装点 —— `msys64` / `msys2` / `program files` / `program files (x86)` /
- *      `windows` / `programdata` / `temp` / `tmp`：**生态标准**，不是某台机器的身份。
- *      `msys64` 是 `privacy.md` §6 明文保留的；`Program Files` 与它同源（human 2026-10-18
- *      拍板 Q3=A）。判据 = 「换台 Windows 机器它还在不在」——在，就不是身份。
+ *    · OS 标准面 —— `msys64` / `msys2` / `windows` / `programdata` / `temp` / `tmp`：
+ *      **生态标准**，不是某台机器的身份。判据 = 「换台 Windows 机器它还在不在」——在，
+ *      就不是身份。`msys64` 经 #120 ④ 按 `privacy.md` §6 判据单独确认保留（e2e 的兜底
+ *      候选按决策记录显式保留）。
+ *      ⚠ `program files` / `program files (x86)` **原在此表**（2026-10-18 拍 Q3=A），
+ *      #120 拍 B 后**移出**：字面安装路径即使是标准点也不进仓——工具链地址依赖走 ENV 键
+ *      （键名+说明在 `.env.example`，值在 `.env.local` / 进程环境，读取优先级 env → file →
+ *      响亮跳过/失败，D47）。现在 `Program Files` 形态的字面路径**即命中**（除非行内
+ *      `pii-allow`）。**declare 边界（#120 复审，扩面另立票不顺手改）**：规则只认
+ *      `C:\` / `C:/` / `/c/` 三种**单分隔符**形；JS 源码**转义形**（字节面 `C:\\…` 双反斜杠）
+ *      结构性不命中——文件探针实测（.scratch/verify120/probe-escaped-form.mjs，2026-10-31），
+ *      且 `tests/verify-msys-env.mjs:90` 的既有转义形夹具串在 F10 真仓扫下静默与之互证。
+ *      仓内转义形现存字面经 grep 复查全是测试夹具与占位符（无活体）；规则扩到转义形属
+ *      扩面，按 D13/D15 另立票。
  *    · 占位符 —— 与 `ALLOWED_USERS` 对齐的一批（`x` / `me` / `u` / `g` / `h` / `r` …），
  *      以及本仓术语面里已由既有规则或占位符承担的（`work` / `src` / `repo` / `scratch`）。
- *      跨仓口径：邻仓 `dsh-shell-host` 的同一脚本要跟着对（`privacy.md` §6）。 */
+ *      跨仓口径：邻仓 `dsh-shell-host` 的同一脚本要跟着看（`privacy.md` §6）。 */
 export const ALLOWED_INSTALL_ROOTS = new Set([
   'users', 'home',
-  'msys64', 'msys2', 'program files', 'program files (x86)', 'windows', 'programdata', 'temp', 'tmp',
+  'msys64', 'msys2', 'windows', 'programdata', 'temp', 'tmp',
   'x', 'y', 'z', 'g', 'h', 'i', 'j', 'k', 'r', 'c2', 'me', 'u', 'name', 'your-name', 'yourname',
   'work', 'src', 'repo', 'scratch', 'dsh-matt-preset',
 ])
@@ -99,8 +109,9 @@ export const RULES = [
     // **本机安装布局**（#107）：盘符绝对路径的**前两级**（`<盘符>:/<目录>/<再一级>`）。
     // 判据是**形状**，不是词表（D15：追词表会变成无收敛的军备竞赛——票面点名的四条里
     // 有两条是同一台机器的自定义安装根，把 `Program Files` 写进词表照样漏掉它们）。
-    // 目录段**允许空格**（`Program Files` 这类），故字符类带空格——否则会在 `Program` 处断掉，
-    // 票面①②反而漏（选型矩阵实测，见 tests/verify-privacy-scan.mjs F16）。
+    // 目录段**允许空格**（`Program Files` 形态，#120 起它不再豁免、必须能被匹配到），
+    // 故字符类带空格——否则会在 `Program` 处断掉（选型矩阵实测，见
+    // tests/verify-privacy-scan.mjs F16c 的直接判据）。
     // 一级目录落进 `ALLOWED_INSTALL_ROOTS` 的**不报**（豁免面见上）。
     kind: KINDS.installRoot,
     re: /(?:[A-Za-z]:[\\/]|\/[a-z]\/)([A-Za-z0-9._][A-Za-z0-9._ -]*)[\\/][A-Za-z0-9._]/g,
