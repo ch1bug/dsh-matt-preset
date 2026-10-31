@@ -48,8 +48,8 @@ function buildFixtureRepo() {
   // ⚠ git 调用走**共享挂具** `tests/isolated-git.mjs`（#110）：本函数**自建仓**，
   //   与原样继承钩子导出的 `GIT_DIR` 会让 `git init` 打到**调用方仓**上
   //   （实测：共享 `.git/config` 的 `core.bare` 被写成 `true`）。
-  //   本文件初版是**手写**清理的 —— 被 `tests/verify-isolated-git.mjs` 的 I2 结构断言当场抓红
-  //   （"病灶复发"），那正是该断言存在的理由。此处改走挂具。
+  //   本文件初版是**手写**清理的 —— 被 `tests/verify-isolated-git-structure.mjs` 的 I2 结构断言当场抓红
+  //   （"病灶复发"；该断言 #169 拆层后住在 structure 文件），那正是该断言存在的理由。此处改走挂具。
   const g = (...a) => gitIn(dir, fixtureEnv())(...a)
   g('init', '-q', '-b', 'main')
   const seed = ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid']

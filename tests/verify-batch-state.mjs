@@ -824,7 +824,8 @@ else bad('C9g. 三态分类自检失败（absent→SKIP 的判据被改动？）
 const TMPFIX = mkdtempSync(join(tmpdir(), 'dsh-matt-c9-count-'))
 try {
   // 清理走共享挂具 `tests/isolated-git.mjs`（#110）：把"怎么写"收敛成一处，"写没写"由
-  // `tests/verify-isolated-git.mjs` 的 I2 结构断言守住（此前 4 个夹具各手写一份、无守卫）。
+  // `tests/verify-isolated-git-structure.mjs` 的 I2 结构断言守住（此前 4 个夹具各手写一份、无守卫；
+  // #169 拆层后该断言在 structure 文件、快集层）。
   const env = fixtureEnv({ GIT_CONFIG_GLOBAL: join(TMPFIX, '.gitconfig'), GIT_CONFIG_SYSTEM: join(TMPFIX, '.gitconfig') })
   const G = (args) => spawnSync('git', ['-C', TMPFIX, ...args], gitOpts(env))
   if (G(['init', '-q', '-b', 'main']).status !== 0) {

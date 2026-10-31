@@ -198,10 +198,11 @@ MSYS_ENV_WIN_GIT_ROOT='<git-install-dir>' . <repo>/scripts/msys-env.sh
   `git status` 报 `fatal: this operation must be run in a work tree`。隐蔽点：`log` / `show` 仍可用，
   只有 `status` / `add` / `commit` 报错，极易误判成"工具坏了"而不是"配置被改了"。
   ⇒ **凡碰 git 的夹具用例一律走共享挂具 `tests/isolated-git.mjs`**（`fixtureEnv()` 清掉全部继承
-  `GIT_*`、`gitIn()` 给 `git -C <dir>`），由 `tests/verify-isolated-git.mjs` 的 I1（机制实测）/
-  I2（结构断言：**默认拒绝** —— 碰 git 的用例必须走挂具，或在 `REGISTRY` 里**显式登记**为
-  「只读调用方仓」（只读子命令白名单会核"确实没有自建仓"）或「已知债务」（响亮列出、带票号）；
-  两者都不是即红）守住。**别在用例里再手写一份清理** —— 那正是本票的病灶。
+  `GIT_*`、`gitIn()` 给 `git -C <dir>`），由两半守住（#169 拆层）：**I2 结构断言**（**默认拒绝**
+  —— 碰 git 的用例必须走挂具，或在 `REGISTRY` 里**显式登记**为「只读调用方仓」（只读子命令
+  白名单会核"确实没有自建仓"）或「已知债务」（响亮列出、带票号）；两者都不是即红）在
+  `tests/verify-isolated-git-structure.mjs`，**快集层** —— pre-commit 即拦；**I1 机制实测**
+  在 `tests/verify-isolated-git.mjs`，**@slow 层**。**别在用例里再手写一份清理** —— 那正是本票的病灶。
 - **探针先自检，再判被测对象**（#107）：一次诊断白烧一整轮，多半是**探针自己坏了**。
   跑之前三样各验一次，任一失败就停（**探针坏了 ≠ 被测对象坏了**）：
   ① `needle` 命中数 **> 0**（0 命中是假证据）；② 扰动后文件**真的变了**；

@@ -1,5 +1,5 @@
 /**
- * verify-all-entry.mjs — 唯一检查入口 `scripts/verify-all.mjs` **自身**的契约（E1–E15）。
+ * verify-all-entry.mjs — 唯一检查入口 `scripts/verify-all.mjs` **自身**的契约（E1–E16）。
  *
  * Why（邻仓 #83 的同族）：入口的汇总逻辑是纯代码——枚举 `tests/*.mjs`、按退出码与
  * `SKIP (loud)` 分档、区分"缺环境跳过"、给 `hooksPath` 出 advisory、决定进程退出码。
@@ -36,6 +36,11 @@
  *   E15 **真树**仍在用 slow 层：存在标记行且每条都写了读数（≈NNs）。刻意**不**钉成员名单
  *      （钉名单 = 第二份清单，D6）。**显式声明不覆盖**：入口的判定器在真树上没有守卫（再写一份
  *      判定器就是 D4），靠 E10–E14 的夹具层 + 复核兜
+ *   E16 **真树**拆层钉子（#169）：`tests/verify-isolated-git-structure.mjs`（git 隔离守卫的
+ *      I2 结构面 / I3 挂具自检）存在且**全文件无任何 @slow 标记形状行**（结构面属快集，不回漂），
+ *      且 `verify-isolated-git.mjs`（机制面）仍带至少一条标记。这**不是** E15 拒绝的那份成员
+ *      名单，是与 I2 的 MUST_MATCH 同款「反空洞点名」——钉 #169 AC 的防线存活；判据 = 标记
+ *      形状的最朴素扫描（正则同 E15），正文伪装形态的辨析由 E13 在夹具层钉住，此处不重复
  *
  * **环境隔离**：子进程清掉全部 `DSH_MATT_*`（门禁变量会把夹具那档从 SKIP 变成执行，计数随之
  * 漂移；2026-10-17 在 msys 全流程口径下实测红）**与全部 `GIT_*`**（本仓上一个版本在
@@ -80,8 +85,9 @@ try {
    *  指到**外层仓**上（实测：带着 `GIT_DIR=<repo>/.git` 跑旧版本用例，本仓 `.git/config` 的
    *  `core.bare` 被改成 true，且夹具的"未设置"假设失效）。
    *  ⚠ 这段清理**已收敛进共享挂具** `tests/isolated-git.mjs`（#110）：此前 4 个夹具各手写一份、
-   *  且没有守卫在看 —— 漏写一处全程静默，直到有人 `git status` 报错。挂具本身由
-   *  `tests/verify-isolated-git.mjs` 的 I1（机制实测）/ I2（结构断言）守住。 */
+   *  且没有守卫在看 —— 漏写一处全程静默，直到有人 `git status` 报错。挂具本身由 I2（结构断言，
+   *  `tests/verify-isolated-git-structure.mjs`，#169 拆层后在快集层）/ I1（机制实测，
+   *  `tests/verify-isolated-git.mjs`，@slow）守住。 */
   const cleanGitEnv = (extra = {}) => fixtureEnv(extra)
   const gitIn = (args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', env: cleanGitEnv() })
   // advisory / hooks= 的可复现面：git 仓库在位、core.hooksPath 未设置
@@ -330,10 +336,40 @@ try {
         ? '真树里一条 `* @slow` 标记都没有'
         : `标记行缺读数（写法：\`* @slow ≈NNs …\`）: ${noReading.join(' ｜ ')}`)
   }
+
+  // ── E16：#169 拆层的**防回漂钉子**（真树）—— 结构面守卫必须活在快集层────────────────
+  // 这**不是** E15 刻意不钉的那份 slow 成员名单（E15 防第二份清单，D6）；它与 I2 的 MUST_MATCH
+  // 同款「反空洞点名」：钉的是 #169 AC 的**防线存活**。判据 = 标记形状的最朴素扫描（正则同 E15；
+  // `tests/verify-isolated-git-structure.mjs` 头注里有一条同主题的写法警告——它的注释续行
+  // 也不得写出标记形状）；正文伪装形态的辨析由 E13 在夹具层钉住，此处不重复。
+  // 三个红分支各点名：① 结构文件被删 ② 结构文件被标 @slow
+  // （秒级纯扫描被切出快集，pre-commit 重新失明）③ 机制文件丢了标记（机制夹具被快集真跑）。
+  const STRUCTURE_CASE = 'verify-isolated-git-structure.mjs'
+  const MECHANISM_CASE = 'verify-isolated-git.mjs'
+  const structPath = join(REPO, 'tests', STRUCTURE_CASE)
+  const structExists = existsSync(structPath)
+  const structSlow = structExists
+    ? readFileSync(structPath, 'utf8').split(/\r?\n/).filter(l => /^[ \t]*\*[ \t]*@slow\b/.test(l))
+    : []
+  const mechSlow = readFileSync(join(REPO, 'tests', MECHANISM_CASE), 'utf8')
+    .split(/\r?\n/).filter(l => /^[ \t]*\*[ \t]*@slow\b/.test(l))
+  if (!structExists) {
+    bad('E16. 结构面守卫文件被删（#169 拆层回漂：快集对 git 隔离重新失明）',
+      `tests/${STRUCTURE_CASE} 不存在 —— 恢复它；别把防线悄悄搬回 @slow 文件`)
+  } else if (structSlow.length > 0) {
+    bad('E16. 结构面守卫被标 @slow（#169 拆层回漂：秒级纯扫描被切出快集，pre-commit 重新失明）',
+      `tests/${STRUCTURE_CASE} 出现标记行: ${structSlow.map(l => l.trim()).join(' ｜ ')} —— 去掉标记（它属于快集）`)
+  } else if (mechSlow.length === 0) {
+    bad('E16. 机制面文件丢了 @slow 标记（分钟级机制夹具会被快集真跑）',
+      `tests/${MECHANISM_CASE} 无任何 \`* @slow\` 标记行 —— 补回（写法：\`* @slow ≈NNs …\`）`)
+  } else {
+    ok('E16. #169 拆层在位：结构面在快集层（文件在、全文件无 @slow 标记），机制面仍在 @slow 层',
+      `${STRUCTURE_CASE} 无标记 / ${MECHANISM_CASE} 带 ${mechSlow.length} 条标记`)
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }
 
-console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E15) ===')
+console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E16) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

@@ -22,7 +22,8 @@
  * 这份清理此前是**逐文件手写**的，4 个文件各写一份（`verify-all-entry.mjs` /
  * `verify-precommit-hook.mjs` / `verify-batch-state.mjs` / `verify-restore-discipline.mjs`），
  * 且**没有任何断言**在看它 —— 新写一个夹具的人漏掉这一行，全程静默，直到有人 `git status` 报错。
- * 本挂具把"怎么写"收敛成一处，"写没写"由 `tests/verify-isolated-git.mjs` 的 `I2` 结构断言守住。
+ * 本挂具把"怎么写"收敛成一处，"写没写"由 `tests/verify-isolated-git-structure.mjs` 的 `I2`
+ * 结构断言守住（#169 拆层：结构面在快集层）。
  *
  * ── 用法 ──────────────────────────────────────────────────────────────────────
  *   import { fixtureEnv, gitIn } from './isolated-git.mjs'

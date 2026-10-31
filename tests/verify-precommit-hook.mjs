@@ -71,7 +71,8 @@ const stubPayload = join(out, 'checker-payload.json')
  * that forgot the line stayed silent until someone's `git status` broke. Measured
  * cost of forgetting: the fixture's `git init` writes `core.bare=true` into the
  * CALLER's shared `.git/config` (probe `.scratch/p110-canary.mjs`).
- * The harness itself is pinned by `tests/verify-isolated-git.mjs` (I1 mechanism / I2 structural). */
+ * The harness itself is pinned by `tests/verify-isolated-git.mjs` (I1 mechanism) and
+ * `tests/verify-isolated-git-structure.mjs` (I2 structural, fast set since #169). */
 const cleanEnv = (extra = {}) => fixtureEnv(extra)
 // `git -C <dir>` rather than spawn's `cwd:` — a host `startup` script family resets
 // a child's cwd to the Windows user dir, so `cwd:` silently fails and the fixture's
