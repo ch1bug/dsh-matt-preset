@@ -9,8 +9,9 @@
  *
  * 划界（勿双写，#157 拍板 + #116 让渡评论）：
  *   - #117 钉「模式描述 ↔ 实挂 roster」的对齐断言（差异表方向 (b)）——本门不做；
- *   - #116 执行方向 A（挂 tool-presentation 行让 run_code 成真 + 实测读数）——本门不动
- *     roster、不改正文；run_code 在本门只**显式登记为未兑现**（带票号与期望行）；
+ *   - #116 执行方向 A（挂 tool-presentation 行让 run_code 成真 + 实测读数）——roster
+ *     行与正文本门都不动；run_code 在本门**曾登记为未兑现**（B4 gap），#116 落地后
+ *     已升级为 provider（rows: tool-presentation，经 mutation 注入 matt-ptc 载体）；
  *   - 本门只管「注入正文 / persona 声称的工具 ∈ 实挂 roster ∪ 显式登记」。
  *
  * ⚠ 判定层声明（simulated 口径，别删）：本门是**静态声明面判定**——读正文文本 + roster
@@ -118,12 +119,9 @@ else bad('SG4. 判据表引用的机械检验面', missingGuards.length > 0 ? `�
 // 无反向兜底：自然语言声称是开放集，机械提取必误抓（D13/Y7d 口径：显式声明不覆盖）。
 const CLAIMS = [
   {
-    claim: 'run_code', kind: 'gap',
+    claim: 'run_code', kind: 'provider', rows: ['tool-presentation'], via: 'mutation',
     anchor: { file: 'workflow-profile-ptc.txt', sentence: 'a program and runs it (`run_code`)' },
-    gap: {
-      ticket: '#116', expectedRow: 'tool-presentation',
-      why: 'run_code 不是插件注册的工具（dsh-tools 注册表 mode: ptc 时的保留传输）；激活开关 = preset 挂 tool-presentation 行（#116 方向 A 已拍、行未挂，其让渡评论明写承诺↔roster 机械守卫归 #157）。本门要求该声称显式登记，不静默。',
-    },
+    note: 'run_code 不是插件注册的工具（dsh-tools 注册表 mode: ptc 时的保留传输）；提供行 = tool-presentation（@deepseek-ai/dsh-agent-tool-presentation，config.mode: ptc），由 lib/bundle-patch.mjs 的 PTC_EXTRA_ROWS 仅注入 matt-ptc 载体（#116 方向 A 交付；曾在 B4 登记为 gap，行挂上后按 B4 防腐升级为 provider）。ptcRuntime 服务由宿主组合的 ptc-runtime 行提供，本行只声明呈现',
   },
   { claim: 'agent()', kind: 'provider', rows: ['workflow-ptc'], via: 'agent',
     anchor: { file: 'workflow-profile-ptc.txt', sentence: '(`agent()`, `parallel()`, `pipeline()`' },
@@ -299,13 +297,14 @@ for (const g of gaps) {
   if (hitAt.length > 0) staleGaps.push(`${g.claim}: 期望行 ${row} 已挂上（${hitAt.join(', ')}）——gap 登记过时，升级成 provider`)
 }
 if (staleGaps.length === 0)
-  ok('SG10. gap 登记防腐：期望行均未挂（挂上即红，逼人更新登记）', gaps.map(g => `${g.claim} → ${g.gap.ticket}`).join('; '))
+  ok('SG10. gap 登记防腐：期望行均未挂（挂上即红，逼人更新登记）',
+    gaps.length === 0 ? '当前无 gap 登记（run_code 已随 #116 升级为 provider）' : gaps.map(g => `${g.claim} → ${g.gap.ticket}`).join('; '))
 else bad('SG10. gap 登记过时', staleGaps.join(' | '))
 
 // SG11：gap 条目必须带票号与理由（无票号的 gap 是无限期豁免——正是静默缺口的形态）。
 const nakedGaps = gaps.filter(g => !/^#\d+$/.test(g.gap.ticket ?? '') || (g.gap.why ?? '').trim() === '')
 if (nakedGaps.length === 0)
-  ok('SG11. gap 条目全带票号+理由', gaps.map(g => `${g.claim}@${g.gap.ticket}`).join('; '))
+  ok('SG11. gap 条目全带票号+理由', gaps.length === 0 ? '当前无 gap 登记' : gaps.map(g => `${g.claim}@${g.gap.ticket}`).join('; '))
 else bad('SG11. gap 条目缺票号/理由', nakedGaps.map(g => g.claim).join(' | '))
 
 // ── C 段：S3 样板消费者——installer 装载降级的输出断言（#80 修复的回归锁）─────────

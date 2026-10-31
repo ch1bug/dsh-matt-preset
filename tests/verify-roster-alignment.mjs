@@ -211,9 +211,9 @@ const pluginIds = (rows) => rows.map(r => r.id).filter(id => !id.startsWith('pre
 // 里点名的具体能力，roster 必须真挂（描述说谎 = D3 类缺陷）。描述不提的能力
 // 不要求断言（描述不是清单）。两种承诺形态：
 //   - row 型：含 phrase → 载体必须有 row。`pendingUntil`：行缺席时登记在案才
-//     豁免（ptc 的 run_code → tool-presentation 归 #116，方向 A 已拍、行未挂，
-//     SG10 已登记该缺口）；一旦行真挂上，pending 登记必须删除——本断言会红，
-//     那是提醒清理，不是障碍（与 SG10 的「登记的期望行一旦真挂上」检测同向）。
+//     豁免——一旦行真挂上，pending 登记必须删除（本断言会红，提醒清理）。
+//     历史用法：ptc 的 run_code → tool-presentation 曾 pending 于 #116，行已挂
+//     （#116 方向 A 交付），条目转为普通 row 型断言。
 //   - sameRosterAs 型：含 phrase → 该模式载体行集合与目标模式全等（minimal 的
 //     「能力面与标准档完全一致」就是这条承诺的文案面）。
 // Descriptions come from lib/bundle-patch.mjs (the single identity table), so
@@ -223,7 +223,7 @@ const DESCRIPTION_ROSTER_CONTRACT = [
   { matt: 'dsh-matt-preset', phrase: 'subagent', row: 'tool-subagent' },
   { matt: 'dsh-matt-preset', phrase: '/compact', row: 'compaction' },
   { matt: 'dsh-matt-preset', phrase: '/handoff', row: 'handoff-tool' },
-  { matt: 'dsh-matt-preset-ptc', phrase: 'run_code', row: 'tool-presentation', pendingUntil: '#116' },
+  { matt: 'dsh-matt-preset-ptc', phrase: 'run_code', row: 'tool-presentation' },
   { matt: 'dsh-matt-preset-ptc', phrase: 'agent()', row: 'tool-workflow' },
   { matt: 'dsh-matt-preset-minimal', phrase: '七门', row: 'workflow-core' },
   { matt: 'dsh-matt-preset-minimal', phrase: '能力面与标准档完全一致', sameRosterAs: 'dsh-matt-preset' },

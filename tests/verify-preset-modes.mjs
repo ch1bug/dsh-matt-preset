@@ -237,10 +237,11 @@ else bad('M4b. descriptions', JSON.stringify(descriptions))
 
 // ── M5: each carrier's core row profile matches; rosters share one baseline ─
 // The four rosters are the SAME matt roster with per-mode differences applied
-// (ADR-0015 §4). Today exactly one mode differs — `matt-cordis` adds
-// `tool-cordis` — so the assertion is "three share one length, and the differing
-// one is exactly one row longer", not "all four are equal" (which Q4 made false)
-// and not "any lengths at all" (which would be no assertion).
+// (ADR-0015 §4). Two modes are differentiated, each by EXACTLY ONE named row:
+// `matt-ptc` adds `tool-presentation` (#116, the run_code presentation switch)
+// and `matt-cordis` adds `tool-cordis` (#99-D). The default and matt-minimal
+// share the baseline verbatim. The diff is asserted by ROW ID, not by length
+// alone — an equal length cannot tell WHICH row a mode gained.
 const lengths = []
 const orderSeen = []
 for (const p of all) {
@@ -254,18 +255,24 @@ for (const p of all) {
   else bad(`M5. ${p.config.id} profile`, `got ${JSON.stringify(profile)} want ${JSON.stringify(p.mode.profile)}`)
 }
 
-// Three modes share the baseline length; `matt-cordis` carries the one extra
-// `tool-cordis` row ADR-0015 §4 requires. Both halves are asserted so neither
-// "nobody is differentiated" nor "everybody is" passes.
 const CORDIS_INDEX = EXPECTED.findIndex(m => m.id === 'dsh-matt-preset-cordis')
-const baselineLengths = lengths.filter((_, i) => i !== CORDIS_INDEX)
-const baselineOk = baselineLengths.length === EXPECTED.length - 1
-  && baselineLengths.every(n => n === baselineLengths[0]) && baselineLengths[0] > 0
-const cordisLength = lengths[CORDIS_INDEX]
-if (baselineOk && cordisLength === baselineLengths[0] + 1)
-  ok('M5. three modes share one roster baseline; matt-cordis adds exactly one row (its tool-cordis)',
-    `${baselineLengths[0]} rows ×3 + ${cordisLength} rows for matt-cordis`)
-else bad('M5. roster lengths', `${JSON.stringify(lengths)} (want three equal + cordis exactly one more)`)
+const PTC_INDEX = EXPECTED.findIndex(m => m.id === 'dsh-matt-preset-ptc')
+const DIFFERENTIATED = { [CORDIS_INDEX]: 'tool-cordis', [PTC_INDEX]: 'tool-presentation' }
+const baselineIndexes = EXPECTED.map((_, i) => i).filter(i => !(i in DIFFERENTIATED))
+const idsOf = (i) => new Set(all[i].config.plugins.map(r => r?.id))
+const baseline = idsOf(baselineIndexes[0])
+const baselineOk = baselineIndexes.length === EXPECTED.length - Object.keys(DIFFERENTIATED).length
+  && baselineIndexes.every(i => { const s = idsOf(i); return s.size === baseline.size && [...s].every(id => baseline.has(id)) })
+  && baseline.size > 0
+const diffOf = (i) => [...idsOf(i)].filter(id => !baseline.has(id)).sort()
+const diffs = Object.entries(DIFFERENTIATED).map(([i, row]) => ({ index: Number(i), row, got: diffOf(Number(i)) }))
+const diffsOk = diffs.every(({ index, row, got }) =>
+  JSON.stringify(got) === JSON.stringify([row]) && all[index].config.plugins.length === baseline.size + 1)
+if (baselineOk && diffsOk)
+  ok('M5. default+minimal share the baseline verbatim; matt-ptc adds exactly tool-presentation (#116), matt-cordis adds exactly tool-cordis',
+    `${baseline.size} baseline rows + ${diffs.map(d => `${EXPECTED[d.index].id}:{${d.got.join(',')}}`).join(' + ')}`)
+else bad('M5. roster baseline/diffs',
+  `lengths=${JSON.stringify(lengths)} diffs=${diffs.map(d => `${EXPECTED[d.index].id}:+[${d.got.join(',')}] (want +[${d.row}])`).join(' ')}`)
 
 // Order drives the picker's sequence (the registry sorts by it): default 0 then
 // 1/2/3 keeps the four matt modes contiguous and in ADR-0015's order.

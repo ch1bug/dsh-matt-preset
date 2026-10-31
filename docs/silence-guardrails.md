@@ -37,8 +37,10 @@ workflow-body.txt / workflow-enforcer.mjs 的注入正文——正文若需要�
 
 - **#117** 钉「模式描述 ↔ 实挂 roster」的**对齐断言**（差异表方向 (b)）——描述文本与
   roster 能力面的一致性归它；
-- **#116** 执行方向 A（挂 `tool-presentation` 行让 `run_code` 成真 + 实测读数）——
-  承诺的**兑现**归它（其让渡评论明写「承诺↔roster 机械守卫归 #157」）；
+- **#116** 执行方向 A——**已交付**：`tool-presentation` 行已随 #116 进 roster
+  （`lib/bundle-patch.mjs` 的 PTC_EXTRA_ROWS 注入 matt-ptc 载体），`run_code` 声称
+  在 B 段已从 gap 登记升级为 provider；承诺的**兑现**归它（其让渡评论明写
+  「承诺↔roster 机械守卫归 #157」，即本门）；
 - **本门**只管「注入正文 / persona 声称的**工具面** ∈ roster ∪ 显式登记」——三张脸
   各守一段，谁也不重复实现谁。
 

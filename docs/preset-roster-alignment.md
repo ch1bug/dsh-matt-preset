@@ -67,9 +67,9 @@ grep -c '^\s*- id: ' package/presets/{standard,ptc,minimal,cordis}.patch.yml
 
 理由文本（fixture `reasons`）引用的决策落点：ADR-0001（`time-context` /
 `tool-schedule` 退役口径，#117 拍板不回补/不追平）、#116（`tool-presentation`
-挂行，方向 A 已拍、定序 #116 先交付）、ADR-0015 §4（matt 特征面与按模式差异化
-roster）、#92（`tool-ralph` 等常驻口径）、SG10（`tests/verify-silence-guardrails.mjs`
-对「承诺行未挂」的登记检测）。
+挂行——方向 A **已交付**：该行已进 matt-ptc 载体，官方 ptc 的差异表不再登记它）、
+ADR-0015 §4（matt 特征面与按模式差异化 roster）、#92（`tool-ralph` 等常驻口径）、
+SG10（`tests/verify-silence-guardrails.mjs` 对「承诺行未挂」的登记检测）。
 
 ## 边界
 
