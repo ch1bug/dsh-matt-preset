@@ -414,6 +414,28 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 以结构性防线替代：一票一分支（污染落在自己分支、进不了 main）+ pathspec 提交 +
 提交后 `git show --stat` 核对。H1（index/工作树脱节）与 H4（detached HEAD）照旧。
 
+### 编排消费面对账与呈现（#173，retro C1/C2/C3）
+
+上面三条管**实施侧**怎么收口自己的改动面；本节是编排/脚本**消费**改动面结论时
+的另一侧判据（#103「提交后 `git show --stat` 核对」的编排消费侧镜像），互补不复述：
+
+- **C1 消费前对账**：编排/脚本在消费「无改动」结论（跳过复审、跳过提交、关票）
+  **之前**，必须以 `git status --porcelain` 实测对账——实施返回的 touchedPaths 为空
+  ≠ 树上无改动，实施自报与树态是**两个事实源**，缺一次对账就把「漏改的树」读成
+  「干净的树」。
+- **C2 对账口径判据**：porcelain **第二列**列 `M`（未暂存）但 `git diff --name-only`
+  不列 ⇒ **行尾 phantom**（index 与工作树的行尾经 autocrlf 归一后内容相同，`git status`
+  与 diff 的内容核对路径不同所致），**不属改动面**——不据此追账、不拦截、不要求处理。
+  **暂存位（第一列非空）不适用本豁免**：`git diff --name-only` 只对未暂存面，staged
+  真改动同样命中字面——暂存位走 `git diff --cached --name-only` 对账（与上面纪律 2
+  的提交面对账同源）。边界：复核入口门 `scripts/review-fixed-point.mjs` 的清洁判据
+  现走 porcelain，phantom 态会**误拦**（「✗ 工作树不干净」）——先以
+  `git diff --name-only` 为空佐证 phantom，按误报处置并记录，**不回改文件**
+  （该脚本判据与 C2 的对齐不在本票 docs-only 修复面，需另立票）。
+- **C3 呈现纪律**：编排呈现面字段（board 卡片 / finding note / 进度行等）
+  **不静默截断**——超长须截断时带显式省略标记，让读者知道有省略、全量在哪
+  （证据链本体落 `.scratch/`，呈现面失真不等于证据受损，但呈现面不许自己造信息）。
+
 ## 1. 隔离契约：两个工作区 + 桌面端互不干扰
 
 启动器用 **`DSH_HOME`** 定位 home、用 **`--profile <name>`** 选择 `$DSH_HOME/profiles/<name>`。
