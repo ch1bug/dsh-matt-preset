@@ -14,6 +14,9 @@
   [dev-environment §0.4](dev-environment.md) 的暂存纪律：先 `git status --short` 逐项归属，
   **确认本会话是唯一写者才用 `git add -A`**，否则逐个显式路径 `git add <path>`——
   新文件用显式路径同样进 diff（判据：add 后 `git status --short` 不再有本票的 `??` 行）。
+- **skill 层已固化该步**（#171）：user-scope 的 code-review 技能（`<user>/.zcode/skills/code-review/SKILL.md`）
+  第 1 步（pin the fixed point）锚定后先列 `??` 行、逐条 `git add -N` 进 diff 面，并把 untracked
+  清单声明进双轴派发 prompt——机制语义见该技能，判据仍以本节上面一条为准，不复述（D6）。
 - **复核后必须把复核产生的修改重新暂存再 commit**（确认唯一写者才整体 `git add -A`，
   否则显式路径——判据同上）：index 是"复核前"的快照，复核产生的修改只落在工作树，
   而 pre-commit 的 verify-all 跑的是**工作树**——它会为提交里根本没有的内容背书。`#82` 实测：
