@@ -33,11 +33,18 @@
  *
  * This plugin CONSUMES host services only and publishes nothing, so it needs
  * no isolate realm.
+ *
+ * #168 模板防呆（合取形态）：「环境快照」节与「产物清单」节由 tool 机械保证——
+ * 快照 = 生成时 git 探针实值（HEAD / 分支 / status 短读数，探针失败写响亮标记，
+ * 不留空壳）；产物清单 = 有声明才生成整节，sha256 由 tool 对声明 path 现算，
+ * 占位行字面从产出物绝迹。拼装面抽成可导入的 `assembleHandoffDocument`（守卫
+ * tests/verify-handoff-tool.mjs 与 #172 的 tracker 回读面都落在它上面）。
  */
-import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'handoff-tool'
@@ -79,6 +86,215 @@ export const HANDOFF_BOUNDARY = [
   `<!-- 父会话注：仅当 human 已明确指定本会话任务时，在正文写入 "## 本会话任务（human 已定向）" 节，且节内必带凭据行（批次 = \`${CREDENTIAL_FORMATS.batch}\`；非批 = \`${CREDENTIAL_FORMATS.ticket}\`——#156/D52）；否则视为候选交接，子会话会问 human。范围认可 ≠ 派单：human 认可候选范围/愿意处理 ≠ 授权定向 handoff；未落票的候选（如 retro 候选）一律先 TICKET EXIT 立票，不得在交接里写成 "human 已定向"。 -->`,
 ]
 
+// ── #168 模板防呆（合取形态）：快照节 / 产物清单节由 tool 机械保证 ────────────────
+// 旧模板的两个空壳病灶：①「环境快照」节 = header + 注释 + 空值行——注释说"作者填值"，
+// 但作者正文在快照**之前**拼装，这些行结构上永远填不进去，定向子会话的快照校验退化为
+// 纯 hash 对比（git 起手式证据未随交接携带）；②「产物清单」节永远渲染，正文是占位行
+// （`sha256:0000…`），靠注释指令「无产物 → 删除本节」让父会话手删——指令不执行时占位行
+// 与「无冻结快照」的定向声明并存，首轮双读。#168 收敛为合取：快照值 = 生成时探针实值；
+// 清单 = 有声明才生成整节、哈希现算；占位行字面从产出物绝迹。守卫 =
+// tests/verify-handoff-tool.mjs（handoff-tool 首个守卫；扰动真红记录 .scratch/verify168/）。
+
+const GIT_PROBE_TIMEOUT_MS = 10_000
+
+/**
+ * git 探针（只读子命令）。**必须 `git -C <dir>` 定位仓，且 env 剥掉全部 `GIT_*`**：
+ * 本机 startup 脚本族会把子进程 cwd 静默复位（spawn 的 `cwd:` 选项失效，命令打到别的
+ * 目录——tests/isolated-git.mjs #110 的同族通路），而继承的 GIT_DIR / GIT_INDEX_FILE
+ * 会把探针指回别的仓（pre-commit 钩子上下文就带着这一族变量）。探针失败**不抛**：
+ * 返回失败原因，由快照节写成「探针失败：<原因>」响亮标记（不留空壳）。
+ */
+function probeGit(args, dir) {
+  const env = {}
+  for (const key of Object.keys(process.env)) {
+    if (!key.startsWith('GIT_')) env[key] = process.env[key]
+  }
+  return new Promise((resolveProbe) => {
+    // `--no-optional-locks`：探针纯读——不带它时 `git status` 会 opportunistic 刷新并**写**
+    // `.git/index`（一次对用户仓的写副作用，还会与父会话并发的 git 操作抢锁）。开发期另
+    // 观察到一次与 `ls-files` 相悖、随后自愈的暂态 staged/unstaged 读数（机制未定，疑似
+    // racy-stat 窗口；读数留档 .scratch/verify168/probe-transient.md）——探针不写 index 至少
+    // 消掉写侧竞态；快照本身是「生成时刻实况，不一致以实际为准」，子会话起手式会复核。
+    execFile('git', ['--no-optional-locks', '-C', dir, ...args], { timeout: GIT_PROBE_TIMEOUT_MS, windowsHide: true, env }, (error, stdout, stderr) => {
+      // child_process 回调成功时 error 是 null（不是 undefined）——判据必须两个都兜住
+      if (error == null) return resolveProbe({ ok: true, out: stdout.trim() })
+      const firstLine = String(stderr || error.message || error).trim().split('\n')[0]
+      const reason = (error.killed && firstLine === ''
+        ? `git 探针超时（${GIT_PROBE_TIMEOUT_MS}ms）`
+        : firstLine === '' ? String(error.code ?? 'git 探针失败') : firstLine
+      ).slice(0, 200)
+      resolveProbe({ ok: false, reason })
+    })
+  })
+}
+
+/** `git status --porcelain` 短读数：按 XY 状态分组计数（子会话起手式重跑同名命令对照）。 */
+function summarizeStatus(porcelain) {
+  const lines = porcelain.split('\n').filter((l) => l.length >= 3)
+  if (lines.length === 0) return 'clean（git status --porcelain 0 行）'
+  const KINDS = { A: 'added', M: 'modified', D: 'deleted', R: 'renamed', C: 'copied', T: 'typechange', U: 'unmerged' }
+  const counts = new Map()
+  const bump = (label) => counts.set(label, (counts.get(label) ?? 0) + 1)
+  for (const line of lines) {
+    const x = line[0]
+    const y = line[1]
+    if (x === '?' && y === '?') { bump('untracked'); continue }
+    if (x === '!' && y === '!') { bump('ignored'); continue }
+    if (x !== ' ') bump(`staged-${KINDS[x] ?? x}`)
+    if (y !== ' ') bump(`unstaged-${KINDS[y] ?? y}`)
+  }
+  return `${lines.length} 行变更（git status --porcelain：${[...counts].map(([k, n]) => `${k}×${n}`).join(' · ')}）`
+}
+
+/** 环境快照节（#168）：每个值要么是探针实值、要么是「探针失败：<原因>」——零空壳。 */
+async function buildSnapshotSection(cwd) {
+  const [branch, head, status] = await Promise.all([
+    probeGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
+    probeGit(['rev-parse', '--short', 'HEAD'], cwd),
+    probeGit(['status', '--porcelain'], cwd),
+  ])
+  const branchHead = !branch.ok
+    ? `探针失败：${branch.reason}`
+    : !head.ok
+      ? `探针失败：${head.reason}`
+      : `${branch.out} @ ${head.out}`
+  const worktree = status.ok ? summarizeStatus(status.out) : `探针失败：${status.reason}`
+  return [
+    '## 环境快照（起手式验证）',
+    '<!-- 本节由 handoff_tool 生成时自动填 git 探针实值（#168：父会话不手填）；新会话起手式：git log/status 对照以下快照，不一致以实际为准 -->',
+    `- 分支/HEAD: ${branchHead}`,
+    `- 工作树: ${worktree}`,
+  ].join('\n')
+}
+
+/**
+ * 产物清单节（#168）：有声明才生成整节，无声明返回 ''（整节不出现在产出物里）。
+ * sha256 由 tool 对声明 path 现算；path 读不到 / 是目录 → **响亮拒绝**（不生成子会话
+ * 核不过的清单行——与其写一个假哈希占位，不如让父会话当场修 path）。
+ */
+async function buildManifestSection(artifacts, cwd) {
+  if (artifacts === undefined) return ''
+  if (!Array.isArray(artifacts)) {
+    throw new Error(`产物清单参数 artifacts 必须是 path 字符串数组（#168 结构校验）——收到 ${typeof artifacts}。`)
+  }
+  const declared = []
+  for (const entry of artifacts) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      throw new Error('产物清单参数 artifacts 的每一项必须是非空 path 字符串（#168 结构校验）。')
+    }
+    const p = entry.trim()
+    if (declared.includes(p)) continue // 重复声明幂等：同一文件只入清单一次
+    // 行解析判据与 lib/autonomy-orchestration.mjs verifyManifest 同源：`<路径> sha256:<64位十六进制>`，
+    // 路径段的排除集 = 空白/反引号/星号——含这些字符的 path 会造出机械校验器解析不了的清单行。
+    if (/[\s`*]/.test(p)) {
+      throw new Error(
+        `产物路径 '${p}' 含空白/反引号/星号（#168 结构校验，响亮拒绝）——清单行按 \`<路径> sha256:<64位十六进制>\``
+        + ' 解析（lib/autonomy-orchestration verifyManifest 同判据），这些字符会造出子会话校验器解析不了的行。',
+      )
+    }
+    declared.push(p)
+  }
+  if (declared.length === 0) return ''
+  const lines = []
+  const seen = new Set()
+  for (const p of declared) {
+    // 归一化（#168 复审 F3）：清单行契约 = `<相对路径> sha256:<64位十六进制>`，由子会话 /
+    // verifyManifest 按基准目录解析核验（lib/autonomy-orchestration.mjs verifyManifest:
+    // `join(rootDir, rel)`——绝对路径 rel 会拼出坏路径 → actual=null 假失真，2026-10-31 实测）。
+    // 声明路径先归一化为基准目录内相对路径；基准目录之外（跨盘 / `..` 前缀）响亮拒绝——
+    // 与空白/反引号/星号同待遇：不生成校验器核不过的行。
+    const abs = resolve(cwd, p)
+    const rel = relative(cwd, abs).split(sep).join('/')
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+      throw new Error(
+        `产物路径 '${p}' 无法归一化为基准目录 ${cwd} 内的相对路径（#168 响亮拒绝）——`
+        + '清单行契约 = `<相对路径> sha256:<64位十六进制>`，由子会话/verifyManifest 按基准目录解析核验'
+        + '（lib/autonomy-orchestration verifyManifest: join(rootDir, rel)）；基准目录之外的文件不进清单。',
+      )
+    }
+    if (seen.has(rel)) continue // 重复声明幂等（相对/绝对声明归一后同键）：同一文件只入清单一次
+    seen.add(rel)
+    let sha256
+    try {
+      const st = await stat(abs)
+      if (st.isDirectory()) throw new Error('是目录，不是文件')
+      sha256 = createHash('sha256').update(await readFile(abs)).digest('hex')
+    } catch (error) {
+      throw new Error(
+        `产物清单现算哈希失败（#168 响亮拒绝——不生成子会话核不过的清单）：'${p}'（基准目录 ${cwd}）—— ${String(error?.message ?? error)}`,
+      )
+    }
+    lines.push(`- \`${rel}\` sha256:${sha256}`)
+  }
+  return [
+    '## 产物清单（子会话逐条机械校验）',
+    '<!-- 每行格式：`<相对路径> sha256:<64位十六进制>`，哈希由 handoff_tool 对声明 path 现算、路径归一化为基准目录内相对路径（#168：占位行不再存在）。子会话开工前逐条校验存在性+哈希（sha256sum / Get-FileHash）；任一缺失或不符 → 报告并停下，不开工。 -->',
+    ...lines,
+  ].join('\n')
+}
+
+/**
+ * 拼装交接文档（#168 起从 executeHandoff 提出的**可导入面**）：作者正文 + 自动快照节 +
+ * （有声明才有的）产物清单节 + 交接边界段。守卫 tests/verify-handoff-tool.mjs 直接测它；
+ * #172 item1（tracker 回读）在本函数面上继续扩「机械填」的清单。
+ *
+ * 定向/候选的门（凭据行、skill 声明）也在这里：它们管的是文档形状，且拒绝必须发生在
+ * 写文件 / 建子会话之前（Track A4/A5 的执行面断言依赖这一顺序）。
+ *
+ * @param {string} document 父会话写的正文（`# Handoff` 标题去重、focus 前缀在此处理）
+ * @param {{focus?: string, skill?: string, artifacts?: string[], cwd?: string}} [opts]
+ *   `cwd` = 探针与哈希的基准目录（生产 = 父会话 header.cwd；缺省 process.cwd()）
+ * @returns {Promise<string>} 完整交接文档（节间空行分隔；页脚注释由执行面追加）
+ */
+export async function assembleHandoffDocument(document, opts = {}) {
+  const cwd = opts.cwd ?? process.cwd()
+  // Dedupe: the agent's document may already open with the same `# Handoff`
+  // heading the tool would prepend — keep exactly one.
+  const focusSuffix = opts.focus && opts.focus.trim() ? ` — ${opts.focus.trim()}` : ''
+  const prefix = `# Handoff${focusSuffix}`
+  let body = String(document ?? '').trim()
+  if (body.startsWith(prefix)) body = body.slice(prefix.length).replace(/^\s*\n/, '')
+  // Gate-4 父会话强约束（2026-09-02 IRIS 观察）+ #156/D52 定向凭据：与旧实现逐字同门，
+  // 只是落点从 executeHandoff 挪进拼装面（拒绝仍发生在写盘 / 建子会话之前）。
+  const isAssignment = body.includes('## 本会话任务（human 已定向）')
+  const directedSection = (() => {
+    const start = body.indexOf('## 本会话任务（human 已定向）')
+    if (start < 0) return ''
+    const next = body.indexOf('\n## ', start)
+    return next < 0 ? body.slice(start) : body.slice(start, next)
+  })()
+  const hasCredentialLine = CREDENTIAL_LINE_RE.test(directedSection)
+  const skill = typeof opts.skill === 'string' ? opts.skill.trim().replace(/^\//, '') : ''
+  if (isAssignment && !hasCredentialLine) {
+    throw new Error(
+      '定向交接缺凭据行（#156/D52，结构校验）——工具拒绝转发本派单（不创建子会话）。修复两选一：'
+      + `① 在「## 本会话任务（human 已定向）」节内加一行可核凭据——批次定向：\`${CREDENTIAL_FORMATS.batch}（.scratch/batch-state.md 在案）\`；非批定向：\`${CREDENTIAL_FORMATS.ticket}\`（先落票才有定向资格，未落票候选一律 TICKET EXIT 立票）；`
+      + '② 去掉定向节，降级为候选交接后重调（child 会停下问 human）。范围认可 ≠ 派单。',
+    )
+  }
+  if (isAssignment && !skill) {
+    throw new Error(
+      "定向交接必须声明 skill（父会话强约束，不是子会话的自觉）：传 skill: 'implement' / 'code-review' / 'grill-with-docs' 等——实现票按惯例等价于以 /implement 开工；工作区内的 grill 票用 grill-with-docs；确无适用技能传 skill: 'none' 并在定向节说明。",
+    )
+  }
+  if (!isAssignment && skill && skill !== 'none') {
+    throw new Error(
+      "候选交接（无「本会话任务（human 已定向）」节）不携带技能契约——先确定任务并写定向节，或去掉 skill 参数。",
+    )
+  }
+  const invocation = isAssignment && skill !== 'none' ? `/${skill}` : ''
+  const [snapshot, manifest] = await Promise.all([
+    buildSnapshotSection(cwd),
+    buildManifestSection(opts.artifacts, cwd),
+  ])
+  const boundary = HANDOFF_BOUNDARY.join('\n')
+  // 节间空行分隔。旧实现的 '' 分隔符被 filter(Boolean) 整个吞掉，节与节之间只有单换行
+  //（2026-10-31 基线实测 .scratch/verify168/baseline-assembly.mjs）——顺手修正为可读形状。
+  return [invocation, prefix, body, snapshot, ...(manifest !== '' ? [manifest] : []), boundary]
+    .filter((part) => part !== '')
+    .join('\n\n')
+}
+
 /** Tool parameter schema for the model-facing call. */
 const handoffSchema = {
   type: 'object',
@@ -86,7 +302,13 @@ const handoffSchema = {
     document: {
       type: 'string',
       description:
-        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section. The tool appends the 环境快照, 产物清单 (path + sha256, child verifies mechanically — replace the placeholder entries with real ones), and 交接边界 sections; do not duplicate them.',
+        'The handoff markdown to carry into the next session: a summary of the current conversation, a "suggested skills" section naming skills the next session should invoke, references to artifacts by path/URL (do not duplicate their content), and NO sensitive data (redact API keys, passwords, PII). Session-local content lives HERE: confirmed decisions, next steps (every candidate/pending item with 判据 + 读数, unverifiable ones marked 未核 — the appended boundary enforces this), and environment claims each as a `命令 → 输出` line (a bare environment claim once shipped a false verdict — D26). For directed handoffs the tool pins a `/<skill>` invocation line above the title — DSH\'s skill system auto-injects the contract; declare `skill` and compose the directed section. The tool machine-fills the appended sections — 环境快照 (git probe values, #168), 产物清单 (only when `artifacts` is declared; sha256 computed by the tool), and 交接边界 — do not duplicate or hand-fill them.',
+    },
+    artifacts: {
+      type: 'array',
+      description:
+        'Optional: paths of files the next session must verify mechanically before starting (sources, tests, batch state, evidence). Every declared path is normalized to a cwd-relative form for the manifest (the mechanical verifier resolves entries against the session cwd); a path outside the session cwd, or with spaces/backticks/asterisks, fails the call loudly (the manifest only carries lines the verifier can parse and re-hash). Each path must exist and be readable NOW — the tool hashes it and writes the real sha256 into the 产物清单 section; a path it cannot read fails the call loudly (fix the path; placeholder hash lines are never generated). Omit entirely for a handoff with no artifacts — the section is then omitted, not left as a placeholder (#168).',
+      items: { type: 'string' },
     },
     focus: {
       type: 'string',
@@ -196,95 +418,23 @@ async function executeHandoff(ctx, args, exec) {
   const stamped = new Date().toISOString().replace(/[:.]/g, '-')
   const fileName = `handoff-${presetId}-${stamped}.md`
   const filePath = join(tmpdir(), fileName)
-  const doc = args.document.trim()
-  // Dedupe: the agent's document may already open with the same `# Handoff`
-  // heading the tool would prepend — keep exactly one.
-  const focusSuffix = args.focus && args.focus.trim() ? ` — ${args.focus.trim()}` : ''
-  const prefix = `# Handoff${focusSuffix}`
-  let body = doc
-  if (body.startsWith(prefix)) body = body.slice(prefix.length).replace(/^\s*\n/, '')
-  // D26: environment snapshot template — the child's起手式 verifies this
-  // (git log/status) instead of rebuilding context; the handoff author fills
-  // the values. Kept as a template so structure is stable, content is theirs.
-  // retro 2026-10-16: a bare environment claim ("this machine has no dsh") shipped
-  // a false AC verdict into a pushed commit, because nothing forced the claim to
-  // carry its probe. Every environment claim now carries `命令 → 输出`.
-  const snapshot = [
-    '## 环境快照（起手式验证）',
-    '<!-- 新会话起手式：git log/status 对照以下快照，不一致以实际为准 -->',
-    '- 分支/HEAD: ',
-    '- 工作树: ',
-    '- 关键文件状态: ',
-    '- 环境结论（每条一行 `命令 → 输出`；裸结论无效）: ',
-    '- 已确认决策: ',
-    '- 下一步（候选待办每条带「判据 + 读数」；判不了的标「未核」——见交接边界）: ',
-  ].join('\n')
-  // 产物清单 (artifact manifest, C1/#35): each line is a path + sha256 the
-  // child can verify mechanically before starting (sha256sum / Get-FileHash).
-  // Template, like the snapshot: structure is tool-guaranteed, entries are
-  // the author's. Any mismatch → report and stop, never start on a bad
-  // manifest; a handoff with no artifacts deletes the section.
-  const artifacts = [
-    '## 产物清单（子会话逐条机械校验）',
-    '<!-- 每行格式：`<相对路径> sha256:<64位十六进制>`。子会话开工前逐条校验存在性+哈希（sha256sum / Get-FileHash）；任一缺失或不符 → 报告并停下，不开工。无产物 → 删除本节。 -->',
-    '- （替换本行：path/to/artifact sha256:0000…）',
-  ].join('\n')
-  // 交接边界 (handoff boundary): tool-guaranteed, not model-discretion. A
-  // document that carries a "## 本会话任务（human 已定向）" section is an
-  // ASSIGNMENT — the child verifies the snapshot, restates understanding, and
-  // declares start without a confirmation round-trip (D35). A document
-  // without that section lists CANDIDATES ("待办/下一步") for the human to
-  // pick, not instructions to execute; the child must verify, restate, and
-  // ASK — never auto-start a listed item (O6: a fresh child misreads a hot
-  // pending item as its assignment and barrels into another ticket's work).
-  // D37/O7: an assignment's authorization is scoped per hop — each chained
-  // handoff re-marks its OWN ticket explicitly (2026-08-31 IRIS incident: a
-  // batch-Q prose claim of blanket authorization collided with the old
-  // single-rule boundary, and children resolved the conflict both ways).
-  // #133 覆盖边界（如实声明，不装成全局护栏）：下面的候选判据规则（含快照段
-  // 「下一步」行的指针）只随本工具拼的「交接边界」段发布，管辖范围 = 经
-  // handoff_tool 生成的交接文档；手写交接文档不受它约束。
-  // #163：数组本体已提到模块级 HANDOFF_BOUNDARY（单点定义，供 runner/编排器
-  // import 拼装）；此处只 join。
-  const boundary = HANDOFF_BOUNDARY.join('\n')
-  // Gate-4 父会话强约束（2026-09-02 IRIS 观察: 两个批内 handoff 都直接开工、
-  // 没加载 implement 技能——只有 review 阶段加载了 code-review）。
-  // 修订 v3：义务在父会话侧（定向交接必须声明 skill）；但工具【不嵌入内容】
-  // ——重复造轮子：DSH 的 skill 插件会在首条消息引用技能时自动注入
-  // <skill_content>（实测于 WF-T2 grill）。工具只在 # Handoff 前单起一行发射
-  // 调用指令（/<skill>），首因位 + 平台注入 = 子会话零读取、零内容重复。
-  const isAssignment = body.includes('## 本会话任务（human 已定向）')
-  // #156/D52 定向凭据：结构校验 only —— 定向节内必须有一行凭据（批次宣告 id
-  // 或已落票票号）。工具不做关键词语义判断、不搞授权语义理解：它无法核验 human
-  // 的真实意图，只能拒绝转发一份没带凭据的定向派单（child 侧的实体核对——
-  // 票 open / 宣告在 .scratch/batch-state.md——由边界模板承载，核对不过降级候选）。
-  const directedSection = (() => {
-    const start = body.indexOf('## 本会话任务（human 已定向）')
-    if (start < 0) return ''
-    const next = body.indexOf('\n## ', start)
-    return next < 0 ? body.slice(start) : body.slice(start, next)
-  })()
-  const hasCredentialLine = CREDENTIAL_LINE_RE.test(directedSection)
-  const skill = typeof args.skill === 'string' ? args.skill.trim().replace(/^\//, '') : ''
-  if (isAssignment && !hasCredentialLine) {
-    throw new Error(
-      '定向交接缺凭据行（#156/D52，结构校验）——工具拒绝转发本派单（不创建子会话）。修复两选一：'
-      + `① 在「## 本会话任务（human 已定向）」节内加一行可核凭据——批次定向：\`${CREDENTIAL_FORMATS.batch}（.scratch/batch-state.md 在案）\`；非批定向：\`${CREDENTIAL_FORMATS.ticket}\`（先落票才有定向资格，未落票候选一律 TICKET EXIT 立票）；`
-      + '② 去掉定向节，降级为候选交接后重调（child 会停下问 human）。范围认可 ≠ 派单。',
-    )
-  }
-  if (isAssignment && !skill) {
-    throw new Error(
-      "定向交接必须声明 skill（父会话强约束，不是子会话的自觉）：传 skill: 'implement' / 'code-review' / 'grill-with-docs' 等——实现票按惯例等价于以 /implement 开工；工作区内的 grill 票用 grill-with-docs；确无适用技能传 skill: 'none' 并在定向节说明。",
-    )
-  }
-  if (!isAssignment && skill && skill !== 'none') {
-    throw new Error(
-      "候选交接（无「本会话任务（human 已定向）」节）不携带技能契约——先确定任务并写定向节，或去掉 skill 参数。",
-    )
-  }
-  const invocation = isAssignment && skill !== 'none' ? `/${skill}` : ''
-  const documentText = [invocation, invocation ? '' : null, prefix, '', body, '', snapshot, '', artifacts, '', boundary, '', '<!-- spawned by ' + presetId + ' preset; child session inherits the same mode -->', ''].filter(Boolean).join('\n')
+  // The document is ASSEMBLED, not templated (#168): the snapshot section is
+  // machine-filled here (git probes over the session cwd — the tool runs in the
+  // parent session, so this is the generation-moment truth), the artifact
+  // manifest exists only when `artifacts` is declared and carries tool-computed
+  // sha256 values, and the boundary is joined from the module-level canonical
+  // array. The credential/skill gates run inside the assembly and throw BEFORE
+  // anything is written or spawned. See assembleHandoffDocument above for the
+  // D26/#133 history of these sections.
+  const documentText = [
+    await assembleHandoffDocument(args.document, {
+      focus: args.focus,
+      skill: args.skill,
+      artifacts: args.artifacts,
+      cwd: header?.cwd,
+    }),
+    `<!-- spawned by ${presetId} preset; child session inherits the same mode -->`,
+  ].join('\n\n')
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')
@@ -394,7 +544,7 @@ export function apply(ctx) {
       "Execute the /handoff phase boundary: write a portable handoff markdown to the OS temp dir and spawn the child session (same mode) that continues the work; the document becomes the child's first prompt and its first turn starts immediately.",
       'Call this when the phase-boundary decision is /handoff — swapping harness, moving to a new directory, sending work to a colleague, or forking a side task mid-phase.',
       'mode "fresh" (default) = empty child session, zero inherited history (the document carries the context); mode "fork" = child continues this session\'s history up to the last completed turn (same-ticket continuation only).',
-      'You compose the `document` yourself (summary + suggested skills + artifact references, redacted); this tool only writes and spawns.',
+      'You compose the `document` yourself (summary + suggested skills + artifact references, redacted); the tool machine-fills the appended sections — 环境快照 (git probe values over the session cwd) and 产物清单 (declare `artifacts` paths; each sha256 is computed here, and the section exists only when artifacts are declared, #168).',
       'After it returns, STOP and tell the human to switch to the child session in the sidebar — you cannot switch the main session yourself.',
     ].join('\n'),
     parameters: handoffSchema,

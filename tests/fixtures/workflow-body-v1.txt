@@ -311,6 +311,10 @@ per-issue push rhythm.
   ## 未验面 — what was not run / not verifiable here and why;
   ## 指针 — discipline pointers (AGENTS.md / docs/agents/issue-tracker.md 等), not
   restated rules.
+  The appended 环境快照 git values and 产物清单 sha256 entries are machine-filled by
+  the handoff tool at generation time (git probes / hashing over the declared artifact
+  paths, #168) — the parent session never hand-fills them, and the manifest section
+  exists only when artifacts are declared (no placeholder lines).
 - Batch end: after the summary gate, push all commits in one go; remote
     CI all-green is the completion gate — red means unfinished batch work,
     fix and re-verify.

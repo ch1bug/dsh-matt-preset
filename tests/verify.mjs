@@ -15,6 +15,7 @@
  */
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -129,12 +130,17 @@ try {
   // execute handoff_tool through the real registry dispatch
   const beforeH = ctxA.sessions.list().length
   const doc = '# Handoff\n\nVerification summary.\n\n## suggested skills\n- tdd\n- code-review'
+  // #168: the artifact manifest is machine-filled — declare one real artifact
+  // (absolute path, cwd-independent) and compare the tool's sha256 against a
+  // digest the test computes independently.
+  const artifactAbs = join(MATT_DIR, 'package.json')
+  const artifactSha = createHash('sha256').update(readFileSync(artifactAbs)).digest('hex')
   let out
   try {
     out = await ctxA.tools.execute({
       callId: ToolCallId('verify-handoff-1'),
       name: 'handoff_tool',
-      arguments: { document: doc, mode: 'fresh' },
+      arguments: { document: doc, mode: 'fresh', artifacts: [artifactAbs] },
       agent: agentA,
       signal: new AbortController().signal,
     })
@@ -173,28 +179,37 @@ try {
       } else {
         bad('A. handoff boundary section', '交接边界/不是本会话的任务指令 missing from document')
       }
-      // C1/#35: the artifact manifest section (path + sha256) must be present
-      // so the child can verify artifacts mechanically before starting.
-      if (text.includes('产物清单') && text.includes('sha256')) {
-        ok('A. handoff document carries the artifact manifest (path + sha256, machine-checkable)')
+      // #168：产物清单 = 有声明才生成整节、sha256 由 tool 对声明 path 现算——这里声明的
+      // 绝对路径产物，哈希与测试独立现算的摘要逐字对照（占位行字面的绝迹由
+      // tests/verify-handoff-tool.mjs T4 钉）。
+      if (text.includes('产物清单') && text.includes(`sha256:${artifactSha}`)) {
+        ok('A. handoff manifest carries the tool-computed sha256 of the declared artifact (#168)', artifactSha.slice(0, 12) + '…')
       } else {
-        bad('A. handoff artifact manifest', '产物清单/sha256 missing from document')
+        bad('A. handoff artifact manifest (#168)', `产物清单 / tool-computed sha256 missing (expected ${artifactSha.slice(0, 12)}…)`)
       }
-      // D26 修订（retro 2026-10-16）：环境快照必须要求环境结论带探针（`命令 → 输出`）——
-      // 一条裸结论（"本机没有 dsh"）曾把错的 AC 判据写进已 push 的 commit。
-      if (text.includes('环境快照') && text.includes('环境结论')) {
-        ok('A. handoff document carries the environment snapshot (claims need command → output)')
-      } else {
-        bad('A. handoff snapshot section', '环境快照/环境结论 missing from document')
+      // #168：快照节由 tool 机械填——值行要么探针实值、要么「探针失败：<原因>」响亮标记，
+      // 唯独不允许空壳（带标签的空值行）。探针实值语义的对照（受控夹具仓）在
+      // tests/verify-handoff-tool.mjs T2；D26 的「环境结论带 `命令 → 输出`」规则随旧模板
+      // 空值行拆除，权威落点 = document 参数说明 + workflow-body 写法规约（#168）。
+      {
+        const snapStart = text.indexOf('## 环境快照')
+        const snapEnd = snapStart < 0 ? -1 : text.indexOf('\n## ', snapStart)
+        const snapshot = snapStart < 0 ? '' : text.slice(snapStart, snapEnd < 0 ? text.length : snapEnd)
+        const shells = snapshot.split('\n').filter((l) => /^- [^:]+:\s*$/.test(l))
+        const valueOf = (label) => snapshot.split('\n').find((l) => l.startsWith(label))
+        const valuesFilled = snapshot !== '' && shells.length === 0
+          && ['- 分支/HEAD: ', '- 工作树: '].every((label) => {
+            const line = valueOf(label)
+            return line !== undefined && line.slice(label.length).trim().length > 0
+          })
+        if (valuesFilled) {
+          ok('A. snapshot section is machine-filled (#168): value lines non-empty (probe value or loud 探针失败)', (valueOf('- 分支/HEAD: ') ?? '').slice(0, 80))
+        } else {
+          bad('A. snapshot section machine-filled (#168)', JSON.stringify({ snapshot, shells }))
+        }
       }
-      // #133：快照的「下一步」行必须带候选判据指针（判据 + 读数 / 未核）。
-      // 行锚定到该行本身（D2 复审：全文级 includes('未核') 会被边界段契约句
-      // 兜住——单删本行半句断言照绿 = 半边假绿）。
-      if (/^- 下一步（[^\n]*判据[^\n]*未核/m.test(text)) {
-        ok('A. handoff snapshot 下一步 line points at the candidate-criteria rule (#133)')
-      } else {
-        bad('A. handoff snapshot 下一步 pointer (#133)', '下一步 line lacks 判据/未核 pointer')
-      }
+      // #133 的快照「下一步」指针行已随旧模板拆除（快照节只剩 tool 机械保证的探针行，
+      // 快照段不再复述边界契约）；候选判据契约的正典 = 交接边界行，由下一条断言钉住。
       // #133（K 批 6 票「疑似已完成」0 张真完成的反例）：候选/待办清单必须
       // 带判据 + 读数，判不了的标「未核」——这句契约在工具拼的交接边界里，
       // 删掉它本断言红。同样行锚定（D2：快照指针行也有「判据 + 读数」「未核」，
@@ -216,6 +231,10 @@ try {
   // compacted history). The child's only user message must be the document.
   {
     const beforeDef = ctxA.sessions.list().length
+    // #168 同批修正：此前用「第一个非父会话 id」找子会话——前一次调用已留下子会话，
+    // find 会拿到别人的 child（旧断言只数 userMsgs 恰好不炸；新断言读文档文本就串台了）。
+    // 改照 A3 形态：调用前拍 id 集，取本次调用新增的那个。
+    const idsBeforeDef = new Set(ctxA.sessions.list().map(s => String(s.id)))
     const defOut = await ctxA.tools.execute({
       callId: ToolCallId('verify-handoff-2'),
       name: 'handoff_tool',
@@ -225,16 +244,20 @@ try {
     })
     trackHandoffDoc(defOut)
     if (defOut && defOut.isError === false && ctxA.sessions.list().length === beforeDef + 1) {
-      const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => id !== String(agentA.session.id))
+      const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => !idsBeforeDef.has(id))
       const child = ctxA.agents.get(childId)
       await new Promise(r => setTimeout(r, 500))
       const childEvents = child.session.snapshotEvents()
       const userMsgs = childEvents.filter(ev => ev.type === 'user/message')
       const inherited = userMsgs.filter(ev => !/Handoff/i.test(JSON.stringify(ev.data?.content ?? '')))
-      if (userMsgs.length === 1 && inherited.length === 0) {
-        ok('A2. default handoff mode is fresh (child has zero inherited history)', `events=${childEvents.length} userMsgs=${userMsgs.length}`)
+      // #168: this call declares NO artifacts → the 产物清单 section must be absent
+      // entirely (structural omission, not a placeholder).
+      const a2Text = userMsgs.map(ev => (Array.isArray(ev.data?.content) ? ev.data.content : []).map(p => p?.text ?? '').join('')).join('')
+      const a2Manifest = a2Text.includes('产物清单') || a2Text.includes('sha256:')
+      if (userMsgs.length === 1 && inherited.length === 0 && !a2Manifest) {
+        ok('A2. default handoff mode is fresh (zero inherited history) + no artifacts → no manifest section (#168)', `events=${childEvents.length} userMsgs=${userMsgs.length}`)
       } else {
-        bad('A2. default handoff mode is fresh', `events=${childEvents.length} userMsgs=${userMsgs.length} inherited=${inherited.length}`)
+        bad('A2. default handoff mode is fresh / no manifest without artifacts (#168)', `events=${childEvents.length} userMsgs=${userMsgs.length} inherited=${inherited.length} manifest=${a2Manifest}`)
       }
     } else {
       bad('A2. default handoff mode is fresh', defOut ? `isError=${defOut.isError}` : 'no result')

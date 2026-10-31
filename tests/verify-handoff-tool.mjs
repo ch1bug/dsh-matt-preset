@@ -1,0 +1,275 @@
+/**
+ * verify-handoff-tool.mjs —— handoff-tool **首个守卫**（#168：模板防呆合取形态的模板面）。
+ *
+ * 被测面 = `handoff-tool.mjs` 导出的 `assembleHandoffDocument`（#168 起从 executeHandoff
+ * 提出的可导入拼装面；#172 item1 的 tracker 回读将落在同一函数上）。执行面（真挂具、真
+ * 子会话）由 `tests/verify.mjs` Track A 覆盖；本文件管模板面：
+ *
+ *   T0  插件面（name / inject 契约形状）
+ *   T1  无产物声明 → 产出**无产物清单节**（整节缺席，不是占位行）
+ *   T2  快照节含**探针实值**（与守卫用 `gitIn` 独立读出的分支/HEAD 对照；干净树 = clean；
+ *       旧模板的空值标签行零在场）
+ *   T3  有产物声明 → 清单行 sha256 与守卫**独立现算**一致（重复声明幂等、相对路径按 cwd 解析）
+ *   T4  占位行字面（`替换本行` / `sha256:0000` / 64 零哈希 / 「无产物 → 删除本节」指令注释）
+ *       在**所有**产出物零在场
+ *   T5  探针失败（非仓目录）→ 「探针失败：<原因>」响亮标记，**零空壳值行**
+ *   T5b 产物声明非法（空白路径 / 缺文件 / 非数组）→ 响亮拒绝，不生成核不过的清单
+ *   T6  status 短读数随树态变化（干净 → untracked×1）
+ *   T7  凭据 / skill 门经新拼装面照常响亮（拒绝发生在写盘/建子会话之前）
+ *   T8  定向 invocation 钉首行 + 交接边界段照常携带
+ *
+ * git 隔离：夹具仓走 `tests/isolated-git.mjs` 挂具（`fixtureEnv` + `gitIn`，`git -C` 定位、
+ * env 剥 `GIT_*`）—— 与被测探针（`git -C` + 剥 `GIT_*`）同一套定位语义，夹具读数与探针
+ * 读数因此可比。探针失败分支用**真非仓目录**实测，不注入假探针。
+ *
+ * 扰动真红（非空洞记录，字节级还原后零残留）：`.scratch/verify168/perturbation.md`。
+ */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+
+import { assembleHandoffDocument, CREDENTIAL_FORMATS, HANDOFF_BOUNDARY, inject, name } from '../handoff-tool.mjs'
+import { fixtureEnv, gitIn } from './isolated-git.mjs'
+
+const results = []
+const ok = (label, detail = '') => results.push('  ✓ ' + label + (detail ? ' — ' + detail : ''))
+const bad = (label, detail = '') => results.push('  ✗ ' + label + (detail ? ' — ' + detail : ''))
+
+/** 取 `## <title>` 节的正文（到下一个 `\n## ` 或文末）。 */
+const sectionOf = (text, title) => {
+  const start = text.indexOf('## ' + title)
+  if (start < 0) return ''
+  const next = text.indexOf('\n## ', start)
+  return text.slice(start, next < 0 ? text.length : next)
+}
+/** 快照节里的空壳值行：带 `: ` 标签但值为空（#168 明令禁止的旧壳形状）。 */
+const emptyShells = (snapshot) => snapshot.split('\n').filter((l) => /^- [^:]+:\s*$/.test(l))
+/** 旧模板的四个永远填不进去的空值标签（#168 拆除，禁止回植）。 */
+const OLD_SHELL_LABELS = ['- 关键文件状态: ', '- 环境结论（', '- 已确认决策: ', '- 下一步（']
+/** 旧模板的占位行字面（#168 绝迹清单）。 */
+const PLACEHOLDER_LITERALS = ['替换本行', 'sha256:0000', '无产物 → 删除本节']
+const sha256Of = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
+
+const tmpRoot = mkdtempSync(join(tmpdir(), 'verify-handoff-tool-'))
+try {
+  // ── 夹具仓（挂具隔离）：fixture-main 分支 + 一个干净提交 ─────────────────────────
+  const repoDir = join(tmpRoot, 'repo')
+  const bareDir = join(tmpRoot, 'not-a-repo')
+  mkdirSync(repoDir)
+  mkdirSync(bareDir)
+  const env = fixtureEnv()
+  const G = gitIn(repoDir, env)
+  const die = (what, r) => {
+    bad('夹具自检（不可继续）', `${what}: exit=${r.status} ${String(r.stdout || r.stderr || '').slice(0, 200)}`)
+    console.log('\n=== HANDOFF-TOOL VERIFY ===')
+    console.log(results.join('\n'))
+    process.exit(1)
+  }
+  die.unless = (cond, what, r) => { if (!cond) die(what, r) }
+  let r = G('init', '-q', '-b', 'fixture-main')
+  die.unless(r.status === 0, 'git init', r)
+  r = G('config', 'user.email', 'fixture@example.invalid')
+  die.unless(r.status === 0, 'git config email', r)
+  r = G('config', 'user.name', 'fixture')
+  die.unless(r.status === 0, 'git config name', r)
+  writeFileSync(join(repoDir, 'README.md'), '# fixture repo for the handoff-tool guard\n')
+  r = G('add', '-A')
+  die.unless(r.status === 0, 'git add', r)
+  r = G('commit', '-qm', 'fixture seed')
+  die.unless(r.status === 0, 'git commit', r)
+  // 独立读数（不走被测探针）：守卫自己的对照基准
+  const branch = G('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim()
+  const head = G('rev-parse', '--short', 'HEAD').stdout.trim()
+  die.unless(branch === 'fixture-main' && head.length >= 7, '夹具读数', r)
+
+  const BODY = '候选交接验证正文：只写本会话现场事实。\n\n## 未验面\n\n- 守卫断言面已跑；GUI 侧子会话渲染未验（本守卫不建子会话）。'
+  const docs = [] // T4 的占位行扫描面：所有产出物都进这里
+
+  // ── T0 插件面 ─────────────────────────────────────────────────────────────────
+  if (name === 'handoff-tool' && JSON.stringify(inject) === JSON.stringify(['tools', 'agents', 'agentPresets'])) {
+    ok(`T0. 插件面（name=${name}；inject=${inject.join('/')}）`)
+  } else {
+    bad('T0. 插件面', `name=${JSON.stringify(name)} inject=${JSON.stringify(inject)}`)
+  }
+
+  // ── T1 + T2：无产物候选交接（干净树）──────────────────────────────────────────
+  const doc1 = await assembleHandoffDocument(BODY, { cwd: repoDir })
+  docs.push(doc1)
+  if (!doc1.includes('产物清单') && !/sha256:[0-9a-f]/.test(doc1)) {
+    ok('T1. 无产物声明 → 产出无产物清单节（整节缺席，无任何 sha256 行）')
+  } else {
+    bad('T1. 无产物声明 → 无产物清单节', '产出物含 产物清单/sha256 —— 占位行形态回潮')
+  }
+  {
+    const snapshot = sectionOf(doc1, '环境快照（起手式验证）')
+    const shells = emptyShells(snapshot)
+    const oldLabels = OLD_SHELL_LABELS.filter((l) => snapshot.includes(l))
+    const boundaryThere = doc1.includes('## 交接边界（首轮必读）') && doc1.includes('不是本会话的任务指令')
+    if (snapshot === '') {
+      bad('T2. 快照节含探针实值', '产出物无「## 环境快照」节')
+    } else if (snapshot.includes(`- 分支/HEAD: ${branch} @ ${head}`) && snapshot.includes('- 工作树: clean')
+      && !snapshot.includes('探针失败') && shells.length === 0 && oldLabels.length === 0 && boundaryThere) {
+      ok('T2. 快照节含探针实值（对照 gitIn 独立读数）+ 干净树 clean + 旧空值标签零在场 + 边界段在场',
+        `- 分支/HEAD: ${branch} @ ${head}`)
+    } else {
+      bad('T2. 快照节含探针实值', JSON.stringify({ snapshot, shells, oldLabels, boundaryThere, expect: `${branch} @ ${head}` }))
+    }
+  }
+
+  // ── T6：树态变脏 → status 短读数跟随 ─────────────────────────────────────────
+  writeFileSync(join(repoDir, 'notes-draft.txt'), 'untracked draft\n')
+  const doc6 = await assembleHandoffDocument(BODY, { cwd: repoDir })
+  docs.push(doc6)
+  {
+    const worktreeLine = sectionOf(doc6, '环境快照（起手式验证）').split('\n').find((l) => l.startsWith('- 工作树: ')) ?? ''
+    if (worktreeLine.includes('untracked×1') && worktreeLine.includes('1 行变更')) {
+      ok('T6. status 短读数随树态变化（clean → untracked×1）', worktreeLine.slice(0, 90))
+    } else {
+      bad('T6. status 短读数随树态变化', worktreeLine)
+    }
+  }
+
+  // ── T3：有产物 → 清单行哈希 = 守卫独立现算 ───────────────────────────────────
+  mkdirSync(join(repoDir, 'utils'), { recursive: true })
+  mkdirSync(join(repoDir, 'evidence'), { recursive: true })
+  writeFileSync(join(repoDir, 'utils', 'slug.js'), 'export const slugify = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")\n')
+  writeFileSync(join(repoDir, 'evidence', 'green.txt'), 'verify-all quick set exit 0\n')
+  const expectSha = {
+    'utils/slug.js': sha256Of(join(repoDir, 'utils', 'slug.js')),
+    'evidence/green.txt': sha256Of(join(repoDir, 'evidence', 'green.txt')),
+  }
+  // 同一文件以相对形态 + 绝对形态 + 重复共声明 4 次：归一化后必须幂等成 2 行（#168 复审 F3）
+  const doc3 = await assembleHandoffDocument(BODY, {
+    cwd: repoDir,
+    artifacts: ['utils/slug.js', 'evidence/green.txt', 'utils/slug.js', join(repoDir, 'utils', 'slug.js')],
+  })
+  docs.push(doc3)
+  {
+    const manifest = sectionOf(doc3, '产物清单（子会话逐条机械校验）')
+    const lines = [...manifest.matchAll(/^- `([^`]+)` sha256:([0-9a-f]{64})$/gm)].map((m) => [m[1], m[2]])
+    const dupGone = manifest.split('\n').filter((l) => l.startsWith('- `') && l.includes('utils/slug.js')).length === 1
+    const allMatch = lines.length === 2 && lines.every(([p, h]) => expectSha[p] === h)
+    if (manifest === '') {
+      bad('T3. 有产物 → 清单行 sha256 现算实值', '声明了两个产物，产出物仍无产物清单节')
+    } else if (allMatch && dupGone) {
+      ok('T3. 有产物 → 清单行 sha256 与独立现算一致（相对/绝对声明归一幂等成 2 行，行路径为相对形态）',
+        lines.map(([p, h]) => `${p}=${h.slice(0, 12)}…`).join(' '))
+    } else {
+      bad('T3. 有产物 → 清单行 sha256 现算实值', JSON.stringify({ lines, expectSha, dupGone }))
+    }
+  }
+
+  // ── T4：占位行字面在所有产出物零在场 ─────────────────────────────────────────
+  {
+    const offenders = []
+    for (const [i, doc] of docs.entries()) {
+      for (const lit of PLACEHOLDER_LITERALS) {
+        if (doc.includes(lit)) offenders.push(`doc#${i}: ${lit}`)
+      }
+      if (/sha256:0{64}/.test(doc)) offenders.push(`doc#${i}: sha256:0{64}`)
+    }
+    if (offenders.length === 0 && docs.length >= 3) {
+      ok(`T4. 占位行字面零在场（${docs.length} 份产出物 × ${PLACEHOLDER_LITERALS.length} 字面 + 64 零哈希）`)
+    } else {
+      bad('T4. 占位行字面零在场', offenders.length > 0 ? offenders.join(' ｜ ') : `产出物只有 ${docs.length} 份（扫描面不足，不报假绿）`)
+    }
+  }
+
+  // ── T5：探针失败 → 响亮标记 + 零空壳（真非仓目录）────────────────────────────
+  {
+    const doc5 = await assembleHandoffDocument(BODY, { cwd: bareDir })
+    docs.push(doc5)
+    const snapshot = sectionOf(doc5, '环境快照（起手式验证）')
+    const branchLine = snapshot.split('\n').find((l) => l.startsWith('- 分支/HEAD: ')) ?? ''
+    const worktreeLine = snapshot.split('\n').find((l) => l.startsWith('- 工作树: ')) ?? ''
+    const bothLoud = branchLine.includes('探针失败：') && worktreeLine.includes('探针失败：')
+      && branchLine.slice('- 分支/HEAD: 探针失败：'.length).trim().length > 0
+      && worktreeLine.slice('- 工作树: 探针失败：'.length).trim().length > 0
+    const reallyBare = !existsSync(join(bareDir, '.git'))
+    if (bothLoud && emptyShells(snapshot).length === 0 && reallyBare) {
+      ok('T5. 探针失败（非仓目录）→ 两个值都是「探针失败：<非空原因>」，零空壳值行',
+        branchLine.slice(0, 80))
+    } else {
+      bad('T5. 探针失败 → 响亮标记', JSON.stringify({ branchLine, worktreeLine, reallyBare }))
+    }
+  }
+
+  // ── T5b：产物声明非法 → 响亮拒绝 ─────────────────────────────────────────────
+  {
+    const rejects = []
+    const expectReject = async (label, artifacts, needle) => {
+      try {
+        await assembleHandoffDocument(BODY, { cwd: repoDir, artifacts })
+        rejects.push(`${label}: 未拒绝`)
+      } catch (error) {
+        if (!String(error?.message ?? error).includes(needle)) {
+          rejects.push(`${label}: 报错不含「${needle}」—— ${String(error?.message ?? error).slice(0, 120)}`)
+        }
+      }
+    }
+    await expectReject('路径含空白', ['has space.txt'], '空白/反引号/星号')
+    await expectReject('路径含反引号', ['a`b.txt'], '空白/反引号/星号')
+    await expectReject('缺文件', ['missing-file.bin'], '现算哈希失败')
+    await expectReject('非数组', 'utils/slug.js', 'path 字符串数组')
+    await expectReject('空串项', [''], '非空 path 字符串')
+    // 基准目录之外（#168 复审 F3）：绝对路径无法归一化 → 响亮拒绝——verifyManifest 按
+    // join(rootDir, rel) 解析，绝对路径 rel 会假失真，不进清单。
+    writeFileSync(join(bareDir, 'outside-artifact.txt'), 'outside the fixture repo cwd\n')
+    await expectReject('基准目录外绝对路径', [join(bareDir, 'outside-artifact.txt')], '归一化')
+    // 显式空数组 = 无产物：整节缺席（与 T1 同形）
+    const docEmpty = await assembleHandoffDocument(BODY, { cwd: repoDir, artifacts: [] })
+    docs.push(docEmpty)
+    if (rejects.length === 0 && !docEmpty.includes('产物清单')) {
+      ok('T5b. 产物声明非法逐条响亮拒绝（空白/反引号/缺文件/非数组/空串/基准目录外）+ 空数组 = 整节缺席')
+    } else {
+      bad('T5b. 产物声明非法 → 响亮拒绝', rejects.join(' ｜ ') + (docEmpty.includes('产物清单') ? ' ｜ 空数组仍生成清单节' : ''))
+    }
+  }
+
+  // ── T7：凭据 / skill 门经新拼装面照常响亮 ────────────────────────────────────
+  {
+    const rejects = []
+    try {
+      await assembleHandoffDocument('正文\n\n## 本会话任务（human 已定向）\n\n- verify-ticket（无凭据行）', { skill: 'implement' })
+      rejects.push('定向缺凭据: 未拒绝')
+    } catch (error) {
+      if (!String(error?.message ?? error).includes('凭据')) rejects.push('定向缺凭据: 报错不含「凭据」')
+    }
+    try {
+      await assembleHandoffDocument('候选正文（无定向节）', { skill: 'implement' })
+      rejects.push('候选带 skill: 未拒绝')
+    } catch (error) {
+      if (!String(error?.message ?? error).includes('skill')) rejects.push('候选带 skill: 报错不含「skill」')
+    }
+    if (rejects.length === 0) {
+      ok('T7. 凭据 / skill 门照常响亮（凭据字面 = CREDENTIAL_FORMATS 单点）',
+        `${CREDENTIAL_FORMATS.batch} / ${CREDENTIAL_FORMATS.ticket}`)
+    } else {
+      bad('T7. 凭据 / skill 门', rejects.join(' ｜ '))
+    }
+  }
+
+  // ── T8：定向 invocation 钉首行 + 定向节透传 ──────────────────────────────────
+  {
+    const doc8 = await assembleHandoffDocument(
+      '定向验证正文。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- 凭据：#168（已落票，票 open）',
+      { skill: 'implement', cwd: repoDir },
+    )
+    docs.push(doc8)
+    const passThrough = doc8.includes('## 本会话任务（human 已定向）') && doc8.includes('凭据：#168')
+    const pinned = doc8.startsWith('/implement\n\n# Handoff')
+    if (passThrough && pinned) {
+      ok('T8. 定向 invocation 钉首行（/implement → # Handoff）+ 定向节与凭据行透传')
+    } else {
+      bad('T8. 定向 invocation / 定向节透传', JSON.stringify({ pinned, passThrough, head: doc8.slice(0, 60) }))
+    }
+  }
+} finally {
+  // 只删本守卫自建的 mkdtemp 路径（home 安全判据：删除目标 = 本条命令自己建出来的路径）
+  rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 3 })
+}
+
+console.log('\n=== HANDOFF-TOOL VERIFY (T0–T8) ===')
+console.log(results.join('\n'))
+process.exit(results.some((r) => r.startsWith('  ✗')) ? 1 : 0)
