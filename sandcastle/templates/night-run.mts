@@ -20,13 +20,68 @@
  *     串行（本模板只给分组与提示文本；真执行归编排会话）
  *   - digest 附「retro 素材」段：返工 / 踩踏 / 降级 / 波次合并的**摘要素材**，喂给
  *     清晨主会话的批末 retro（#71 规则）。**容器内不跑 retro**（Q73-1）：这里只喂料。
+ *   - 发车前自检 bash 工具链（#43）：Windows 宿主的 PATH bash 会漂移到 WSL bash
+ *     （uname=Linux、无 msys /c 映射）或 Git bash（无 gcc）。夜跑宿主链本身
+ *     （night-run→run-ticket→podman provider）经 npx/git/gh/podman CLI 直启、不经宿主
+ *     bash（实测：@ai-hero/sandcastle 0.12.0 podman provider 宿主侧全部 execFile/spawn
+ *     podman CLI，容器内走 sh -c）——探针是与 e2e findBash()（#30 修复先例）同判据的
+ *     宿主工具链守门：漂移的 PATH bash 会让任何宿主 bash 步骤（templates/setup.sh、
+ *     消费者自建的 gh shim 编译、e2e 搭台）以含糊方式挂，这里在烧批前统一响亮核对：
+ *     bash 可执行 + uname 非 Linux（msys 形态）+ gcc 直达或 /ucrt64/bin/gcc 存在；
+ *     失败给可行动错误（指明设 PATH 或安装 msys2），绝不带病发射。
  *
- * 退出码：0=全部处理完  2=配额熔断提前停止（队列可重跑续命）
+ * 退出码：0=全部处理完  2=配额熔断提前停止（队列可重跑续命）  3=bash 工具链自检失败
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { arg, isMain } from "./lib.ts";
 import { EXIT_STATUS } from "./run-ticket.mts";
+
+// ============================================================
+// bash 工具链自检（#43；参照 tests/sandcastle-e2e.mjs findBash()，#30 修复先例）
+// ============================================================
+
+/** 一条 `bash -c` 探针的执行形态（main 里传真实现；测试注入假执行器，不依赖本机工具链）。 */
+export type BashProbeRunner = (script: string) => { status: number | null; stdout: string };
+
+/**
+ * bash 工具链能力探针，判据与 e2e findBash() 同源（#43）：
+ *   ① bash 可执行，且 Windows 宿主上 `uname -s` 非 Linux（msys 形态 = MINGW 或 MSYS
+ *      前缀；WSL bash 报 Linux——它没有 msys /c 路径映射，宿主侧的 bash 步骤
+ *      （setup.sh、消费者自建的 shim 编译）会以含糊失败挂掉）；
+ *   ② gcc 直达（command -v gcc）或 msys2 标准位 /ucrt64/bin/gcc.exe 存在。
+ * 返回 undefined=自检通过；否则返回**可行动错误**全文（指明设 PATH 或安装 msys2）。
+ * 非 Windows 宿主（原生 Linux/macOS）跳过 ① 的形态判定——uname=Linux 是真内核而非漂移，
+ * 只做 ② 的 gcc 关。
+ */
+export function bashToolchainProblem(run: BashProbeRunner, platform: string): string | undefined {
+  const uname = run("uname -s");
+  if (uname.status !== 0) {
+    return (
+      "✗ bash 工具链自检失败：bash 不在 PATH 上或不可执行（uname -s 退出 " +
+      `${uname.status}）。\n` +
+      "  修复方式之一：安装 Git for Windows 或 msys2（https://www.msys2.org），" +
+      "或把其 usr/bin 前置到 PATH 后重跑。"
+    );
+  }
+  const s = uname.stdout.trim();
+  if (platform === "win32" && !/MINGW|MSYS/i.test(s)) {
+    return (
+      `✗ bash 工具链自检失败：PATH 上的 bash 不是 msys 形态（uname -s = ${s}；` +
+      "常见于 WSL bash——无 msys /c 路径映射）。\n" +
+      "  修复方式之一：把 Git for Windows / msys2 的 usr/bin 前置到 PATH 后重跑。"
+    );
+  }
+  const gcc = run("command -v gcc >/dev/null 2>&1 || test -x /ucrt64/bin/gcc.exe");
+  if (gcc.status !== 0) {
+    return (
+      "✗ bash 工具链自检失败：gcc 不可达（PATH 上没有 gcc，msys2 标准位 /ucrt64/bin/gcc.exe 也不存在）。\n" +
+      "  修复方式之一：安装 msys2（https://www.msys2.org）并 `pacman -S mingw-w64-ucrt-x86_64-gcc`，" +
+      "或把 msys2 的 usr/bin 与 ucrt64/bin 前置到 PATH 后重跑。"
+    );
+  }
+  return undefined;
+}
 
 // ============================================================
 // 波次合并提示（纯函数，供冒烟测试直接导入）
@@ -312,6 +367,17 @@ export function skipReason(prevStatus: string): string | undefined {
 // ============================================================
 // CLI 主体整体包在 main()：冒烟测试 import 纯函数时不读队列、不 spawn、不退出。
 function main(): void {
+// #43：发车前 bash 工具链自检（判据与 e2e findBash() 同源）——失败 exit 3，
+// 在烧批前把宿主工具链形态响亮核对掉，绝不带病发射。
+const probeRun: BashProbeRunner = (script) => {
+  const r = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+  return { status: r.status, stdout: r.stdout ?? "" };
+};
+const toolchainProblem = bashToolchainProblem(probeRun, process.platform);
+if (toolchainProblem) {
+  console.error(toolchainProblem);
+  process.exit(3);
+}
 const queueFile = arg("queue") ?? ".sandcastle/night-queue.json";
 const image = arg("image");
 if (!image) throw new Error("提供 --image localhost/<repo>:dsh");

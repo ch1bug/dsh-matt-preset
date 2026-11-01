@@ -10,9 +10,12 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 
 ## 项目接入（一次性）
 
-1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / **build-image.sh** / **complete-check.sh** /
+1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / **setup.sh** / **build-image.sh** / **complete-check.sh** /
    dsh.ts / dsh-config.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——共享模块与模板同目录、
-   相对导入 `./lib.ts` / `./dsh-config.ts`，别漏拷）
+   相对导入 `./lib.ts` / `./dsh-config.ts`，别漏拷）。
+   **setup.sh 前置条件**：宿主要有一个 msys 形态的 bash（Git for Windows / msys2，不得是 WSL 的
+   `System32\bash.exe`）+ gcc 可达（PATH 上，或 msys2 的 `/ucrt64/bin/gcc`）——缺了先
+   `bash .sandcastle/setup.sh` 看可行动报错（#43；判据与 e2e `findBash()` 同源）
 2. `npm i -D @ai-hero/sandcastle@0.12.0 tsx` —— **钉版本**（0.x API 周级变动）
    DSH 适配层 `dsh.ts` / `dsh-config.ts` 已在模板内自包含（#146），**无需额外 DSH provider 包**。
    Dockerfile 以实体模板为唯一来源；沙箱依赖只在执行 run-ticket 主流程时动态加载。
@@ -136,6 +139,8 @@ npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:d
 #    .sandcastle/night-queue.json: { "tickets": [449, 452, { "issue": 455, "verify": "cargo test -p iris-agent --lib" }] }
 
 # ② 发车（每票独立子进程：单票崩不伤队列；检查点幂等，中断后重跑同命令即续命）
+#    发车前 night-run 起手自检 bash 工具链（#43，判据同 `bash .sandcastle/setup.sh`；
+#    失败 exit 3 并给可行动错误——宿主工具链形态不对，别把夜晚烧在含糊失败上）
 npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
   --verify "cargo test -p iris-api --lib" --max-minutes 60
 
@@ -189,6 +194,14 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - PATH 上 `bash` 解析到 `C:\WINDOWS\system32\bash.exe`（WSL）时，`sandcastle-e2e.mjs`
   搭台必挂（msys 路径映射 + gcc 缺失）——跑 e2e 前把 `Git\bin`（与 `msys64\ucrt64\bin`
   的 gcc）前置到 PATH（2026-10-09 实测，#18）
+- 夜跑入口 `night-run.mts` 发车前自检 bash 工具链（#43）：bash 可执行 + `uname -s` 非
+  Linux（msys 形态）+ gcc 直达或 `/ucrt64/bin/gcc` 存在（判据与 e2e `findBash()` 同源，
+  守卫双向钉住）；失败 exit 3 并给可行动错误（设 PATH / 安装 msys2）。守护面如实说：
+  夜跑宿主链（night-run→run-ticket→podman provider）经 npx/git/gh/podman CLI 直启、
+  **不经宿主 bash**（@ai-hero/sandcastle 0.12.0 podman provider 宿主侧全部 execFile/
+  spawn podman CLI，容器内走 `sh -c`）——探针守的是宿主 bash 形态这一格：漂移的
+  PATH bash 会让 setup.sh、消费者自建的 shim 编译、e2e 搭台等宿主 bash 步骤以含糊
+  方式挂，发车前统一响亮核对
 - `copyToWorktree` 在宿主侧 spawn `cp`（ENOENT）——不要用；票据文件先 commit 进分支
 - DSH 凭据要求 mode 600——模板钩子里已带 `chmod 600`
 - podman machine 内存是并行度上限（2GiB 只够 1–2 并行；放量先 `podman machine set` 扩容）
