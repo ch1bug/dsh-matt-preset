@@ -623,7 +623,7 @@ chosen module on the /codebase-design bench.
 
 STANDALONE — /grill-me, /prototype, /research (background agent,
 primary sources), /to-questionnaire, /wizard, /wait-what, /teach,
-/writing-for-agents, /resolving-merge-conflicts.
+/writing-for-agents.
 
 UTILITIES — /git-guardrails-claude-code (block destructive git
 commands), /setup-pre-commit, /scaffold-exercises,
