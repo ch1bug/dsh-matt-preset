@@ -1,0 +1,1 @@
+{ "meta": { "title": "Matt 工作流核心", "description": "承载 ask-matt 工作流正文（主流程、七道执行门、批模式），经 system-prompt assemble 注入；profile 以 delta 适配。" } }

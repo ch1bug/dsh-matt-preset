@@ -1,0 +1,1 @@
+{ "meta": { "title": "Matt Handoff Tool", "description": "Writes the handoff document and spawns a fresh child session on this preset, then hands the baton back to the human." } }

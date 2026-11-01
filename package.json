@@ -35,7 +35,8 @@
     "sandcastle",
     "LICENSE",
     "NOTICE.md",
-    "README.md"
+    "README.md",
+    "plugin-meta"
   ],
   "dsh": {
     "bundle": {
@@ -48,6 +49,14 @@
     }
   },
   "exports": {
+    "./workflow-core.mjs/locale/*.json": "./plugin-meta/workflow-core/locale/*.json",
+    "./workflow-core.mjs/icon": "./plugin-meta/workflow-core/icon.svg",
+    "./workflow-enforcer.mjs/locale/*.json": "./plugin-meta/workflow-enforcer/locale/*.json",
+    "./workflow-enforcer.mjs/icon": "./plugin-meta/workflow-enforcer/icon.svg",
+    "./lang-enforcer.mjs/locale/*.json": "./plugin-meta/lang-enforcer/locale/*.json",
+    "./lang-enforcer.mjs/icon": "./plugin-meta/lang-enforcer/icon.svg",
+    "./handoff-tool.mjs/locale/*.json": "./plugin-meta/handoff-tool/locale/*.json",
+    "./handoff-tool.mjs/icon": "./plugin-meta/handoff-tool/icon.svg",
     "./*": "./*",
     "./package.json": "./package.json"
   }

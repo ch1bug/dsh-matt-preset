@@ -1,0 +1,1 @@
+{ "meta": { "title": "Matt Workflow Core", "description": "Carries the ask-matt workflow body (MAIN FLOW, seven enforcement gates, batch mode) and injects it at system-prompt assemble; profiles adapt it via deltas." } }
