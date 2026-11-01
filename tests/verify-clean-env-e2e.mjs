@@ -27,6 +27,9 @@
  * 门禁：未设 DSH_MATT_LIVE_CLI（源码检出的 CLI 入口）→ **响亮跳过**（`SKIP (loud)`、
  * exit 0，verify-all 记为 PASS*）。
  *
+ * 挂具（SSE mock / runCli / rpc / cleanup，含 #75 的"等 stdio 管道关闭再退出"修法）自 #81
+ * 起收进 tests/live-harness.mjs，本文件只留断言与门禁。
+ *
  * 安装环的**挂载那半边**还需要 PATH 上有字面 `dsh`：`bin/install.mjs` 的 `mountOrWarn`
  * shell out 到它（#67 根因）。本文件**不造包装**（操作者按 docs/dev-environment §3.1
  * 预配 PATH），也**不自己再探一份** `dsh --version`（#78：测试 `dshOnPath` 与安装器
@@ -37,13 +40,13 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { payloadOf } from '../lib/payload.mjs'
+import { assertTempHome, cleanup, createSseMock, rpc, runCli } from './live-harness.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const BIN = join(REPO, 'bin', 'install.mjs')
@@ -83,52 +86,18 @@ const SRC_ROOT = resolve(CLI, '../../..') // 同 verify-live-tool-call：tsx 解
 const NODE_ARGS = (args) => ['--import', 'tsx/esm', CLI, ...args]
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-matt-clean-'))
-
-/** canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内。
- *  一条 `rm(home)` 只要 `home` 解析错（例如继承到真实 `DSH_HOME`），就会作用到真实 home；
- *  删前再断言一次，把「错路径」变成显式失败而不是静默事故。 */
-const TMP_ROOT = resolve(tmpdir())
-const assertTempHome = (p) => {
-  const rel = relative(TMP_ROOT, resolve(p))
-  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
-    throw new Error(`temp-home canary tripped: ${p} is outside ${TMP_ROOT}`)
-  }
-}
+// canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内（判据在 live-harness）。
 assertTempHome(home)
 
-/** 跑 CLI（bootstrap / dump-config）：DSH_HOME 一律指向临时 home。 */
-const runCli = (args, env = {}) => new Promise((resolveRun) => {
-  const p = spawn(process.execPath, NODE_ARGS(args), {
-    cwd: SRC_ROOT,
-    env: { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', ...env },
-  })
-  let out = ''
-  p.stdout.on('data', (c) => { out += c })
-  p.stderr.on('data', (c) => { out += c })
-  p.on('exit', (code) => resolveRun({ code, out }))
-})
+/** 跑 CLI（bootstrap / dump-config）：DSH_HOME 一律指向临时 home（挂具在 live-harness）。 */
+const runCliHere = (args, env = {}) => runCli(CLI, args, { cwd: SRC_ROOT, home, env })
 
 /** 读 JSON；读不出返回 undefined，让所在环节自己报红，而不是把整条链炸成一个笼统的 bad。 */
 const readJsonMaybe = async (path) => {
   try { return JSON.parse(await readFile(path, 'utf8')) } catch { return undefined }
 }
 
-const rpc = async (origin, cookie, endpoint, args) => {
-  const response = await fetch(`${origin}/api/${endpoint}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie },
-    // typert descriptor: 命名参数 `request`（session/create|prompt 的签名是
-    // (request, signal)），故 args 必须包成 { request: … }。
-    body: JSON.stringify({ type: 'client-request', rpcId: `clean-${endpoint}`, method: endpoint, payload: { args: { request: args } } }),
-  })
-  if (!response.ok) throw new Error(`${endpoint} HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`)
-  const body = await response.json()
-  if (body.result?.ok !== true) throw new Error(`${endpoint}: ${JSON.stringify(body.result?.error ?? body).slice(0, 300)}`)
-  return body.result.value
-}
-
-/** Anthropic-协议 SSE 帧（与 verify-live-tool-call 同形：mock provider 的确定性应答）。 */
-const sse = (events) => events.map(e => `data: ${JSON.stringify(e)}\n\n`).join('')
+const rpcHere = (origin, cookie, endpoint, args) => rpc(origin, cookie, endpoint, args, 'clean')
 
 // ── 保留口占用快照（本用例**一切动作之前**取；跑之后在 finally 里再取一次比对）──────
 // 覆盖范围 = 此后 mock LLM / bootstrap / 安装 / 实例的所有建连行为。
@@ -149,72 +118,13 @@ const reservedSnapshot = async () => Object.fromEntries(
   await Promise.all(RESERVED_PORTS.map(async (p) => [p, await portTaken(p)])))
 const reservedBefore = await reservedSnapshot()
 
-/** 实例发出的**真实请求**字节（captured）与 mock 的应答策略。 */
-const captured = []
-const mock = createServer((req, res) => {
-  let body = ''
-  req.on('data', (c) => { body += c })
-  req.on('end', () => {
-    let parsed = {}
-    try { parsed = JSON.parse(body) } catch { /* keep raw */ }
-    const messages = Array.isArray(parsed.messages) ? parsed.messages : []
-    const text = JSON.stringify(messages)
-    const sawToolResult = text.includes('tool_result')
-    captured.push({
-      system: typeof parsed.system === 'string' ? parsed.system : undefined,
-      // agent 主请求带工具面；会话标题请求不带——用结构定位，别靠内容自证（否则
-      // "模型面含正文"的断言会变成同义反复）。
-      hasTools: Array.isArray(parsed.tools) && parsed.tools.length > 0,
-      promptSeen: text.includes(PROMPT_TEXT),
-      sawToolResult,
-      messages,
-    })
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-    if (!sawToolResult) {
-      // 第一轮：让模型发起一次工具调用（证明调用侧真的能打到工具面）。
-      res.write(sse([
-        { type: 'message_start', message: { id: 'clean-1', model: 'mock', usage: { input_tokens: 1, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_clean_1', name: TOOL_NAME, input: {} } },
-        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ]))
-    } else {
-      res.write(sse([
-        { type: 'message_start', message: { id: 'clean-2', model: 'mock', usage: { input_tokens: 1, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'clean-env-e2e-complete' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ]))
-    }
-    res.end()
-  })
-})
-await new Promise(r => mock.listen(0, '127.0.0.1', r))
-const mockPort = mock.address().port
+/** SSE mock LLM（#81 起挂具收进 tests/live-harness.mjs：捕获实例发出的真实请求）。 */
+const mock = await createSseMock({ tag: 'clean', toolName: TOOL_NAME, finalText: 'clean-env-e2e-complete', promptText: PROMPT_TEXT })
+const captured = mock.captured
+const mockPort = mock.port
 
 let child
 let instancePort
-/** 等 stdio 管道真正关闭（null/destroyed 视为已关闭）。 */
-const streamClosed = (stream) => (stream === null || stream.destroyed === true)
-  ? Promise.resolve()
-  : new Promise((r) => { stream.once('close', r); setTimeout(r, 2000) })
-const cleanupChild = async () => {
-  if (child === undefined) return
-  // 等子进程真正退出再收尾：kill 后立刻 exit 会触发 libuv 的
-  // "UV_HANDLE_CLOSING" 断言噪音（实测），虽不影响结论但污染输出。
-  const exited = new Promise(r => child.once('exit', r))
-  child.kill('SIGKILL')
-  await Promise.race([exited, new Promise(r => setTimeout(r, 5000))])
-  // 还要等 stdout/stderr 管道关干净：失败路径若直接 process.exit，libuv 断言会把
-  // 退出码变成崩溃码（实测 -1073740791），反而埋掉"哪一环红"的读数。
-  await Promise.race([
-    Promise.all([streamClosed(child.stdout), streamClosed(child.stderr)]),
-    new Promise(r => setTimeout(r, 3000)),
-  ])
-}
 
 /** 挂载那半边的环境判定：消费安装器自己的降级告警，不另探一份 dsh（#78）。 */
 let mountDegraded = false
@@ -233,7 +143,7 @@ const seenSystems = () => JSON.stringify(captured.map(c =>
 
 try {
   // ── A0 安装（DSH 标准 bootstrap）：临时 home 上从 shipped web 模板起 profile ──
-  const boot = await runCli(['--profile', PROFILE, '--from-default-profile', 'web', '--dump-config'])
+  const boot = await runCliHere(['--profile', PROFILE, '--from-default-profile', 'web', '--dump-config'])
   const profileDir = join(home, 'profiles', PROFILE)
   const profilePkg = boot.code === 0 ? await readJsonMaybe(join(profileDir, 'package.json')) : undefined
   const bundlesBefore = profilePkg?.dsh?.profile?.bundles ?? []
@@ -315,7 +225,7 @@ try {
 
   if (!mountDegraded) {
     // ── B1 启动：组合树含 workflow-core 行（subpath 寻址）──────────────────
-    const dump = await runCli(['--profile', PROFILE, '--dump-config'])
+    const dump = await runCliHere(['--profile', PROFILE, '--dump-config'])
     if (dump.code === 0 && dump.out.includes('dsh-matt-preset/workflow-core.mjs')) {
       ok('B1. start: composed tree carries the dsh-matt-preset/workflow-core.mjs row')
     } else {
@@ -385,7 +295,7 @@ try {
       // ── C1 会话：真实建会话（带 matt preset）──────────────────────────────
       let created
       try {
-        created = await rpc(origin, cookie, 'session/create', { agentPreset: 'dsh-matt-preset', cwd: REPO.replace(/\\/g, '/') })
+        created = await rpcHere(origin, cookie, 'session/create', { agentPreset: 'dsh-matt-preset', cwd: REPO.replace(/\\/g, '/') })
         if (created?.sessionId !== undefined) ok('C1. session: live session created with the matt preset', String(created.sessionId))
         else bad('C1. session: live session created', JSON.stringify(created))
       } catch (error) {
@@ -395,7 +305,7 @@ try {
       if (created?.sessionId !== undefined) {
         // ── C2 会话：该会话的模型面断面被捕获（靠发出的提示词文本归属）────────
         try {
-          await rpc(origin, cookie, 'session/prompt', {
+          await rpcHere(origin, cookie, 'session/prompt', {
             requestId: 'clean-env-request-1',
             sessionId: created.sessionId,
             mode: 'queue',
@@ -472,13 +382,13 @@ try {
     bad('B5. isolation: reserved ports untouched',
       `drifted=[${drifted.map((p) => `${p}: ${reservedBefore[p] ? 'taken' : 'free'} → ${reservedAfter[p] ? 'taken' : 'free'}`).join(', ')}] instance=${instancePort ?? '-'}`)
   }
-  await cleanupChild()
-  mock.close()
+  // 收尾四合一在 live-harness（kill → 等 exit → 等 stdio 管道关闭 → mock.close → canary 后
+  // 删临时 home；#75 的 libuv 修法烘焙在 harness，失败路径不会再把退出码变成崩溃码）。
+  await cleanup({ child, mock: mock.server, home })
 }
 
-// 清理（AC「跑完清理」）：成功失败都删——失败现场靠上面的逐环读数定位。
-assertTempHome(home)
-await rm(home, { recursive: true, force: true }).catch(() => {})
+// 清理（AC「跑完清理」）：成功失败都删（rm 已在 harness cleanup 内、canary 删前断言）——
+// 失败现场靠上面的逐环读数定位；这里只复核删除确曾发生。
 if (!existsSync(home)) ok('Z1. cleanup: temp home removed')
 else bad('Z1. cleanup: temp home removed', home)
 
@@ -488,4 +398,6 @@ console.log(results.join('\n'))
 console.log(failed
   ? '\nFAILED — tmp home removed (see the ring lines above)'
   : `\nall clean-env rings passed${skips > 0 ? `（含 ${skips} 条 loud skip：其环境侧断言未验证）` : ''}`)
-process.exit(failed ? 1 : 0)
+// 退出用 exitCode 自然排空，不 process.exit 硬杀（同 verify-live-tool-call 尾注：失败路径
+// 上父进程还有 socket 在关闭中，硬退撞 libuv UV_HANDLE_CLOSING 断言）。退出码语义不变。
+process.exitCode = failed ? 1 : 0

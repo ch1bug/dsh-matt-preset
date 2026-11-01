@@ -15,6 +15,9 @@
  * 门禁：未设 DSH_MATT_LIVE_CLI（源码检出的 CLI 入口）时**响亮跳过**。
  * 可选 DSH_MATT_LIVE_PRESET_DIR 覆盖 preset 目录（默认 = 本仓库根）。
  *
+ * 挂具（SSE mock / runCli / rpc / cleanup）自 #81 起收进 tests/live-harness.mjs，
+ * 本文件只留断言与门禁。
+ *
  * 断言：
  *   T1 安装/初始化：web 模板 profile 建好 + preset 注册为 bundle
  *   T2 配置：--dump-config 组合树含 workflow-core 行
@@ -23,11 +26,11 @@
  *   T5 调用（工具执行）：模型发的 tool_use 被执行，下一轮请求带该工具的 tool_result
  */
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { assertTempHome, cleanup, createSseMock, rpc, runCli } from './live-harness.mjs'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const results = []
@@ -50,110 +53,32 @@ const PRESET_DIR = process.env.DSH_MATT_LIVE_PRESET_DIR ?? REPO
 const PROFILE = 'matt-live'
 const TOOL_NAME = 'context_status' // 由 workflow-enforcer 注册；无需审批门
 
-/** Anthropic-协议 SSE 帧（同上游 apps/web smoke 的 mock provider 形状）。 */
-const sse = (events) => events.map(e => `data: ${JSON.stringify(e)}\n\n`).join('')
-
-/** 捕获到的请求（真实模型请求）与 mock 的应答策略。 */
-const captured = []
-const mock = createServer((req, res) => {
-  let body = ''
-  req.on('data', (c) => { body += c })
-  req.on('end', () => {
-    let parsed = {}
-    try { parsed = JSON.parse(body) } catch { /* keep raw */ }
-    const messages = Array.isArray(parsed.messages) ? parsed.messages : []
-    const sawToolResult = JSON.stringify(messages).includes('tool_result')
-    captured.push({ system: parsed.system, messages, sawToolResult })
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-    if (!sawToolResult) {
-      // 第一轮：让模型发起一次工具调用（证明调用侧真的能打到工具面）。
-      res.write(sse([
-        { type: 'message_start', message: { id: 'live-1', model: 'mock', usage: { input_tokens: 1, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_live_1', name: TOOL_NAME, input: {} } },
-        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ]))
-    } else {
-      res.write(sse([
-        { type: 'message_start', message: { id: 'live-2', model: 'mock', usage: { input_tokens: 1, output_tokens: 0 } } },
-        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'live-tool-call-complete' } },
-        { type: 'content_block_stop', index: 0 },
-        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
-        { type: 'message_stop' },
-      ]))
-    }
-    res.end()
-  })
-})
-await new Promise(r => mock.listen(0, '127.0.0.1', r))
-const mockPort = mock.address().port
+/** SSE mock LLM（#81 起挂具收进 tests/live-harness.mjs：两轮确定性应答 + 捕获真实请求）。 */
+const mock = await createSseMock({ tag: 'live', toolName: TOOL_NAME, finalText: 'live-tool-call-complete' })
+const captured = mock.captured
+const mockPort = mock.port
 
 const home = await mkdtemp(join(tmpdir(), 'dsh-matt-live-'))
-/** canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内——`rm(home)` 的 home 一旦
- *  解析错（如继承到真实 `DSH_HOME`），删的就是真实 home。删前再断言一次。 */
-const TMP_ROOT = resolve(tmpdir())
-const assertTempHome = (p) => {
-  const rel = relative(TMP_ROOT, resolve(p))
-  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
-    throw new Error(`temp-home canary tripped: ${p} is outside ${TMP_ROOT}`)
-  }
-}
+// canary（2026-10-18 事故硬化）：清理目标必须留在系统临时目录内（判据在 live-harness）。
 assertTempHome(home)
 let child
-const cleanup = async () => {
-  if (child !== undefined) {
-    // 等子进程真正退出再收尾：kill 后立刻 exit 会触发 libuv 的
-    // "UV_HANDLE_CLOSING" 断言（实测）。**它不止是噪音**：#75 实测在失败路径下退出码会变成崩溃码
-    // （-1073740791），把"哪一环红"的读数埋掉——完整收尾还要等 stdout/stderr 管道 close；这一步的
-    // 修法随 #81 抽共享挂具时一并带过去（dev-environment §0.2 记了配方）。
-    const exited = new Promise(r => child.once('exit', r))
-    child.kill('SIGKILL')
-    await Promise.race([exited, new Promise(r => setTimeout(r, 5000))])
-  }
-  mock.close()
-  assertTempHome(home)
-  await rm(home, { recursive: true, force: true }).catch(() => {})
-}
 
-const runCli = (args, env = {}) => new Promise((resolveRun) => {
-  const p = spawn(process.execPath, ['--import', 'tsx/esm', CLI, ...args], {
-    cwd: SRC_ROOT,
-    env: { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', ...env },
-  })
-  let out = ''
-  p.stdout.on('data', (c) => { out += c })
-  p.stderr.on('data', (c) => { out += c })
-  p.on('exit', (code) => resolveRun({ code, out }))
-})
+const runCliHere = (args, env = {}) => runCli(CLI, args, { cwd: SRC_ROOT, home, env })
 
-const rpc = async (origin, cookie, endpoint, args) => {
-  const response = await fetch(`${origin}/api/${endpoint}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', cookie },
-    // typert descriptor: 命名参数 `request`（session/create|prompt 的签名是
-    // (request, signal)），故 args 必须包成 { request: … }。
-    body: JSON.stringify({ type: 'client-request', rpcId: `live-${endpoint}`, method: endpoint, payload: { args: { request: args } } }),
-  })
-  if (!response.ok) throw new Error(`${endpoint} HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`)
-  const body = await response.json()
-  if (body.result?.ok !== true) throw new Error(`${endpoint}: ${JSON.stringify(body.result?.error ?? body).slice(0, 300)}`)
-  return body.result.value
-}
+const rpcHere = (origin, cookie, endpoint, args) => rpc(origin, cookie, endpoint, args, 'live')
 
 try {
   // ── T1 安装：web 模板 profile + preset 注册 ─────────────────────────────
-  const init = await runCli(['--profile', PROFILE, '--from-default-profile', 'web', '--dump-config'])
+  const init = await runCliHere(['--profile', PROFILE, '--from-default-profile', 'web', '--dump-config'])
   if (init.code !== 0) bad('T1. profile init', init.out.slice(-300))
-  const add = await runCli(['plugin', '--profile', PROFILE, 'add', PRESET_DIR.replace(/\\/g, '/')])
+  const add = await runCliHere(['plugin', '--profile', PROFILE, 'add', PRESET_DIR.replace(/\\/g, '/')])
   const manifest = JSON.parse(await readFile(join(home, 'profiles', PROFILE, 'package.json'), 'utf8'))
   const bundles = manifest?.dsh?.profile?.bundles ?? []
   if (add.code === 0 && bundles.includes('dsh-matt-preset')) ok('T1. install: preset registered as a bundle', bundles.join(', '))
   else bad('T1. install: preset registered', `code=${add.code} bundles=${JSON.stringify(bundles)} ${add.out.slice(-200)}`)
 
   // ── T2 配置：组合树含 workflow-core 行 ──────────────────────────────────
-  const dump = await runCli(['--profile', PROFILE, '--dump-config'])
+  const dump = await runCliHere(['--profile', PROFILE, '--dump-config'])
   if (dump.out.includes('dsh-matt-preset/workflow-core.mjs')) ok('T2. config: workflow-core row in the live composed tree')
   else bad('T2. config: workflow-core row', dump.out.slice(-300))
 
@@ -193,12 +118,12 @@ try {
   const origin = new URL(launch).origin
 
   // ── T3 会话：真实建会话（带 matt preset）────────────────────────────────
-  const created = await rpc(origin, cookie, 'session/create', { agentPreset: 'dsh-matt-preset', cwd: SRC_ROOT.replace(/\\/g, '/') })
+  const created = await rpcHere(origin, cookie, 'session/create', { agentPreset: 'dsh-matt-preset', cwd: SRC_ROOT.replace(/\\/g, '/') })
   if (created?.sessionId !== undefined) ok('T3. live session created with the matt preset', `${created.sessionId} preset=${created.agentPreset ?? '(default)'}`)
   else bad('T3. live session created', JSON.stringify(created))
 
   // ── 发消息，驱动真实 turn ───────────────────────────────────────────────
-  await rpc(origin, cookie, 'session/prompt', {
+  await rpcHere(origin, cookie, 'session/prompt', {
     requestId: 'live-request-1',
     sessionId: created.sessionId,
     mode: 'queue',
@@ -242,9 +167,15 @@ try {
 } catch (error) {
   bad('live call-side run', String(error?.message ?? error))
 } finally {
-  await cleanup()
+  // 收尾四合一在 live-harness（kill → 等 exit → 等 stdio 管道关闭 → mock.close → canary 后
+  // 删临时 home；#75 的 libuv 修法烘焙在 harness，失败路径不会再把退出码变成崩溃码）。
+  await cleanup({ child, mock: mock.server, home })
 }
 
 console.log('\n=== LIVE TOOL-CALL VERIFY (call side) ===')
 console.log(results.join('\n'))
-process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
+// 退出用 exitCode 自然排空，不 process.exit 硬杀：失败路径上父进程还有 socket
+// （undici keep-alive 连着刚被 kill 的实例、mock 侧连接）在关闭中，硬退会撞 libuv 的
+// UV_HANDLE_CLOSING 断言、退出码变崩溃码（#81 实测 exit=127，--trace-exit 定位 exit 时
+// 仍挂 2 个 Socket）。#75 的 stdio 等待只兜住 child 半边；退出码语义不变（0/1）。
+process.exitCode = results.some(r => r.startsWith('  ✗')) ? 1 : 0
