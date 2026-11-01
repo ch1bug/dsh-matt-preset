@@ -168,6 +168,11 @@ const NON_TOOL = new Map([
   ['set_bundle', '同上（plugin_manager 动作）'],
   ['list_plugins', '同上（plugin_manager 只读动作）'],
   ['list_bundles', '同上（plugin_manager 只读动作）'],
+  // #96：门表补齐后 cordis delta 新指名的三个 plugin_manager 动作（同族——
+  // 门监听的动作面，非模型工具；enforcer↔正文一致仍由 V16/V17 钉）。
+  ['remove_bundle', '同上（plugin_manager 动作，#96 纳入外部动作门）'],
+  ['set_version_exemption', '同上（plugin_manager 动作，#96 纳入外部动作门）'],
+  ['list_version_exemptions', '同上（plugin_manager 只读动作，#96 同批指名）'],
   // #163：正文 WAKE ORCHESTRATION 条叙述应答通道时指名的**运行时事件**（编排件
   // pendingHumanQuestion 的检测判据，chain3 实测形态）——它是编排器轮询面读到的
   // 事件，不是本 preset 提供的模型工具；其判据行为由

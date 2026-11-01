@@ -588,6 +588,8 @@ const CANONICAL = {
   'plugin_manager install_bundle': { name: 'plugin_manager', arguments: { action: 'install_bundle', target: 'x@1' } },
   'plugin_manager set_plugin': { name: 'plugin_manager', arguments: { action: 'set_plugin', enabled: true } },
   'plugin_manager set_bundle': { name: 'plugin_manager', arguments: { action: 'set_bundle', enabled: true } },
+  'plugin_manager remove_bundle': { name: 'plugin_manager', arguments: { action: 'remove_bundle', name: 'x' } },
+  'plugin_manager set_version_exemption': { name: 'plugin_manager', arguments: { action: 'set_version_exemption', plugin: 'x', version: '1.0.0' } },
   'git reset --hard': { name: 'bash', arguments: { command: 'git reset --hard HEAD~1' } },
   'git clean -f': { name: 'bash', arguments: { command: 'git clean -fd' } },
   'rm -rf': { name: 'bash', arguments: { command: 'rm -rf build/' } },

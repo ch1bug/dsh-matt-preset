@@ -161,7 +161,16 @@ export const DEFAULT_GATES = {
     // #55's cordis profile declares install/enable as gate-6 events — this is
     // the one place the gate list lives (D23: high-risk details ride in the
     // plugin, the workflow text keeps the anchor).
+    // #96: remove_bundle (the required first step to reinstall a package with
+    // a different version/location upstream) and set_version_exemption
+    // (upstream: "risk crashes and data loss — warn the user and obtain
+    // explicit permission") close the mutation surface. set_version_exemption
+    // stays EXTERNAL, not destructive: the destructive tier is irreversible
+    // data destruction (rm -rf / drop database / git reset --hard), while an
+    // exemption is a queryable (list_version_exemptions), overwritable
+    // registration — the same profile-state mutation family as the other three.
     'plugin_manager install_bundle', 'plugin_manager set_plugin', 'plugin_manager set_bundle',
+    'plugin_manager remove_bundle', 'plugin_manager set_version_exemption',
   ],
   destructive: [
     'git reset --hard', 'git clean -f', 'rm -rf', 'docker compose down -v',

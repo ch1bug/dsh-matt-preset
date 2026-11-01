@@ -12,8 +12,14 @@ unchanged): `plugin_manager` mutations ARE external-action-gate events.
 `install_bundle`, `set_plugin` (enable/disable) and `set_bundle` change a whole
 profile, can run package build scripts, and are awkward to unwind — report the
 exact target (package@version, pendingBuilds / approvedBuilds, acceptRisk, the
-profile affected), then WAIT for confirmation, exactly as with a push. Reading
-is routine: `list_plugins` / `list_bundles` need no confirmation; only mutations
+profile affected), then WAIT for confirmation, exactly as with a push. The same
+gate covers `remove_bundle` (reinstalling a package at another version or
+location requires removing the installed one first — it unloads it from the live
+profile) and `set_version_exemption` (upstream: exemptions "risk crashes and
+data loss" — warn and obtain explicit permission for the exact plugin and
+runtime versions before granting one). Reading
+is routine: `list_plugins` / `list_bundles` / `list_version_exemptions` need no
+confirmation; only mutations
 gate. Disabling a plugin that is already installed still mutates the live
 profile.
 Those names are the plugin-manager tool surface, which this mode's roster mounts

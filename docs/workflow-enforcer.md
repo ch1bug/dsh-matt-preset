@@ -214,7 +214,7 @@ Default (see `DEFAULT_GATES` in `workflow-enforcer.mjs`):
 
 | Group | Gate (matched structurally — see 判定面 below) |
 | --- | --- |
-| external | `git push`, `gh pr create`, `gh issue create`, `gh release create`, `gh repo create`, `npm publish`, `cargo publish`, `sandcastle`, `run-ticket`, `plugin_manager install_bundle`, `plugin_manager set_plugin`, `plugin_manager set_bundle` |
+| external | `git push`, `gh pr create`, `gh issue create`, `gh release create`, `gh repo create`, `npm publish`, `cargo publish`, `sandcastle`, `run-ticket`, `plugin_manager install_bundle`, `plugin_manager set_plugin`, `plugin_manager set_bundle`, `plugin_manager remove_bundle`, `plugin_manager set_version_exemption` |
 | destructive | `git reset --hard`, `git clean -f`, `rm -rf`, `docker compose down -v`, `docker volume rm`, `docker system prune`, `drop database`, `truncate table`, `delete from`, `git push --force` |
 
 A gate matches as a **word run at a command position** of the call's declared
@@ -222,7 +222,13 @@ action field — never as a substring over the serialized call (#79). Flag words
 match by prefix (`git clean -f` reaches `git clean -fd`). So
 `plugin_manager install_bundle` fires on the tool+action pair (its install/enable
 events are gate-6 events — the read-only `list_plugins` / `list_bundles` calls
-stay routine, #55), and a plain `plugin_manager` substring alone never does. A
+stay routine, #55), and a plain `plugin_manager` substring alone never does. The
+same word-pair face covers the rest of the plugin_manager mutation surface
+(#96): `remove_bundle` (the required first step before reinstalling a package at
+another version/location upstream) and `set_version_exemption` (upstream: an
+exemption "risk[s] crashes and data loss" — it stays EXTERNAL, not destructive,
+because the destructive tier is irreversible data destruction while an exemption
+is a queryable, overwritable registration). A
 document body, an `echo`, a commit message, `--grep`, or an inline `--body` that
 merely *mentions* `git push` fires nothing: a false ⚠ makes the agent stop and
 wait for a confirmation on a high-risk action that never happened, and it dilutes

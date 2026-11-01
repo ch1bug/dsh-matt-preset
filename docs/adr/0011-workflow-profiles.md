@@ -35,7 +35,9 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
 4. **cordis 档**（创作者 preset 适配，**只增不改**，三节）：`creator-context`（框定：
    产物是运行时扩展，地图与七门照旧）；`creator-gate-extension`
    （`plugin_manager` 的 `install_bundle` / `set_plugin`(enable/disable) / `set_bundle`
-   属**外部动作门**事件——报目标与风险字段后等确认；只读 `list_*` 不需确认）；
+   属**外部动作门**事件——报目标与风险字段后等确认；#96 起 `remove_bundle`
+   （重装换版/换位的必要前置）与 `set_version_exemption`（上游明写豁免
+   "risk crashes and data loss"，须显式许可）同口径纳入；只读 `list_*` 不需确认）；
    `creator-inspect-first`（写插件代码前先 `cordis_inspect_list` →
    `cordis_inspect_query` 读准契约：Service 方法 / Event 模式 / Config schema /
    Tool schema / 主题 token / Slot 树与 props；只读，不触发也不替代任何门）。
@@ -55,7 +57,9 @@ system-prompt/assemble 注入。系列下一票 #55 要让**同一份工作流**
   verbatim 断言保持全绿——重构对渲染面零影响。
 - **文本与机制同口径**：cordis 文本声明的 gate 事件必须真的在 enforcer 的
   `DEFAULT_GATES` 里（D23：高危清单归插件、工作流文本只留锚点）——故 #55 把
-  `plugin_manager install_bundle` / `set_plugin` / `set_bundle` 加进默认外部清单
+  `plugin_manager install_bundle` / `set_plugin` / `set_bundle` 加进默认外部清单，
+  #96 又补齐 `remove_bundle` / `set_version_exemption` 两个真实 mutation
+  （现况清单以 `DEFAULT_GATES` 为准，此处不抄全量）
   （词对匹配，只读 `list_*` 不触发）。否则"清单是穷举的"那句基线提醒会与注入文本
   自相矛盾。
 - 打包面：`workflow-profile-*.txt` 进 package `files`（安装器 payload 断言覆盖）。
