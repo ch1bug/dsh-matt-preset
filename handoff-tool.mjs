@@ -41,7 +41,8 @@
  * tests/verify-handoff-tool.mjs 与 #172 的 tracker 回读面都落在它上面）。
  *
  * #172 item1（tracker 单源回读）：定向节凭据为票号（`凭据：#<票号>`）时，tool 在拼装前
- * 经 `gh issue view` 回读票面实值（标题/状态/标签/URL）生成「票面回读」节——定向节里经
+ * 经 `gh issue view` 回读票面实值（标题/状态/标签/URL）生成「票面回读」节（#144 起触发
+ * 面扩为凭据行**或**定向节第一个 #<n> 引用，见下方 #144 段）——定向节里经
  * 转抄的票面字段（标签笔误 / 计数漂移 / 哈希软化，IRIS #1539/#1546/#1532）从此有机械
  * 判据裁定：与本节不符以本节为准。回读失败写「回读失败：<原因>」响亮标记，不静默降级为
  * 转抄值；票面正文内的计数/哈希等生成后仍会漂移的字段，节内显式标「生成后漂移，子会话
@@ -50,6 +51,27 @@
  * 守卫：tests/verify-handoff-tool.mjs T9 族（注入 reader，不打真网；T9d 钉 readerEnv
  * 过滤面与源码消费锚——真 execFile 的 env 子进程传递不在守卫断言面，显式声明）+
  * tests/verify.mjs Track A（真挂具，成功/失败两态都响亮断言）。
+ *
+ * #144 调用前防呆（IRIS 2026-10-11 同票重复 handoff 的兜底，#45 AC③）：在既有 tri-state
+ * （#44，只覆盖「首 turn 未起」）之上追加「调用前」判定——现有实现完全不看交接文档指向
+ * 哪张票、那张票是否已关，父会话主观认为失败而首 turn 实际起过时重复 handoff 顺畅通过
+ * （IRIS 22:48 事故形态）。四件：
+ *   ① 票号提取：优先凭据行（TICKET_CREDENTIAL_RE 的 `凭据：#<票号>`），退而在定向节扫
+ *      第一个 `#<n>` 引用；都落空 =「票号提取不到」（unverified，不阻断）。
+ *   ② 已关告警：回读 state=CLOSED → 结构化字段 `ticketClosed: <n>` + 文本告警（字段给
+ *      机械断言，不只靠文本）。
+ *   ③ 二次判定：同一会话对同一票第二次 handoff → 独立字段 `duplicateTicket: <n>`（与
+ *      ticketClosed 两个独立信号，可同时在场）；会话内记录即可（WeakMap 挂 session）。
+ *   ④ 未核降级：gh 不可用 / 票号提取不到 → 字段 `ticketCheckUnverified` + 文本「未核」，
+ *      不阻断也不静默（verify-all loud-skip 口径）。
+ * 另落票面 2026-10-20 并入条：attachToWorkspace 失败从只进日志提升为模型可见——
+ * `sidebarAttached: false` + `sidebarAttachReason`（no-workspace / attach-error）+ 文本
+ * 「子会话可能不出现在侧边栏，别据此重发」（IRIS 事故的直接成因面）。
+ * 判定落点 = 拼装面（buildTicketSection 已持回读结果，与 #172 回读共用一次读取，不双读），
+ * 信号经 `ticketGuardSignals` 收集器带出，`ticketGuardFields`/`ticketGuardTextLines`
+ * 映射为返回字段与文本（守卫断言同一映射）；守卫 tests/verify-handoff-tool.mjs
+ * T10–T14（注入 reader / 记忆探针 / fake ctx，不打真网不建子会话），执行面接线由
+ * T15 源码消费锚钉住（真挂具 Track A 未扩，显式声明）。
  */
 import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -255,6 +277,23 @@ async function buildManifestSection(artifacts, cwd) {
  *  暂无第二消费者——等真消费者出现再导出（#172 复审④ 裁决：不预置 API 面）。 */
 const TICKET_CREDENTIAL_RE = /凭据[:：]\s*#\s*(\d+)/
 
+/**
+ * #144 调用前防呆的票号提取：优先凭据行（`凭据：#<票号>`），退而在定向节扫**第一个**
+ * `#<n>` 引用（票面：「优先取『本会话任务』节内出现的那个」）；都落空 → undefined =
+ * 「票号提取不到」（unverified，不阻断）。提取范围只在定向节：批次凭据无单票对象，正文
+ * 其他位置的票号引用（如「复用 #172 的机器」）不是交接目标，当目标会误告警。
+ * `#\s*(\d+)` 的已知边界（#144 复审①）：数字开头的 markdown 标题会命中并按第一引用处理
+ * （实测：`## 2026-11-01 计划` → "2026"、`### 144 相关链接` → "144"）；非数字开头的标题
+ * （`## 本会话任务…`）不命中。误命中方向保守——告警不阻断，且凭据行在场时优先级更高。
+ * #172 与 #144 共用本函数的同一个提取结果（buildTicketSection 一次读取既造回读节又出
+ * 防呆信号，不双读）。
+ */
+function extractTicketNumber(directedSection) {
+  const fromCredential = TICKET_CREDENTIAL_RE.exec(directedSection)?.[1]
+  if (fromCredential !== undefined) return fromCredential
+  return /#\s*(\d+)/.exec(directedSection)?.[1]
+}
+
 const GH_TICKET_TIMEOUT_MS = 10_000
 
 /**
@@ -323,16 +362,48 @@ function ghTicketReader(ticket, cwd) {
 }
 
 /**
- * 票面回读节（#172）：定向节凭据为票号时，tool 生成时经回读器取 tracker 实值——
- * 转抄字段与本节不符时以本节为准（产出以回读值为准并标记）；票面正文内的计数/哈希/AC
- * 勾选态等生成后仍会漂移，节内显式标「生成后漂移，子会话以实读为准」。回读失败 =
- * 「回读失败：<原因>」响亮行 + 实读规约，**不静默降级为转抄值**。无票号凭据（候选 /
- * 批次定向）→ 返回 ''（整节缺席，与 #168 产物清单同构：没有 tracker 对象就不造该节）。
+ * 票面回读节（#172）+ 调用前防呆信号（#144）：定向节含票号时，tool 生成时经回读器取
+ * tracker 实值——转抄字段与本节不符时以本节为准（产出以回读值为准并标记）；票面正文内的
+ * 计数/哈希/AC 勾选态等生成后仍会漂移，节内显式标「生成后漂移，子会话以实读为准」。
+ * 回读失败 = 「回读失败：<原因>」响亮行 + 实读规约，**不静默降级为转抄值**。无票号
+ * （候选 / 批次定向且无引用）→ 返回 ''（整节缺席，与 #168 产物清单同构：没有 tracker
+ * 对象就不造该节），**但** #144 防呆仍响亮出「未核」信号——整节缺席是文档面形状，
+ * unverified 是返回值面读数，两者不互相吞。
+ *
+ * #144 信号（经 guard.signal 收集，executeHandoff 映射为返回字段）：
+ *   - 回读 state=CLOSED → `{ kind:'ticketClosed', ticket }`
+ *   - guard.handedOff(ticket) 为真（同会话同票第二次）→ `{ kind:'duplicateTicket', ticket }`
+ *     ——与 closed 两个**独立**信号，可同时在场（closed 不抑制 duplicate，反之亦然）
+ *   - 回读失败 / 提取不到 → `{ kind:'ticketCheckUnverified', ticket?, reason }`
+ *   - 票 open 且首交 → 零信号（正常态零噪音；「未关票不告警」是扰动断言之一）
+ *
+ * @param {string} directedSection 定向节原文（'' = 无定向节）
+ * @param {string} cwd gh 回读基准目录
+ * @param {(ticket: string, cwd?: string) => Promise<object>} [reader] 回读器（守卫注入缝）
+ * @param {{signal?: (event: object) => void, handedOff?: (ticket: string) => boolean}} [guard]
+ *   #144 防呆缝：signal = 信号收集（executeHandoff 传收集器），handedOff = 会话内记忆探针
  */
-async function buildTicketSection(directedSection, cwd, reader) {
-  const ticket = TICKET_CREDENTIAL_RE.exec(directedSection)?.[1]
-  if (ticket === undefined) return ''
+async function buildTicketSection(directedSection, cwd, reader, guard) {
+  const ticket = extractTicketNumber(directedSection)
+  if (ticket === undefined) {
+    guard?.signal?.({
+      kind: 'ticketCheckUnverified',
+      reason: directedSection === ''
+        ? '无定向节（候选交接），无票号对象'
+        : '定向节无票号凭据且无 #<n> 引用（批次定向？），无单票对象',
+    })
+    return ''
+  }
   const read = await (reader ?? ghTicketReader)(ticket, cwd)
+  if (guard?.handedOff?.(ticket) === true) {
+    guard?.signal?.({ kind: 'duplicateTicket', ticket })
+  }
+  const state = String(read.fields?.state ?? '').trim().toUpperCase()
+  if (!read.ok) {
+    guard?.signal?.({ kind: 'ticketCheckUnverified', ticket, reason: `gh 回读失败：${read.reason}` })
+  } else if (state === 'CLOSED') {
+    guard?.signal?.({ kind: 'ticketClosed', ticket })
+  }
   const header = [
     '## 票面回读（tracker 实读，#172）',
     '<!-- 本节由 handoff_tool 生成时经 `gh issue view` 回读 tracker 实值（转抄字段不手填）。定向节与正文里经转抄的票面字段（标题/标签/计数/哈希）若与本节不符，以本节为准。 -->',
@@ -358,6 +429,60 @@ async function buildTicketSection(directedSection, cwd, reader) {
   ].join('\n')
 }
 
+// ── #144 调用前防呆：信号 → 返回字段 / 文本映射（导出面，守卫断言同一映射）────────────
+// 与 #44 的 stalled 同构：只在异常/未核时置位——正常态（票 open 且同票首交）零字段零文本
+// 噪音；「未关票不告警」本身是扰动断言（T11）。
+
+/**
+ * #144 信号 → 模型可见结构化字段（executeHandoff 返回值组装用）。字段给机械断言，
+ * 文本（ticketGuardTextLines）只给人读——同一信号的两种呈现，不互相替代：
+ *   - `ticketClosed: <n>`：目标票已关闭（tracker 实读）
+ *   - `duplicateTicket: <n>`：同会话同票第二次 handoff（独立字段，可与 ticketClosed 并存）
+ *   - `ticketCheckUnverified: '<原因>'`：gh 不可用 / 票号提取不到——未核，不阻断也不静默
+ */
+export function ticketGuardFields(signals) {
+  const closed = (signals ?? []).find((s) => s?.kind === 'ticketClosed')
+  const dup = (signals ?? []).find((s) => s?.kind === 'duplicateTicket')
+  const unverified = (signals ?? []).find((s) => s?.kind === 'ticketCheckUnverified')
+  return {
+    ...(closed !== undefined ? { ticketClosed: Number(closed.ticket) } : {}),
+    ...(dup !== undefined ? { duplicateTicket: Number(dup.ticket) } : {}),
+    ...(unverified !== undefined ? { ticketCheckUnverified: String(unverified.reason) } : {}),
+  }
+}
+
+/** #144 信号 → 返回文本的告警行（措辞钉住票面要求：「已关闭，重复 handoff 可能重做
+ *  已完成的工作」；未核行写明不阻断也不静默——loud-skip 口径）。 */
+export function ticketGuardTextLines(signals) {
+  const lines = []
+  for (const s of signals ?? []) {
+    if (s?.kind === 'ticketClosed') {
+      lines.push(`⚠ 目标票 #${s.ticket} 已关闭——重复 handoff 可能重做已完成的工作。如确需在此票上重开工作，请先与 human 确认。`)
+    } else if (s?.kind === 'duplicateTicket') {
+      lines.push(`⚠ 本会话已对票 #${s.ticket} handoff 过一次——本次为同票重复调用，可能重复派单（#44/#144 防呆）；请确认不是在重做已完成的工作。`)
+    } else if (s?.kind === 'ticketCheckUnverified') {
+      lines.push(`票号防呆未核：${s.reason}——不阻断，也不静默当成没问题（#144 loud-skip 口径）。`)
+    }
+  }
+  return lines
+}
+
+/**
+ * #144 AC⑤（2026-10-20 并入）：attachToWorkspace 结果 → 模型可见字段。
+ *   - `{ attached: false, reason }` → `sidebarAttached: false` + `sidebarAttachReason`
+ *     （no-workspace = cwd 无注册工作区；attach-error = 定位/挂接抛错）
+ *   - `{ attached: true }` → `sidebarAttached: true`（成功也机械可断言——IRIS 事故里父会话
+ *     正是无从判断可见性才重发）
+ *   - undefined（机会性 skip：无 workspaceRegistry / 无 cwd 的组合）→ 零字段：无侧边栏
+ *     概念的部署不告警（不是失败，是环境不支持）。
+ */
+export function sidebarFields(sidebar) {
+  if (sidebar === undefined) return {}
+  return sidebar.attached === false
+    ? { sidebarAttached: false, sidebarAttachReason: String(sidebar.reason) }
+    : { sidebarAttached: true }
+}
+
 /**
  * 拼装交接文档（#168 起从 executeHandoff 提出的**可导入面**）：作者正文 + （票号凭据才有的）
  * 票面回读节 + 自动快照节 + （有声明才有的）产物清单节 + 交接边界段。守卫
@@ -367,12 +492,20 @@ async function buildTicketSection(directedSection, cwd, reader) {
  * 定向/候选的门（凭据行、skill 声明）也在这里：它们管的是文档形状，且拒绝必须发生在
  * 写文件 / 建子会话之前（Track A4/A5 的执行面断言依赖这一顺序）。回读同样发生在拼装前：
  * reader 先行 await，回读结果在拼节时已在场（失败面写响亮标记，不静默降级为转抄值）。
+ * #144 调用前防呆在同一次读取上出信号（closed / duplicate / unverified），经
+ * `ticketGuardSignals` 收集器带出——文档面不新增告警节（回读节的「状态」行已携带
+ * tracker 实值；告警呈现面 = 工具返回值，不在交接文档里复述）。
  *
  * @param {string} document 父会话写的正文（`# Handoff` 标题去重、focus 前缀在此处理）
  * @param {{focus?: string, skill?: string, artifacts?: string[], cwd?: string,
- *          trackerReader?: (ticket: string, cwd?: string) => Promise<object>}} [opts]
+ *          trackerReader?: (ticket: string, cwd?: string) => Promise<object>,
+ *          handedOff?: (ticket: string) => boolean,
+ *          ticketGuardSignals?: object[]}} [opts]
  *   `cwd` = 探针/哈希/gh 回读的基准目录（生产 = 父会话 header.cwd；缺省 process.cwd()）；
- *   `trackerReader` = 回读器注入面（守卫用，注入假 reader 不打真网；缺省 = 内置 gh 实现）
+ *   `trackerReader` = 回读器注入面（守卫用，注入假 reader 不打真网；缺省 = 内置 gh 实现）；
+ *   `handedOff` = #144 会话内记忆探针（executeHandoff 注入）；`ticketGuardSignals` =
+ *   #144 信号收集器（executeHandoff 传数组，拼装后经 ticketGuardFields/ticketGuardTextLines
+ *   映射为返回字段与文本）
  * @returns {Promise<string>} 完整交接文档（节间空行分隔；页脚注释由执行面追加）
  */
 export async function assembleHandoffDocument(document, opts = {}) {
@@ -415,7 +548,10 @@ export async function assembleHandoffDocument(document, opts = {}) {
   const [snapshot, manifest, ticketSection] = await Promise.all([
     buildSnapshotSection(cwd),
     buildManifestSection(opts.artifacts, cwd),
-    buildTicketSection(directedSection, cwd, opts.trackerReader),
+    buildTicketSection(directedSection, cwd, opts.trackerReader, {
+      signal: (event) => opts.ticketGuardSignals?.push(event),
+      handedOff: opts.handedOff,
+    }),
   ])
   const boundary = HANDOFF_BOUNDARY.join('\n')
   // 节间空行分隔。旧实现的 '' 分隔符被 filter(Boolean) 整个吞掉，节与节之间只有单换行
@@ -465,20 +601,30 @@ const handoffSchema = {
  * Account a fresh session into its cwd's workspace so the GUI sidebar lists
  * it (the GUI's `session.create`/`session.fork` paths attach; the bare
  * `ctx.agents.create()` factory does not). Opportunistic: compositions
- * without a workspace registry simply skip.
+ * without a workspace registry simply skip (→ `undefined`，无侧边栏概念的组合不告警).
+ *
+ * #144 AC⑤（2026-10-20 并入）：失败从「只进日志」提升为**模型可见**——返回值由
+ * executeHandoff 经 sidebarFields 映射为结构化字段 + 文本。此前该路径失败时工具仍报成功，
+ * 父会话无从判断可见性（human 看不到 → 父会话重发——IRIS 事故的直接成因）。三个显式面：
+ *   - cwd 无注册工作区 → `{ attached: false, reason: 'no-workspace' }`
+ *   - 定位 / 挂接抛错 → `{ attached: false, reason: 'attach-error' }`
+ *   - 无 registry / 无 cwd → `undefined`（机会性 skip 保留：环境不支持 ≠ 失败）
+ * 日志照旧（warn），返回值是新增的模型可见面——两者不互相替代。
  */
-async function attachToWorkspace(ctx, sessionId, cwd) {
+export async function attachToWorkspace(ctx, sessionId, cwd) {
   const registry = ctx.get('workspaceRegistry')
-  if (registry === undefined || cwd === undefined) return
+  if (registry === undefined || cwd === undefined) return undefined
   try {
     const workspace = await registry.resolveByPath(cwd)
     if (workspace === undefined) {
       ctx.logger.warn(`handoff_tool: no workspace registered for cwd '${cwd}'; session '${sessionId}' will not show in the sidebar`)
-      return
+      return { attached: false, reason: 'no-workspace' }
     }
     await workspace.attachSession(sessionId)
+    return { attached: true }
   } catch (error) {
     ctx.logger.warn(`handoff_tool: could not attach session '${sessionId}' to its workspace: ${String(error?.message ?? error)}`)
+    return { attached: false, reason: 'attach-error' }
   }
 }
 
@@ -531,6 +677,11 @@ export async function waitForFirstTurn(handle, timeoutMs) {
   return childStarted(handle)
 }
 
+// #144 二次判定（AC③）的会话内记忆：本会话已 handoff 过的票号。WeakMap 挂 session 对象
+// ——会话被回收记忆随之消失（票面：「会话内记录即可」）。只要拼装成功（= 工具实际走到
+// 交接）就记入，**无论子会话随后是否成功**——正是「父会话主观认为失败而重发」的形态要拦。
+const HANDOFF_TICKET_MEMORY = new WeakMap()
+
 /** One atomic handoff: write the file, spawn the child, start its first turn. */
 async function executeHandoff(ctx, args, exec) {
   const agent = exec?.agent
@@ -556,15 +707,34 @@ async function executeHandoff(ctx, args, exec) {
   // array. The credential/skill gates run inside the assembly and throw BEFORE
   // anything is written or spawned. See assembleHandoffDocument above for the
   // D26/#133 history of these sections.
+  // #144 调用前防呆：注入会话内记忆探针与信号收集器（判定在拼装面，与 #172 回读共用
+  // 一次读取；信号经 ticketGuardFields/ticketGuardTextLines 映射进返回值）。
+  const handedOffTickets = (() => {
+    const key = agent.session ?? agent
+    let set = HANDOFF_TICKET_MEMORY.get(key)
+    if (set === undefined) {
+      set = new Set()
+      HANDOFF_TICKET_MEMORY.set(key, set)
+    }
+    return set
+  })()
+  const ticketGuardSignals = []
   const documentText = [
     await assembleHandoffDocument(args.document, {
       focus: args.focus,
       skill: args.skill,
       artifacts: args.artifacts,
       cwd: header?.cwd,
+      handedOff: (ticket) => handedOffTickets.has(ticket),
+      ticketGuardSignals,
     }),
     `<!-- spawned by ${presetId} preset; child session inherits the same mode -->`,
   ].join('\n\n')
+  // 拼装成功 = 工具实际走到交接（凭据门拒绝 throw 时根本到不了这里，不算 handoff）→
+  // 记入会话内防呆记忆；下一次同票 handoff 触发 duplicateTicket。
+  for (const event of ticketGuardSignals) {
+    if (typeof event?.ticket === 'string') handedOffTickets.add(event.ticket)
+  }
   let writeError
   try {
     await writeFile(filePath, documentText, 'utf8')
@@ -597,7 +767,8 @@ async function executeHandoff(ctx, args, exec) {
     ...(agentOptions !== undefined ? { agentOptions } : {}),
     setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, presetId),
   })
-  await attachToWorkspace(ctx, handle.agent.session.id, header?.cwd)
+  // #144 AC⑤：attach 结果带出（失败面 = 模型可见字段 + 文本，不再只进日志）。
+  const sidebar = await attachToWorkspace(ctx, handle.agent.session.id, header?.cwd)
 
   // 3. The document as the child's FIRST USER PROMPT: queue a real turn (the
   // same admission the prompt RPC uses) and wake the driver. The child starts
@@ -657,10 +828,19 @@ async function executeHandoff(ctx, args, exec) {
     // stalled=true is the protocol-level anti-duplicate flag (#44 review):
     // the model-facing text above is advisory, this field is checkable.
     ...(stalled ? { stalled: true } : {}),
+    // #144 调用前防呆字段（ticketClosed / duplicateTicket / ticketCheckUnverified）
+    // 与侧边栏可见性字段（sidebarAttached [+ sidebarAttachReason]）——异常/未核才置位
+    // 或成功也机械可断言（sidebarAttached: true），正常票号路径零新增噪音。
+    ...ticketGuardFields(ticketGuardSignals),
+    ...sidebarFields(sidebar),
     text: [
       `Handoff 子会话已创建：${handle.agent.session.id}`,
       writeError ? `文件写入失败：${writeError}` : `可移植交接文档：${filePath}`,
       statusLine,
+      ...ticketGuardTextLines(ticketGuardSignals),
+      ...(sidebar?.attached === false
+        ? [`⚠ 子会话可能不出现在侧边栏（${sidebar.reason}）——别据此重发本工具；需要确认可见性时让 human 在侧边栏核对。`]
+        : []),
       '请在侧边栏切换到新会话；本会话保持可恢复。',
     ].join('\n'),
   }
@@ -675,6 +855,7 @@ export function apply(ctx) {
       'Call this when the phase-boundary decision is /handoff — swapping harness, moving to a new directory, sending work to a colleague, or forking a side task mid-phase.',
       'mode "fresh" (default) = empty child session, zero inherited history (the document carries the context); mode "fork" = child continues this session\'s history up to the last completed turn (same-ticket continuation only).',
       'You compose the `document` yourself (summary + suggested skills + artifact references, redacted); the tool machine-fills the appended sections — 环境快照 (git probe values over the session cwd) and 产物清单 (declare `artifacts` paths; each sha256 is computed here, and the section exists only when artifacts are declared, #168).',
+      'Before handing off, the tool runs the #144 pre-call guard: the ticket in the directed section (credential line first, else the first #<n> reference in it) is checked against the tracker — a CLOSED ticket sets `ticketClosed`, a second handoff of the SAME ticket in this session sets `duplicateTicket` (independent signals, both advisory, never blocking), and when gh is unavailable or no ticket can be extracted it sets `ticketCheckUnverified` instead of staying silent. Sidebar attachment is also surfaced: `sidebarAttached: false` (+ `sidebarAttachReason`) means the child may not appear in the sidebar — do NOT re-call this tool because of it.',
       'After it returns, STOP and tell the human to switch to the child session in the sidebar — you cannot switch the main session yourself.',
     ].join('\n'),
     parameters: handoffSchema,
@@ -687,6 +868,14 @@ export function apply(ctx) {
           // #44: set ONLY on the still-stalled path — protocol-level
           // anti-duplicate signal (text alone is advisory).
           stalled: { type: 'boolean' },
+          // #144 调用前防呆（与 stalled 正交；正常票号路径零字段零噪音）：
+          ticketClosed: { type: 'number' },          // 目标票已关闭（tracker 实读，AC①）
+          duplicateTicket: { type: 'number' },       // 同会话同票第二次 handoff（独立信号，AC②）
+          ticketCheckUnverified: { type: 'string' }, // gh 不可用/票号提取不到——未核原因（AC③）
+          // #144 AC⑤（2026-10-20 并入）：侧边栏可见性。false 时附 sidebarAttachReason
+          // （no-workspace / attach-error）；无 registry/无 cwd 的组合缺席（机会性 skip）。
+          sidebarAttached: { type: 'boolean' },
+          sidebarAttachReason: { type: 'string' },
         },
         required: ['text'],
       },

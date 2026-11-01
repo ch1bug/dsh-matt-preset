@@ -22,6 +22,19 @@
  *       T9c 批次凭据 / 候选 → 整节缺席且 reader 零调用
  *   T9d #172 复审①：gh 回读器 env 过滤（GIT_* 与 GH_REPO 剥离、认证面/PATH 保留）+
  *       源码消费锚；真 execFile 的 env 子进程传递显式声明不在断言面
+ *   T10 #144 AC① 已关告警：回读 state=CLOSED → ticketClosed 信号 + Number 字段 +
+ *       文本行钉票面措辞（「已关闭」「重复 handoff 可能重做已完成的工作」），文档照常产出（不阻断）
+ *   T11 #144 未关票不告警：state=OPEN（含小写归一读数）→ 零信号零字段零文本行
+ *   T12 #144 AC② 二次告警独立：open+已交过 → 仅 duplicateTicket；closed+已交过 →
+ *       两独立信号并存（closed 不吞 duplicate）；未交过 → 不误报
+ *   T13 #144 AC③ 未核不阻断 + 票号提取优先级：reader 失败 → ticketCheckUnverified
+ *       （带票号与原因，字段+文本行「未核…不阻断」）；批次凭据/候选 → unverified（提取不到）
+ *       且 reader 零调用；凭据行优先于节内引用；批次凭据退而在定向节扫 #<n>
+ *   T14 #144 AC⑤ sidebarAttached：attachToWorkspace 五分支（no-workspace / attach-error
+ *       ×2 / 成功 / 机会性 skip ×2）+ sidebarFields 映射（true 也机械可断言）
+ *   T15 #144 执行面接线源码锚（handedOff 探针 / 信号收集 / 记忆 add / 字段文本映射 /
+ *       sidebar 消费）；⚠ declare：真执行面（真挂具、记忆跨调用、Track A）不在本守卫
+ *       断言面——接线由锚 + T10–T14 真函数注入面组合钉住，显式声明
  *
  * git 隔离：夹具仓走 `tests/isolated-git.mjs` 挂具（`fixtureEnv` + `gitIn`，`git -C` 定位、
  * env 剥 `GIT_*`）—— 与被测探针（`git -C` + 剥 `GIT_*`）同一套定位语义，夹具读数与探针
@@ -38,7 +51,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 
-import { assembleHandoffDocument, CREDENTIAL_FORMATS, HANDOFF_BOUNDARY, inject, name, readerEnv } from '../handoff-tool.mjs'
+import { assembleHandoffDocument, attachToWorkspace, CREDENTIAL_FORMATS, HANDOFF_BOUNDARY, inject, name, readerEnv, sidebarFields, ticketGuardFields, ticketGuardTextLines } from '../handoff-tool.mjs'
 import { fixtureEnv, gitIn } from './isolated-git.mjs'
 
 const results = []
@@ -375,11 +388,204 @@ try {
       }
     }
   }
+
+  // ── T10–T13：#144 调用前防呆（注入 reader / handedOff 记忆探针，不打真网）─────────
+  // 判定落点 = 拼装面 buildTicketSection（与 #172 回读共用一次读取）；信号经
+  // ticketGuardSignals 收集器带出，ticketGuardFields/ticketGuardTextLines 是同一映射的
+  // 消费面（executeHandoff 用它组装返回值）——守卫直接断言「信号 → 字段/文本」端到端。
+  {
+    const openRead = (n) => async () => ({ ok: true, fields: { number: n, title: `在办票 ${n}（fixture）`, state: 'OPEN', labels: 'enhancement', url: `https://tracker.invalid/issues/${n}` } })
+    const closedRead = (n) => async () => ({ ok: true, fields: { number: n, title: `已关票 ${n}（fixture）`, state: 'CLOSED', labels: 'enhancement', url: `https://tracker.invalid/issues/${n}` } })
+    const directedBody = (n) => `定向验证正文（#144）。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- 凭据：#${n}（已落票）`
+
+    // T10（AC①）：已关票 → ticketClosed 信号 + Number 字段 + 文本行钉票面措辞；文档照常
+    // 产出（不阻断——告警不是拦截）且回读节状态行 = tracker 实值 CLOSED。
+    {
+      const signals10 = []
+      const doc10 = await assembleHandoffDocument(directedBody(140), { skill: 'implement', cwd: repoDir, trackerReader: closedRead(140), ticketGuardSignals: signals10 })
+      docs.push(doc10)
+      const fields = ticketGuardFields(signals10)
+      const lines = ticketGuardTextLines(signals10)
+      const closed = signals10.find((s) => s?.kind === 'ticketClosed')
+      const stateLine = sectionOf(doc10, '票面回读（tracker 实读，#172）').split('\n').find((l) => l.startsWith('- 状态: ')) ?? ''
+      const pass = closed?.ticket === '140'
+        && fields.ticketClosed === 140 && !('duplicateTicket' in fields) && !('ticketCheckUnverified' in fields)
+        && lines.length === 1 && lines[0].includes('已关闭') && lines[0].includes('重复 handoff 可能重做已完成的工作')
+        && stateLine === '- 状态: CLOSED' && doc10.includes('## 交接边界（首轮必读）')
+      if (pass) {
+        ok('T10. 已关票 → ticketClosed 字段（结构化，AC①）+ 文本行钉「已关闭…重复 handoff 可能重做已完成的工作」+ 文档照常产出（不阻断）', fields.ticketClosed === 140 ? 'ticketClosed=140' : JSON.stringify(fields))
+      } else {
+        bad('T10. 已关票告警', JSON.stringify({ signals: signals10, fields, lines, stateLine }))
+      }
+    }
+
+    // T11：未关票**不**告警——open（含小写归一读数）零信号零字段零文本行（扰动断言之一）。
+    {
+      const signals11 = []
+      const doc11 = await assembleHandoffDocument(directedBody(141), { skill: 'implement', cwd: repoDir, trackerReader: openRead(141), ticketGuardSignals: signals11 })
+      docs.push(doc11)
+      const signals11b = []
+      const doc11b = await assembleHandoffDocument(directedBody(141), { skill: 'implement', cwd: repoDir, trackerReader: async () => ({ ok: true, fields: { number: '141', title: 't', state: 'open', labels: 'l', url: 'u' } }), ticketGuardSignals: signals11b })
+      docs.push(doc11b)
+      const pass = signals11.length === 0 && signals11b.length === 0
+        && Object.keys(ticketGuardFields(signals11)).length === 0 && ticketGuardTextLines(signals11).length === 0
+        && sectionOf(doc11, '票面回读（tracker 实读，#172）').includes('- 状态: OPEN')
+      if (pass) {
+        ok('T11. 未关票不告警（OPEN/小写 open 零信号、零字段、零文本行——正常态零噪音）')
+      } else {
+        bad('T11. 未关票不告警', JSON.stringify({ open: signals11, lowerOpen: signals11b }))
+      }
+    }
+
+    // T12（AC②）：二次告警与已关是**两个独立信号**——open+已交过 → 仅 duplicateTicket；
+    // closed+已交过 → 两信号并存（closed 不吞 duplicate，反之亦然）。
+    {
+      const signals12a = []
+      const doc12a = await assembleHandoffDocument(directedBody(142), { skill: 'implement', cwd: repoDir, trackerReader: openRead(142), handedOff: () => true, ticketGuardSignals: signals12a })
+      docs.push(doc12a)
+      const fields12a = ticketGuardFields(signals12a)
+      const signals12b = []
+      const doc12b = await assembleHandoffDocument(directedBody(142), { skill: 'implement', cwd: repoDir, trackerReader: closedRead(142), handedOff: () => true, ticketGuardSignals: signals12b })
+      docs.push(doc12b)
+      const fields12b = ticketGuardFields(signals12b)
+      const pass = signals12a.length === 1 && signals12a[0]?.kind === 'duplicateTicket' && signals12a[0]?.ticket === '142'
+        && fields12a.duplicateTicket === 142 && !('ticketClosed' in fields12a) && !('ticketCheckUnverified' in fields12a)
+        && signals12b.length === 2 && fields12b.ticketClosed === 142 && fields12b.duplicateTicket === 142
+        && ticketGuardTextLines(signals12b).some((l) => l.includes('同票重复调用'))
+      if (pass) {
+        ok('T12. 二次告警独立（AC②）：open+已交过仅 duplicateTicket；closed+已交过两独立信号并存（Number 字段各自可断言）')
+      } else {
+        bad('T12. 二次告警独立', JSON.stringify({ openPlusSeen: { signals: signals12a, fields: fields12a }, closedPlusSeen: { signals: signals12b, fields: fields12b } }))
+      }
+    }
+
+    // T13（AC③ + brief 提取优先级）：未核不阻断——reader 失败 → ticketCheckUnverified
+    // （带票号与原因）；批次凭据 / 候选 → unverified（提取不到）且 reader 零调用；
+    // 提取优先级 = 凭据行 > 定向节内第一个 #<n> 引用。
+    {
+      const signals13a = []
+      const doc13a = await assembleHandoffDocument(directedBody(143), { skill: 'implement', cwd: repoDir, trackerReader: async () => ({ ok: false, reason: '（T13）gh 不可达' }), ticketGuardSignals: signals13a })
+      docs.push(doc13a)
+      const fields13a = ticketGuardFields(signals13a)
+      const lines13a = ticketGuardTextLines(signals13a)
+      const unv = signals13a.find((s) => s?.kind === 'ticketCheckUnverified')
+
+      const signals13b = []
+      let calls13b = 0
+      const doc13b = await assembleHandoffDocument(
+        `定向验证正文（批次凭据）。\n\n## 本会话任务（human 已定向）\n\n- verify-ticket\n- ${CREDENTIAL_FORMATS.batch}（.scratch/batch-state.md 在案）`,
+        { skill: 'implement', cwd: repoDir, trackerReader: async () => { calls13b += 1; return { ok: true, fields: { number: '0', title: 't', state: 'OPEN', labels: 'l', url: 'u' } } }, ticketGuardSignals: signals13b },
+      )
+      docs.push(doc13b)
+      const unv13b = signals13b.find((s) => s?.kind === 'ticketCheckUnverified')
+
+      const signals13c = []
+      let calls13c = 0
+      const doc13c = await assembleHandoffDocument(BODY, { cwd: repoDir, trackerReader: async () => { calls13c += 1; return { ok: true, fields: { number: '0', title: 't', state: 'OPEN', labels: 'l', url: 'u' } } }, ticketGuardSignals: signals13c })
+      docs.push(doc13c)
+      const unv13c = signals13c.find((s) => s?.kind === 'ticketCheckUnverified')
+
+      // 13d 凭据行优先：凭据 #145 在场时，节内另一引用 #999 不得盖过它
+      const seen13d = []
+      const doc13d = await assembleHandoffDocument(
+        '定向验证正文。\n\n## 本会话任务（human 已定向）\n\n- 上下文引用：#999\n- 凭据：#145（已落票）',
+        { skill: 'implement', cwd: repoDir, trackerReader: async (t) => { seen13d.push(t); return { ok: true, fields: { number: t, title: 't', state: 'OPEN', labels: 'l', url: 'u' } } }, ticketGuardSignals: [] },
+      )
+      docs.push(doc13d)
+      // 13e 批次凭据 + 定向节内引用 #146 → 退而扫定向节命中 146（reader 被调且票号正确）
+      const seen13e = []
+      const doc13e = await assembleHandoffDocument(
+        `定向验证正文。\n\n## 本会话任务（human 已定向）\n\n- ${CREDENTIAL_FORMATS.batch}（.scratch/batch-state.md 在案）\n- 延续 #146 的收尾`,
+        { skill: 'implement', cwd: repoDir, trackerReader: async (t) => { seen13e.push(t); return { ok: true, fields: { number: t, title: 't', state: 'OPEN', labels: 'l', url: 'u' } } }, ticketGuardSignals: [] },
+      )
+      docs.push(doc13e)
+
+      const pass = unv?.ticket === '143' && String(unv?.reason).includes('（T13）gh 不可达')
+        && fields13a.ticketCheckUnverified === String(unv?.reason) && !('ticketClosed' in fields13a)
+        && lines13a.length === 1 && lines13a[0].includes('未核') && lines13a[0].includes('不阻断')
+        && calls13b === 0 && signals13b.length === 1 && unv13b?.ticket === undefined && String(unv13b?.reason).includes('无单票对象')
+        && calls13c === 0 && signals13c.length === 1 && String(unv13c?.reason).includes('无定向节')
+        && seen13d.length === 1 && seen13d[0] === '145'
+        && seen13e.length === 1 && seen13e[0] === '146'
+      if (pass) {
+        ok('T13. 未核不阻断（AC③）：reader 失败 → unverified 带票号原因（字段+「未核…不阻断」文本行）；批次/候选 → unverified（提取不到）且 reader 零调用；提取 = 凭据行优先、退而定向节扫 #<n>')
+      } else {
+        bad('T13. 未核与提取优先级', JSON.stringify({ unv, fields13a, lines13a, calls13b, unv13b, calls13c, unv13c, seen13d, seen13e }))
+      }
+    }
+  }
+
+  // ── T14：#144 AC⑤ attachToWorkspace 失败提升为模型可见（fake ctx，无真挂具）────────
+  {
+    const warns = []
+    const fakeCtx = (registry) => ({
+      get: (n) => (n === 'workspaceRegistry' ? registry : undefined),
+      logger: { warn: (m) => warns.push(String(m)) },
+    })
+    const okRegistry = { resolveByPath: async () => ({ attachSession: async () => {} }) }
+    const attachThrows = { resolveByPath: async () => ({ attachSession: async () => { throw new Error('（T14）attach 炸') } }) }
+    const resolveThrows = { resolveByPath: async () => { throw new Error('（T14）resolve 炸') } }
+    const noWsRegistry = { resolveByPath: async () => undefined }
+    const rOk = await attachToWorkspace(fakeCtx(okRegistry), 'sid', repoDir)
+    const warnsBeforeNoWs = warns.length
+    const rNoWs = await attachToWorkspace(fakeCtx(noWsRegistry), 'sid', repoDir)
+    const rErr1 = await attachToWorkspace(fakeCtx(attachThrows), 'sid', repoDir)
+    const rErr2 = await attachToWorkspace(fakeCtx(resolveThrows), 'sid', repoDir)
+    const rNoReg = await attachToWorkspace(fakeCtx(undefined), 'sid', repoDir)
+    const rNoCwd = await attachToWorkspace(fakeCtx(okRegistry), 'sid', undefined)
+    const fOk = sidebarFields(rOk)
+    const fNoWs = sidebarFields(rNoWs)
+    const fErr = sidebarFields(rErr1)
+    const fSkip = sidebarFields(rNoReg)
+    const pass = rOk?.attached === true
+      && rNoWs?.attached === false && rNoWs?.reason === 'no-workspace'
+      && rErr1?.attached === false && rErr1?.reason === 'attach-error'
+      && rErr2?.attached === false && rErr2?.reason === 'attach-error'
+      && rNoReg === undefined && rNoCwd === undefined
+      && warns.length > warnsBeforeNoWs // 失败面日志照旧（返回值是新增模型可见面，不替代日志）
+      && fOk.sidebarAttached === true && !('sidebarAttachReason' in fOk)
+      && fNoWs.sidebarAttached === false && fNoWs.sidebarAttachReason === 'no-workspace'
+      && fErr.sidebarAttached === false && fErr.sidebarAttachReason === 'attach-error'
+      && Object.keys(fSkip).length === 0
+    if (pass) {
+      ok('T14. attachToWorkspace 五分支 + sidebarFields 映射（AC⑤）：no-workspace / attach-error（两 throw 面）/ 成功 / 机会性 skip×2（无 registry、无 cwd → 零字段）；成功也机械可断言（sidebarAttached: true）')
+    } else {
+      bad('T14. sidebarAttached', JSON.stringify({ rOk, rNoWs, rErr1, rErr2, rNoReg, rNoCwd, fOk, fNoWs, fErr, fSkip, warns: warns.length }))
+    }
+  }
+
+  // ── T15：#144 执行面接线源码锚（executeHandoff 需真挂具，接线用锚钉住）─────────────
+  // ⚠ declare：真执行面（真挂具上的记忆跨调用行为、返回字段实际出现）不在本守卫断言面
+  // （Track A 未扩）——接线靠本锚 + T10–T14 的真函数注入面组合钉住，显式声明。
+  {
+    const src = readFileSync(join(REPO, 'handoff-tool.mjs'), 'utf8')
+    const anchors = {
+      memoryDeclared: src.includes('const HANDOFF_TICKET_MEMORY = new WeakMap()'),
+      probeInjected: src.includes('handedOff: (ticket) => handedOffTickets.has(ticket)'),
+      // signalsCollected 用含逗号的 shorthand 实传字面（#144 复审④：裸词会被注释残留命中，
+      // 10 处→弱锚；`ticketGuardSignals,` 在源码恰 1 处 = executeHandoff 实传给 assemble 的行）
+      signalsCollected: src.includes('ticketGuardSignals,'),
+      memoryRecorded: src.includes("if (typeof event?.ticket === 'string') handedOffTickets.add(event.ticket)"),
+      fieldsMapped: src.includes('...ticketGuardFields(ticketGuardSignals)'),
+      textMapped: src.includes('...ticketGuardTextLines(ticketGuardSignals)'),
+      sidebarConsumed: src.includes('const sidebar = await attachToWorkspace(ctx, handle.agent.session.id, header?.cwd)')
+        && src.includes('...sidebarFields(sidebar)')
+        && src.includes('sidebar?.attached === false'),
+      schemaFields: src.includes('ticketClosed: { type: \'number\' }') && src.includes('duplicateTicket: { type: \'number\' }')
+        && src.includes('ticketCheckUnverified: { type: \'string\' }') && src.includes('sidebarAttached: { type: \'boolean\' }'),
+    }
+    const missing = Object.entries(anchors).filter(([, v]) => !v).map(([k]) => k)
+    if (missing.length === 0) {
+      ok('T15. 执行面接线源码锚（记忆声明/探针注入/信号收集/拼装后记忆 add/字段文本映射/sidebar 消费/schema 字段）')
+    } else {
+      bad('T15. 执行面接线源码锚', `missing: ${missing.join(', ')}`)
+    }
+  }
 } finally {
   // 只删本守卫自建的 mkdtemp 路径（home 安全判据：删除目标 = 本条命令自己建出来的路径）
   rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 3 })
 }
 
-console.log('\n=== HANDOFF-TOOL VERIFY (T0–T9) ===')
+console.log('\n=== HANDOFF-TOOL VERIFY (T0–T15) ===')
 console.log(results.join('\n'))
 process.exit(results.some((r) => r.startsWith('  ✗')) ? 1 : 0)
