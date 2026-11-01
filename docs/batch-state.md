@@ -1,7 +1,8 @@
 # batch-state —— 批次状态文件的形状（单一事实源）
 
 本文件是 `.scratch/batch-state.md`**形状的唯一事实源**：模板、必需字段、落盘契约都写在这里。
-工作流正文（`workflow-body.txt` 的 `@@ batch-mode` 节）、enforcer 的提醒文案与断言用例
+工作流正文（`workflow-component-batch.txt` 的 `@@ batch-mode` 节——#58 组件化后 batch
+规则块搬出骨架，组件开=与原正文逐字等价）、enforcer 的提醒文案与断言用例
 **只留指针、不复述字段**——字段要改，先改这里，再让指针面跟上（D27 低频变更；量表未变不改机制，D29）。
 
 **载体归属**：批次机制（触发、路径、命名、marker、状态行）必须落在**仓内**——`~/.dsh/skills/`
@@ -53,7 +54,7 @@ retro: done @ <commit>
 
 `retro:` 那一行**不是模板的可选装饰**：它是批末 retro 的**完成标记**，enforcer 读它来判断
 「这批的批末 retro 是否已经跑过」（`RETRO_TRIGGER.retroMarker`，存在性判据——不解析表格、
-不校验其它字段）。**写这一行的是 agent**（正文规则，见 `workflow-body.txt` 的 `@@ batch-mode` 节）：
+不校验其它字段）。**写这一行的是 agent**（正文规则，见 `workflow-component-batch.txt` 的 `@@ batch-mode` 节）：
 enforcer 是 reminder-only，**只读标记、不写文件**。
 
 ⚠ **两个标记、两件事**（勿混）：`retro:` 说的是「批末 retro 已**跑**」，而它写在批末 push
@@ -100,7 +101,7 @@ id 的条目**（`<批次标识> aggregated @ <日期>`）；判定是「**当�
 批外票**不自动继承、不跨批继承**仍成立——登记是**逐票显式**的，不是「批外票一律免确认」。
 `标准` 档偏好下，已登记的批外票可免确认**改标 + 关票**（须带证据三要素：证明命令 / exit
 code / 证据路径）；免确认的改标/关票动作进 wrap 的自主 digest（格式与越界读数口径见
-`workflow-body.txt` `@@ batch-mode` 的 AUTONOMY DIGEST 条——批内动作不重抄，Progress 行已承载三要素）。
+`workflow-component-batch.txt` `@@ batch-mode` 的 AUTONOMY DIGEST 条——批内动作不重抄，Progress 行已承载三要素）。
 **登记写权在 human**：批外票清单由 human 在批宣告时拍板登记（或事后显式追加），**agent 不得
 自行登记**——免确认的入口本身要有确认面，自行登记的票**没有授权依据**，照进 digest 的
 `⚠ 无授权依据的动作` 段（#135 的越界三步止损读同一段）。
@@ -151,7 +152,7 @@ code / 证据路径）；免确认的改标/关票动作进 wrap 的自主 diges
   `subagentCatalog` + 宽限 + 1 次 nudge + 应答通道）正典同在
   `lib/autonomy-orchestration.mjs`（`runWakeLoop`），评测消费面
   `evals/autonomy/runner.mjs` import 它、零内嵌副本。
-- **落点**：wrap 结论的 AUTONOMY DIGEST 段（`workflow-body.txt` `@@ batch-mode`）——
+- **落点**：wrap 结论的 AUTONOMY DIGEST 段（`workflow-component-batch.txt` `@@ batch-mode`）——
   **与批末 retro 聚合面衔接不重复**：审计行进 digest，retro 候选不重复承载同一读数。
 - **分层边界**：B 侧校验命中（hop2 是否真做起手校验）是**评分面**（rubric），不进
   digest——机械读数与评分读数分层，勿混。
@@ -331,7 +332,7 @@ retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字
 - ADR：[`docs/adr/0002-batch-mode.md`](adr/0002-batch-mode.md)（批次权威口径）、
   [`docs/adr/0003-sandbox-batch-mode.md`](adr/0003-sandbox-batch-mode.md)（沙箱 Y 车道；落地见 #73）。
 - 触发面与注入文案：[`docs/workflow-enforcer.md`](workflow-enforcer.md)。
-- 正文规则：[`workflow-body.txt`](../workflow-body.txt) 的 `@@ batch-mode` 节。
+- 正文规则：[`workflow-component-batch.txt`](../workflow-component-batch.txt) 的 `@@ batch-mode` 节（#58 组件化）。
 - 机器守卫：[`tests/verify-batch-state.mjs`](../tests/verify-batch-state.mjs)（**C1–C8** 模板完整性与
   载体漂移守卫（**C1c** 钉住 develop 集成分支三条款：commit 落 develop / 合并闸口 / 提交前
   git status 对账，#161）；**C9** 活文件「未推送清单」机械对账：读 `.scratch/batch-state.md` 的**最后一条**

@@ -24,6 +24,7 @@
     "workflow-gates.yml.example",
     "workflow-core.mjs",
     "workflow-body.txt",
+    "workflow-component-batch.txt",
     "workflow-profile-cordis.txt",
     "workflow-profile-ptc.txt",
     "workflow-profile-minimal.txt",

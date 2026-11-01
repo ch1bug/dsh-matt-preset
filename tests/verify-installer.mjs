@@ -331,7 +331,8 @@ await test('install: copies payload to the stable store, stamps version + manife
   assert.deepEqual(absent, [], `payload entries missing from the store: ${absent.join(', ')}`)
   // payload 完整：类别代表（bundle 载体 / 插件 / skills / lang-packs / sandcastle）
   for (const f of ['preset.yml', 'agent.cordis.yml', 'cordis.patch.yml',
-    'workflow-core.mjs', 'workflow-body.txt', 'workflow-profile-cordis.txt',
+    'workflow-core.mjs', 'workflow-body.txt', 'workflow-component-batch.txt',
+    'workflow-profile-cordis.txt',
     'workflow-profile-ptc.txt', 'workflow-profile-minimal.txt',
     'workflow-enforcer.mjs', 'lang-enforcer.mjs', 'handoff-tool.mjs',
     'skills/ponytail/SKILL.md', 'lang-packs', 'sandcastle', 'package.json']) {

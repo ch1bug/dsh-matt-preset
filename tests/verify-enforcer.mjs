@@ -1691,7 +1691,11 @@ else bad('V35g2. batch-end push swallowed the commit arm',
 const commitDoc = {
   enforcer: readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8'),
   batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
-  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+  // #58: the batch-mode section now lives in workflow-component-batch.txt —
+  // the carrier face is the skeleton + component file (verbatim-equivalent
+  // to the pre-#58 body when the component is mounted, the default).
+  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8') +
+    readFileSync(new URL('../workflow-component-batch.txt', import.meta.url), 'utf8'),
   context: readFileSync(new URL('../CONTEXT.md', import.meta.url), 'utf8'),
   adr: readFileSync(new URL('../docs/adr/0002-batch-mode.md', import.meta.url), 'utf8'),
 }
@@ -2104,7 +2108,10 @@ else bad('V37b. style-preference declaration drift',
 
 // (c) every carrier that states the contract stays aligned (V35h discipline).
 const styleDoc = {
-  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+  // #58: the STYLE PREFERENCE / digest text now lives in the batch component
+  // file — the body carrier = skeleton + component file (see commitDoc above).
+  body: readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8') +
+    readFileSync(new URL('../workflow-component-batch.txt', import.meta.url), 'utf8'),
   batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
   enforcer: readFileSync(new URL('../docs/workflow-enforcer.md', import.meta.url), 'utf8'),
   context: readFileSync(new URL('../CONTEXT.md', import.meta.url), 'utf8'),

@@ -54,6 +54,24 @@
  * mounts this row deliberately (its mount IS the opt-in) passes
  * `scope: 'all'` to receive the workflow text regardless of a marker.
  *
+ * Components (#58): some rule blocks are TOGGLEABLE, not unconditional —
+ * they ride on the same delta structure but a mount can turn them off.
+ * `COMPONENTS` registers each one as `{ delta, sectionIds }`: a delta file
+ * (same `@@ <id>` syntax, `after=`-anchored) plus the section ids it owns.
+ * `config.components: ['batch']` names what to mount; the DEFAULT is every
+ * registered component (the pre-#58 behavior — the standard render stays
+ * byte-identical to the frozen baseline). Composition order: the profile
+ * delta first, then the component deltas, so a component section anchored
+ * at the same anchor as a profile's sections lands AFTER them — the cordis
+ * /ptc section order is unchanged. A profile may override a component's
+ * section (minimal's compressed `batch-mode`): the profile delta wins, the
+ * component's default text is skipped for that id. Turning a component OFF
+ * filters its section ids out of the composed text — whatever carried them
+ * (the component delta, a profile's override) — so `components: []` means
+ * NO batch sections reach the model under any profile. An unknown
+ * component name is loud (mount fails): a typoed switch must never
+ * silently do nothing.
+ *
  * Config:
  *   - profile: 'standard' (default), 'cordis' (creator preset: plugin
  *              authoring adaptations), 'ptc' (PTC execution shape: program
@@ -61,6 +79,9 @@
  *              token-budget text, gates unchanged). An unknown name falls back
  *              to the default with one warn per mount — a typo must never cost
  *              a session its workflow text.
+ *   - components: names from COMPONENTS to mount (default: all of them).
+ *              Unlike a profile typo, an unknown component name throws at
+ *              mount — a switch that silently does nothing is a lie.
  *   - scope:  'marker' (default — inject only when the marker is present)
  *             or 'all' (inject on every assembly of a mounting preset).
  *   - marker: the scope-guard marker (default 'ask-matt').
@@ -92,6 +113,23 @@ export const PROFILES = {
   minimal: new URL('./workflow-profile-minimal.txt', import.meta.url),
 }
 
+/** Component registry (#58): name → { delta, sectionIds }. A component is a
+ * toggleable rule block that rides the delta structure: `delta` is the file
+ * its default text lives in (same `@@ <id>` syntax), `sectionIds` are the
+ * ids it owns — turning the component off removes those sections from the
+ * composed text, whatever carried them (the component delta or a profile's
+ * override, e.g. minimal's compressed batch-mode). */
+export const COMPONENTS = {
+  batch: {
+    delta: new URL('./workflow-component-batch.txt', import.meta.url),
+    sectionIds: ['batch-mode'],
+  },
+}
+
+/** Components a mount gets when config does not name any — every registered
+ * one (the pre-#58 behavior: standard stays byte-identical to the baseline). */
+export const DEFAULT_COMPONENTS = Object.keys(COMPONENTS)
+
 /** `@@ <id>`, `@@ <id> tight` or `@@ <id> after=<anchor>` — a delimiter line.
  * Exactly one optional clause: `tight` describes the separator before the
  * section (skeleton only), `after=` where a delta section is inserted. */
@@ -100,6 +138,21 @@ const DELIMITER = /^@@\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+(tight|after=([A-Za-z
 /** Whether `name` names a registered profile. */
 function knownProfile(name) {
   return typeof name === 'string' && Object.hasOwn(PROFILES, name)
+}
+
+/** Validate and normalize a `components` request: `undefined` → the default
+ * (all components), duplicates deduped, an unknown name LOUD (#58 — a typoed
+ * switch must never silently do nothing). */
+export function resolveComponents(components = DEFAULT_COMPONENTS) {
+  if (components === undefined) return DEFAULT_COMPONENTS.slice()
+  if (!Array.isArray(components) || components.some((name) => typeof name !== 'string')) {
+    throw new TypeError(`components must be an array of component names (${Object.keys(COMPONENTS).join(', ')}), got ${JSON.stringify(components)}`)
+  }
+  const unknown = [...new Set(components)].filter((name) => !Object.hasOwn(COMPONENTS, name))
+  if (unknown.length > 0) {
+    throw new Error(`unknown workflow component(s): ${unknown.join(', ')} — registered: ${Object.keys(COMPONENTS).join(', ')}`)
+  }
+  return [...new Set(components)]
 }
 
 /**
@@ -156,7 +209,12 @@ export function parseSections(text) {
 /**
  * Apply `deltas` to `skeleton` sections. Overrides keep their skeleton
  * position (and with it the position's separator); inserts land right after
- * their anchor, in delta order.
+ * their anchor, in delta order. A second insert anchored at the SAME anchor
+ * lands after the WHOLE insert chain started by the first (#58: a component
+ * section sharing a profile section's anchor must land after the profile's
+ * chained sections — the pre-#58 text had the batch section at the skeleton
+ * position, i.e. after every inserted section). For a chain of one the two
+ * readings coincide, so delta order is preserved exactly as before.
  */
 export function composeSections(skeleton, deltas = []) {
   if (!Array.isArray(skeleton)) throw new TypeError('composeSections: skeleton must be a section array')
@@ -164,7 +222,7 @@ export function composeSections(skeleton, deltas = []) {
   const composed = skeleton.map(section => ({ id: section.id, text: section.text, tight: section.tight === true }))
   const byId = new Map(composed.map(section => [section.id, section]))
   const overridden = new Set()
-  /** anchor id → id of the last section inserted after it (keeps delta order). */
+  /** anchor id → id of the last section inserted directly after it (delta order). */
   const lastInsertedAfter = new Map()
   for (const delta of deltas) {
     const id = delta?.id
@@ -186,7 +244,11 @@ export function composeSections(skeleton, deltas = []) {
     if (anchor === null) {
       at = composed.length
     } else {
-      const previous = lastInsertedAfter.get(anchor) ?? anchor
+      // Walk to the END of the insert chain rooted at `anchor`, then land
+      // after it — never between the chain's links.
+      let previous = lastInsertedAfter.get(anchor) ?? anchor
+      let next
+      while ((next = lastInsertedAfter.get(previous)) !== undefined) previous = next
       const found = composed.findIndex(section => section.id === previous)
       if (found < 0) throw new Error(`workflow delta "${id}" anchors on unknown section "${anchor}"`)
       at = found + 1
@@ -225,15 +287,38 @@ export function skeletonText() {
   return cached('skeleton', () => readFile(new URL('./workflow-body.txt', import.meta.url), 'utf8'))
 }
 
-/** The injected body for `profile` (unknown names fall back to the default). */
-export function profileBody(profile = DEFAULT_PROFILE) {
+/** The injected body for `profile` (unknown names fall back to the default)
+ * with `components` mounted (default: all registered — #58).
+ *
+ * Composition order: profile delta sections FIRST, component delta sections
+ * SECOND. Both may anchor at the same skeleton section (cordis's
+ * creator-context and the batch component both anchor at
+ * enforcement-recovery); letting the profile go first keeps the component
+ * section AFTER the profile's — the composed order is unchanged from the
+ * pre-#58 text, where the batch-mode section sat in the skeleton. A profile
+ * overriding a component's id (minimal's compressed batch-mode) wins: the
+ * component's default text is skipped for that id. Turning a component off
+ * filters its sectionIds out AFTER composition — the section disappears
+ * even when a profile's delta carried it. */
+export function profileBody(profile = DEFAULT_PROFILE, components = DEFAULT_COMPONENTS) {
   const key = knownProfile(profile) ? profile : DEFAULT_PROFILE
-  return cached('profile:' + key, async () => {
+  const comps = resolveComponents(components)
+  return cached(`profile:${key}|components:${comps.join(',')}`, async () => {
     const skeleton = parseSections(await skeletonText())
     const delta = PROFILES[key]
-    if (delta === null) return joinSections(skeleton.sections, skeleton.trailingNewline)
-    const deltas = parseSections(await readFile(delta, 'utf8'))
-    return joinSections(composeSections(skeleton.sections, deltas.sections), skeleton.trailingNewline)
+    const profileDeltas = delta === null ? [] : parseSections(await readFile(delta, 'utf8')).sections
+    const profileIds = new Set(profileDeltas.map((section) => section.id))
+    const componentDeltas = []
+    for (const name of comps) {
+      for (const section of parseSections(await readFile(COMPONENTS[name].delta, 'utf8')).sections) {
+        if (!profileIds.has(section.id)) componentDeltas.push(section)
+      }
+    }
+    let composed = composeSections(skeleton.sections, [...profileDeltas, ...componentDeltas])
+    const mounted = new Set(comps.flatMap((name) => COMPONENTS[name].sectionIds))
+    const offIds = new Set(Object.values(COMPONENTS).flatMap((component) => component.sectionIds).filter((id) => !mounted.has(id)))
+    if (offIds.size > 0) composed = composed.filter((section) => !offIds.has(section.id))
+    return joinSections(composed, skeleton.trailingNewline)
   })
 }
 
@@ -248,6 +333,11 @@ export function apply(ctx, config = {}) {
   const marker = config.marker ?? 'ask-matt'
   const order = config.order ?? 10
   const requested = config.profile ?? DEFAULT_PROFILE
+  // #58: resolve the components ONCE at mount — an unknown name is a broken
+  // switch, so it throws here (the mount fails loudly) instead of quietly
+  // injecting text the mount did not ask for. profileBody re-validates its
+  // own direct callers.
+  const components = resolveComponents(config.components)
   // Single decision point for the fallback: apply resolves the profile once at
   // mount (profileBody only guards its own direct callers — M4). The warn fires
   // once per mount on the first assembly, never once per request.
@@ -267,7 +357,7 @@ export function apply(ctx, config = {}) {
         warned = true
         ctx.logger(name).warn(`unknown profile "${String(requested)}" — falling back to "${selected}"`)
       }
-      const text = (config.text ?? (await profileBody(selected))).replace(/\r\n/g, '\n')
+      const text = (config.text ?? (await profileBody(selected, components))).replace(/\r\n/g, '\n')
       return { ...assembled, sections: [...sections, { name: SECTION_NAME, order, text }] }
     } catch (error) {
       // A filter bug must never brick every request of a session.

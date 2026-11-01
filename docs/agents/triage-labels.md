@@ -76,7 +76,7 @@ RFA——没有解冻条件的 RFH 是死票。
 （#122 裁定、由 #143 落地）在 `docs/agents/issue-tracker.md` 的「分诊产出前置项」——两票各改一处，
 与本节不重叠。
 
-**同步面声明（D16b 处置先例）**：本节三条判据与 `workflow-body.txt` 的 RFA 契约段（#123/#128
+**同步面声明（D16b 处置先例）**：本节三条判据与 `workflow-component-batch.txt` 的 RFA 契约段（#123/#128
 落地的实现侧正典：「pick a direction / supply a credential or environment / judge a real-UI run /
 be present」）语义一一对应，但两边**不互钉**——本仓套件不钉本文件（漂移靠人肉比对）。
 

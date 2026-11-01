@@ -109,11 +109,17 @@ const read = (rel) => {
 }
 
 // ── 输入面：三张脸一起读；任一张缺失都是**响亮**的红，不是静默跳过 ──────────────
+// #58 组件化：`@@ batch-mode` 节正文搬进 workflow-component-batch.txt（组件受控注入，
+// 组件开 = 注入文本与原骨架逐字等价）。判据对象 = **注入文本的承载源并集** = 骨架 +
+// 组件文件（C3 的节切/C5 的词形/C6 的节 id 都与节间分隔无关，拼接文本即足）；
+// 组件文件缺席同样响亮红（它现在是 batch 规则的唯一载体）。
 const DOC = read('docs/batch-state.md')
-const BODY = read('workflow-body.txt')
+const SKELETON = read('workflow-body.txt')
+const COMPONENT = read('workflow-component-batch.txt')
+const BODY = SKELETON === null || COMPONENT === null ? null : SKELETON + COMPONENT
 const ENFORCER = read('workflow-enforcer.mjs')
 
-for (const [rel, text] of [['docs/batch-state.md', DOC], ['workflow-body.txt', BODY], ['workflow-enforcer.mjs', ENFORCER]]) {
+for (const [rel, text] of [['docs/batch-state.md', DOC], ['workflow-body.txt', SKELETON], ['workflow-component-batch.txt', COMPONENT], ['workflow-enforcer.mjs', ENFORCER]]) {
   if (text === null) bad(`C0. ${rel} 可读`, '文件缺失或不可读 —— 载体面缺一张脸')
 }
 if (DOC === null || BODY === null || ENFORCER === null) report('BATCH-STATE VERIFY (C1–C6)')
@@ -300,10 +306,14 @@ if (ENFORCER_MOD !== null && ENFORCER_MOD.RETRO_TRIGGER?.push?.words?.includes('
 else bad('C2e. 触发面形状漂移', JSON.stringify(ENFORCER_MOD?.RETRO_TRIGGER ?? null))
 
 // ── C3: `@@ batch-mode` 节含规则关键词 ──────────────────────────────────────
-/** 取 `@@ batch-mode` 到下一个 `@@ ` 标记之间的正文（下一个标记前不留空行）。 */
+/** 取 `@@ batch-mode` 到下一个 `@@ ` 标记之间的正文（下一个标记前不留空行）。
+ *  #58 起判据对象含组件文件：delta 语法 marker 可以带子句
+ *  （`@@ batch-mode after=enforcement-recovery`），所以节首匹配按 marker 语法
+ *  认「`@@ <id>` 行尾或空格后续子句」，不再要求整行精确相等。 */
 function sectionText(text, id) {
   const lines = text.split('\n')
-  const start = lines.findIndex(l => l === `@@ ${id}`)
+  const isMarker = (l) => l === `@@ ${id}` || l.startsWith(`@@ ${id} `)
+  const start = lines.findIndex(isMarker)
   if (start < 0) return null
   let end = lines.length
   for (let i = start + 1; i < lines.length; i++) {
@@ -404,6 +414,8 @@ if (drift.length === 0)
 else bad('C5. 字段表↔正文漂移', drift.join(', '))
 
 // ── C6: 节结构守卫（改动不得吃掉 batch-mode 节）──────────────────────────────
+// #58 起判据对象 = 骨架 + 组件文件的并集（batch-mode 节在组件文件里）：
+// 节 id 仍必须唯一、batch-mode 仍必须在场（吃到哪一侧都红）。
 const markerIds = BODY.split('\n').filter(l => l.startsWith('@@ ')).map(l => l.slice(3).trim().split(/\s+/)[0])
 const dupes = markerIds.filter((id, i) => markerIds.indexOf(id) !== i)
 if (!dupes.length && markerIds.includes('batch-mode'))

@@ -6,7 +6,8 @@
 按它干活）与**机械检验方式**（能跑的检查，不是散文）。
 
 **enforcer 规则面只留锚点**（与 D23「高危清单归插件」同构）：判据的细节不进
-workflow-body.txt / workflow-enforcer.mjs 的注入正文——正文若需要提及，只写一行锚点
+workflow-body.txt / workflow-component-batch.txt（#58 组件化后的 batch 规则块）/ 各
+profile delta / workflow-enforcer.mjs 的注入正文——正文若需要提及，只写一行锚点
 指回本表；第二份全文复述就是漂移种子。
 
 ## 判据表

@@ -156,9 +156,13 @@ else bad('AC3. standard vs baseline', divergence(standard, BASELINE))
 
 const parsed = core.parseSections(SECTIONED)
 const ids = parsed.sections.map(s => s.id)
-if (core.joinSections(parsed.sections, parsed.trailingNewline) === BASELINE)
-  ok('AC3a. the split skeleton rejoins to the baseline bytes (tight join is lossless)')
-else bad('AC3a. lossless rejoin', divergence(core.joinSections(parsed.sections, parsed.trailingNewline), BASELINE))
+// #58: the skeleton alone no longer rejoins to the baseline (the batch
+// section lives in the component file) — it rejoins to the component-OFF
+// standard render; component-on = baseline is the profiles file's C2.
+const componentOff = await core.profileBody('standard', [])
+if (core.joinSections(parsed.sections, parsed.trailingNewline) === componentOff)
+  ok('AC3a. the split skeleton rejoins to the component-off bytes (tight join is lossless)')
+else bad('AC3a. lossless rejoin', divergence(core.joinSections(parsed.sections, parsed.trailingNewline), componentOff))
 
 if (groupIsContiguous(ids))
   ok('AC3b. the enforcement block is four consecutive sections', ENFORCEMENT_GROUP.join(', '))
@@ -339,34 +343,41 @@ else bad('AC2d. minimal/standard ratio', `${minimal.length} / ${standard.length}
 // Structural duplication check, in the shape an override-heavy profile needs:
 // an untouched skeleton section appears once, a rewritten one is GONE (the
 // override replaces it in place — nothing is left behind), and every delta
-// body appears once.
-const minUntouchedShadowed = ids
+// body appears once. #58: the SHARED text = skeleton + batch component file
+// (minimal rewrites the batch-mode section too — its "was" is the component
+// section now).
+const COMPONENT_RAW_2 = lf(readFileSync(REPO + '/workflow-component-batch.txt', 'utf8'))
+const componentDelta2 = core.parseSections(COMPONENT_RAW_2)
+const sharedSections2 = [...parsed.sections, ...componentDelta2.sections.filter(s => !ids.includes(s.id))]
+const sharedIds2 = sharedSections2.map(s => s.id)
+const sharedTextOf = (id) => sharedSections2.find(s => s.id === id)?.text
+const minUntouchedShadowed = sharedIds2
   .filter(id => !minDeltaIds.includes(id))
-  .filter(id => countOf(minText, parsed.sections.find(s => s.id === id).text) !== 1)
-const overriddenCount = ids.filter(id => minDeltaIds.includes(id)).length
-const minLeftovers = ids
+  .filter(id => countOf(minText, sharedTextOf(id)) !== 1)
+const overriddenCount = sharedIds2.filter(id => minDeltaIds.includes(id)).length
+const minLeftovers = sharedIds2
   .filter(id => minDeltaIds.includes(id))
-  .filter(id => countOf(minText, parsed.sections.find(s => s.id === id).text) !== 0)
+  .filter(id => countOf(minText, sharedTextOf(id)) !== 0)
 const minDeltaCopies = minDeltaIds.filter(id => countOf(minText, minDelta.sections.find(s => s.id === id).text) !== 1)
 if (minUntouchedShadowed.length === 0 && minLeftovers.length === 0 && minDeltaCopies.length === 0)
-  ok('AC2e. nothing is duplicated and nothing is left behind', `${ids.filter(id => !minDeltaIds.includes(id)).length} untouched, ${overriddenCount} rewritten`)
+  ok('AC2e. nothing is duplicated and nothing is left behind', `${sharedIds2.filter(id => !minDeltaIds.includes(id)).length} untouched, ${overriddenCount} rewritten`)
 else bad('AC2e. minimal structure', `shadowed: ${minUntouchedShadowed.join(', ') || 'none'}; leftover skeleton: ${minLeftovers.join(', ') || 'none'}; delta copies: ${minDeltaCopies.join(', ') || 'none'}`)
 
 // "examples cut": every overridden section must actually SHRINK, and the
 // example-heavy ones must shrink hard.
-const overriddenIds = minDeltaIds.filter(id => ids.includes(id))
+const overriddenIds = minDeltaIds.filter(id => sharedIds2.includes(id))
 const grew = overriddenIds.filter(id => {
-  const was = parsed.sections.find(s => s.id === id).text.length
+  const was = sharedTextOf(id).length
   const now = minDelta.sections.find(s => s.id === id).text.length
   return now >= was
 })
 if (overriddenIds.length >= 8 && grew.length === 0)
-  ok('AC2f. every section minimal rewrites is shorter than the skeleton', `${overriddenIds.length} overridden`)
+  ok('AC2f. every section minimal rewrites is shorter than the shared text', `${overriddenIds.length} overridden`)
 else bad('AC2f. minimal overrides', `${overriddenIds.length} overridden, not shrunk: ${grew.join(', ') || 'none'}`)
 
 const exampleHeavy = ['batch-mode', 'context-hygiene', 'initialization']
 const notCut = exampleHeavy.filter(id => {
-  const was = parsed.sections.find(s => s.id === id).text.length
+  const was = sharedTextOf(id).length
   return minDelta.sections.find(s => s.id === id).text.length > was * 0.6
 })
 if (notCut.length === 0)

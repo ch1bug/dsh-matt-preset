@@ -35,7 +35,7 @@ the source of truth, never memory: batch-state.md for the batch,
 First move = verify the environment snapshot. If the state file is missing,
 stale, or contradicts the observed environment, STOP and ask — never guess and
 never silently rewrite the record.
-@@ batch-mode
+@@ batch-mode after=enforcement-recovery
 BATCH MODE — only when the human declares a batch; never on by default.
 - ENTRY CONTRACT: RFA = no user in the loop AND no open decision; five things
   pinned in the body (write scope, criterion form, acceptance reading, closing

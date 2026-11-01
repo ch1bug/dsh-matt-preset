@@ -1,0 +1,421 @@
+@@ batch-mode after=enforcement-recovery
+BATCH MODE（攒批）— only when the human declares a batch ("这批攒批 /
+系列处理 / 大系列"); never on by default. Single-issue work keeps the
+per-issue push rhythm.
+- TICKET ENTRY CONTRACT（票面契约 —— every ticket, batch or not）: RFA = the
+  ticket needs NO user in the loop AND has NO open decision. That TEST is the
+  label's: its definition lives in the tracker's `docs/agents/triage-labels.md`
+  (the expansion checklist and the stock re-check stay with the tracking side).
+  What this contract pins is the ticket BODY — five things written down before
+  the label goes on:
+  (1) the write-domain whitelist (including "may touch a same-family file
+  when the criterion requires it"), (2) the criterion's form (what the assertion
+  compares against), (3) the acceptance reading (exact command + expected
+  output), (4) the closing rule (which ticket(s) it closes, and who may close),
+  (5) the push checkpoint. A ticket that cannot pin one of the five is RFH, not
+  RFA.
+- RFA is not "fully specified on paper": if implementing it needs the human to
+  pick a direction, supply a credential or environment, judge a real-UI run, or
+  be present while it is verified, it is RFH however well the body is written.
+- A REAL open decision found at runtime — mutually exclusive ACs, a destructive
+  step, a write outside the declared scope, a criterion that contradicts the
+  measured repo — DOWNGRADES the ticket to RFH and STOPS. Ask-then-continue is
+  the failure this rule forbids. What counts as real is exactly that list plus
+  the enforcer's high-risk list; everything else is routine — decide it and put
+  one line of "decided X because Y" in the delivery comment so the human can
+  audit it afterwards.
+- CONFLICT ZERO（四类冲突归零）— at triage / grill close-out, four faces, all
+  four read before the RFA label goes on:
+  - ① inside the ticket: the ACs do not contradict each other and their
+    arithmetic is feasible;
+  - ② ticket vs measured reality: the symptom / root-cause section was
+    re-measured on HEAD (one command + its reading, D9) or is marked "not
+    measured, assumed";
+  - ③ DOCUMENT vs measured reality: `git grep -n <the ticket's keywords> -- docs/
+    *.md`, every hit judged "still true" or "stale, this ticket supersedes it";
+    a document that contradicts the ticket is either fixed or explicitly
+    overridden inside the ticket;
+  - ④ ticket vs tickets: duplicates, dependency direction and batch assignment
+    checked against `gh issue list`, and no write-scope or criterion overlap
+    with the other members of its batch.
+  One unread face → NOT RFA. Each face's disposal (resolved / decided /
+  explicitly declared) is written INTO the ticket, never left in the chat.
+- No decision-pushing wording in a ticket body, and no line admitting the ticket
+  still needs a human decision (that admission IS an open decision → the ticket
+  is RFH, not RFA). Each such phrase IS an unread conflict face. The unambiguous
+  token lists live in exactly TWO places — the tracker's procedure
+  (`docs/agents/issue-tracker.md`, always) and, where the repo ships one, a
+  matcher (this repo: `scripts/triage-check.mjs`; without one, the same list is
+  read by hand). This text POINTS at them and never re-enumerates: a second
+  enumeration is precisely the drift these rules exist to prevent. The
+  contextual half (a bare "?" hung on a decision, "或" as an option list, 建议
+  in the "要不要做" sense) stays a human read, declared as such in that doc.
+- BATCH DECLARATION PRE-AUTHORIZATION LIST（批宣告预授权清单）— the declaration
+  is the license for autonomous execution, and it authorizes exactly four
+  things:
+  - WRITE SCOPE: the declared write-domain whitelist + "a same-family file when
+    the criterion requires it" + the ticket's own evidence artifacts. A write
+    outside it is a real decision → stop.
+  - CREATE TICKETS: in-batch you may CREATE tickets for discoveries outside the
+    ticket's scope（只建不关 — never close them in-batch). Read the labels back
+    after creating: `gh issue view <n> --json labels --jq '[.labels[].name]'` —
+    exactly one category (bug / enhancement) + exactly one state (one of the
+    five roles). A ticket with no state is invisible on every state-filtered
+    surface (#126 / #127 were built that way).
+  - CLOSE TICKETS: the confirmation mode of closing is chosen AT DECLARATION
+    TIME and recorded in the batch state — (a) per-ticket confirm (report →
+    human confirms → close; the default), (b) in-batch pre-authorization (a
+    finished member is closed without asking, on the batch-end review), or
+    (c) batch-end once (nothing closed in-batch; the summary gate closes the
+    whole membership). If the declaration names no mode, (a) applies AND the
+    declaration prints the loud line 「closing mode not declared — per-ticket
+    confirmation」 (D47: absence is loud, never the convenient default).
+    Comment-closing is still an external action (D21) — the authorization covers
+    the DECLARED members only and NEVER carries into another batch.
+  - PUSH: once, at the batch end, through the summary gate. Never per ticket.
+- STYLE PREFERENCE LAYER（风格偏好层, #49 — user preference, NOT a fifth
+  authorization column）: the confirmation TIMING of out-of-batch Bucket-B
+  tickets rides a user style preference file OUTSIDE the repo
+  (`<DSH_HOME>/batch-style-preference.md`; its SHAPE lives in
+  `docs/batch-state.md`「风格偏好层」— the single source for the shape —
+  and the tier ENUMERATION is pinned in `workflow-enforcer.mjs`
+  `STYLE_PREFERENCE.tiers`; its VALUES never enter the repo). No preference
+  file → the `保守` tier (the default: everything stays as declared —
+  in-batch four columns as declared, out-of-batch tickets confirmed one by
+  one). `标准` = `保守` + tickets registered in the batch state's 批外票清单
+  may be re-labelled and closed without per-ticket confirmation (the three
+  evidence elements required); registration is the HUMAN's call (at the
+  declaration, or an explicit later addition) — the agent never registers a
+  ticket into 批外票清单 itself, and a self-registered ticket has NO
+  authorization basis.
+  The tier names are an enumeration of exactly two (`保守`/`标准`); per-item
+  exceptions ride `加:` (allow beyond the tier) / `减:` (deny within it),
+  each with a one-line reason and a date. BOTH tiers exclude push. Like
+  in-batch pre-authorization, the preference changes WHEN a confirmation
+  happens, never the NATURE of the action — out-of-batch closing is still
+  an external action (D21). The preference file is HUMAN-write-only: the
+  agent may transcribe exactly the version the human approved VERBATIM,
+  then echo the written file in full + its absolute path, and treat it as
+  read-only from then on (Q4; same discipline as D51's "only touch what you
+  yourself created"). First batch declaration with no preference file →
+  ask ONCE whether to record it (the same `batchDeclare` face, zero new
+  hooks); a human stating an authorization preference anywhere with no file
+  on record → propose recording it once; never ask otherwise (Q5).
+- CLOSE-OUT STEP — BEFORE A BATCH IS DECLARED（收口步）: classify the open
+  backlog (series / needs-triage / ready-for-human / standalone), MERGE the
+  same-family tickets that one session or one edit would close together, and
+  only then allocate batches (cap 5 per batch). When counting "ready to start",
+  DROP the tickets that are already DONE but not yet closed — a frontier that
+  counts them overstates the queue (B-batch reading, 2026-10-19: 28 vs a true
+  25). Record the close-out in the batch state (the classification line + the
+  merge decisions) so the next session reads it instead of re-deriving it.
+- EXPLICITLY NOT GUARDED (D15): tickets live on GitHub and the local suite
+  NEVER queries the tracker. The ticket-side faces above — labels, close mode,
+  conflict-zero declarations — are verified at the batch-end review, not by a
+  guard. Guards cover only what is decidable in-repo: this body verbatim, the
+  batch-state shape, the frozen fixtures, the bundle, and the enforcer's
+  injection text.
+- Batch = the set of issues the human declares (usually one series,
+  e.g. #503 T1/T2/T3, or a to-tickets feature's ticket group). The
+  declaration must name the members and the end point (last ticket).
+- Inside a batch: work each ticket → local commit + local verification
+  (L1/L2/clippy/fmt/code-review) → NO per-ticket push. Closing an issue
+  may precede the remote CI (based on local verification + code-review);
+  the remote CI is confirmed once at the batch-end push.
+- ONE TICKET PER SESSION STILL HOLDS (human-mandated): batch mode never
+  changes the session grain — each ticket gets its own implement
+  session (one ticket + its verification), handing off through
+  batch-state.md. Never chain tickets inside one session on the grounds
+  that they are "same batch / related" — the gate-5 fold-in conditions
+  are NOT relaxed by batch mode. The batch-end wrap (summary → human
+  confirmation → push) is done by the last ticket's session as its
+  closing step, or by a dedicated wrap-up session; it is not a ticket.
+- AUTO-HANDOFF BETWEEN TICKETS (parent-side, same disease as D35 but on
+  the closing session): when a batch ticket completes (local closure —
+  gates green, code-review clean, batch-state.md updated), the session
+  AUTO-HANDOFFs to the next batch member — fresh mode + directed
+  section (the batch declaration IS the assignment; order is fixed),
+  without waiting for the human to say "open the next ticket". The
+  directed section carries the credential line 「凭据：批次 <宣告id>」
+  (#156/D52: the declaration recorded in batch-state.md — the existing
+  batch auto-handoff contract is unchanged). The
+  parent MUST declare `skill` on every directed handoff (tool-enforced:
+  an implement-phase ticket declares `implement`; a working-dir grill
+  ticket declares `grill-with-docs`) and the tool pins a `/<skill>`
+  invocation line above the title — DSH's skill system auto-injects the
+  contract, the child executes it and reads nothing (observed gap: two
+  batch handoffs went straight to implementation without loading
+  `implement`). A
+  "ticket done, 本会话收尾" close-out is NOT a stop-and-wait point
+  when batch-state.md names a clear successor. Exceptions: (a) the next
+  ticket carries an embedded decision gate needing human sign-off; (b)
+  the human explicitly asks to pause/check first; (c) this ticket is
+  the batch end point → go straight to the batch-end wrap (summary →
+  human confirmation → push). The child still starts with the directed
+  "按交接开工 X" declaration; the human still switches in the sidebar —
+  only the "please open the next ticket" round-trip is eliminated.
+- WAKE ORCHESTRATION (#163 — L2 first version = orchestrator polling;
+  #50 evidence base): an unattended batch orchestrator keeps a child
+  session's turn ALIVE by polling. The wake/deliverable/metering logic
+  is canonized in `lib/autonomy-orchestration.mjs` (single source; the
+  evaluation consumer `evals/autonomy/runner.mjs` imports it and carries
+  no embedded copy). Mechanics, all #50-measured: judge the turn by the
+  event stream's `turn/end`-after-`turn/start` seq order — NOT
+  `projections.running` (its shape lies mid-turn); while
+  `subagentCatalog` shows subagents in flight (`continuable` entries
+  with `subagentTiming.settledMs === 0`), a `turn/end` is NOT treated as
+  death — hold for the settle-and-resume (both measured chain breaks
+  were exactly this shape: the session ended its turn waiting on
+  parallel code-review subagents), the overall timeout stays the
+  backstop; once idle past a 6-minute grace with no subagent in flight
+  and the deliverable criteria unmet, ONE nudge fires (criteria faces,
+  #50 verbatim: A group = commit + evidence/green.txt +
+  .eval/{delivery-comment,decision-gate}.md; relay hop 1 = handoff doc
+  on disk; relay hop 2 = new commit — a nudge never covers a generic
+  "not done"); after MAX_NUDGE=1 it stops and reports honestly.
+  Metering is first-class (#50 retro candidate 4): every
+  orchestrator-proxied action — nudges, human relays — is counted and
+  carried in the conclusion; an autonomy reading never hides the
+  fallback inside implementation details.
+  Closing-step seam (#160: full-auto ends at the closing step): delivery
+  is automatic; push/close-ticket and other D21 external actions STOP
+  and ask. When the session asks (`ask_user_question` pending with no
+  later turn/start), the orchestrator RELAYS the question through its
+  `onAwaitingHuman` channel, injects the answer as the next prompt
+  (metered as a relay; one relay per pending question — never a
+  re-inject storm), or with no answerer stops at awaiting-human
+  carrying the question verbatim instead of letting the overall timeout
+  truncate it (the #50 chain3 break).
+- HANDOFF WRITING RULES (#159): a handoff document carries THIS SESSION'S
+  facts + pointers — never a restatement of repo discipline. AGENTS.md and
+  docs/agents/* are the single authority; a cached copy of a rule drifts
+  the moment they change (a real handoff carried 11 restated rules — most
+  already had an authoritative home). Three rules: (a) write only what
+  THIS session produced — commands actually run and their results,
+  environment anomalies, faces not verified (or not verifiable here),
+  implementation judgments the ticket did not specify, with the reason;
+  (b) every discipline is a pointer ("见 AGENTS.md / docs/agents/issue-tracker.md 等"),
+  never the rule text; (c) the handoff ends with a 「未验面」 section.
+  Skeleton (5-10 lines, expand each heading with session-local facts only):
+  ## 现场事实（本会话产生） — commands run + results, anomalies, blockers;
+  ## 票面没写的实现判断（+理由） — decisions only this session knows;
+  ## 未验面 — what was not run / not verifiable here and why;
+  ## 指针 — discipline pointers (AGENTS.md / docs/agents/issue-tracker.md 等), not
+  restated rules.
+  The appended 环境快照 git values and 产物清单 sha256 entries are machine-filled by
+  the handoff tool at generation time (git probes / hashing over the declared artifact
+  paths, #168) — the parent session never hand-fills them, and the manifest section
+  exists only when artifacts are declared (no placeholder lines). Directed handoffs
+  whose credential is a ticket number additionally get a 票面回读 section: the tool
+  reads title/state/labels from the tracker at generation time (#172) — transcribed
+  ticket fields lose to that section, and fields it cannot know are marked 生成后漂移
+  (the child re-reads the tracker; a failed read is marked loudly, never downgraded
+  to the transcribed values).
+- Batch end: after the summary gate, push all commits in one go; remote
+    CI all-green is the completion gate — red means unfinished batch work,
+    fix and re-verify.
+- SANDBOX BATCH MODE (sandcastle; opt-in — only when the human asks for
+    sandboxed/AFK parallel ticket runs, e.g. "沙箱批跑"): the main session
+    ORCHESTRATES, sandboxed DSH-headless workers EXECUTE; human judgment
+    at the edges (audit before launch, PR/digest review after), agents in
+    the middle.
+    (a) The orchestrating session is a dedicated wrap-up-style session —
+    it never edits ticket code inline; one-ticket-per-session governs the
+    implement grain, workers are external executors, not sessions.
+    (b) TICKET AUDIT BEFORE LAUNCH (input quality gate): a ticket enters
+    the queue only with a recorded audit — AC decidable (what "done"
+    means is checkable), touch-set declared (expected file set), the
+    proving verification command named (exact test/lint), forbidden-path
+    scan clean (migrations / money-path / governance semantics → demote
+    to the daytime batch lane), size estimate sane. Audit fails → the
+    ticket goes back for spec rework, never launches on vibes. Mechanical
+    pre-check: `.sandcastle/audit-ticket.mts` writes the audit record;
+    the orchestrator judges what the machine cannot.
+    (c) TOUCH-SET CHECK across the launched set: overlapping tickets are
+    serialized or merged into one — never run in parallel.
+    (d) Y-LANE SHAPE (audit-passed tickets): one podman sandbox + one
+    run per ticket on `branch` strategy; the merge gate is the
+    ORCHESTRATOR-run verification exec in the same sandbox (the exact
+    command the audit named — never the worker's self-report); a big
+    diff passes a simplify pass before that gate. Merge serially in
+    waves (3–5), rebase onto master one ticket at a time; a
+    conflicted/rejected ticket returns to its sandbox for one rework run
+    or goes to Bucket A. Every finished ticket persists a checkpoint
+    (state file: SHAs + verification output) and every worker runs under
+    a wall-clock watchdog — unattended batches resume from the
+    checkpoint, never from zero. Batch end still = one push through the
+    summary gate (Actions-minute economy, ADR-0002); PR-per-unit
+    (`--pr`) only where CI budget allows.
+    (e) Every sandbox launch is an EXTERNAL-ACTION GATE event (enforcer
+    matches `sandcastle`/`run-ticket`); the batch-end push still goes
+    through the summary gate. (f) Ticket exit evidence = audit record +
+    commit SHAs + verification exec output + the sandbox run log;
+    "worker said done" alone closes nothing. (g) WORKER CONTEXT: every
+    worker task injects the project's principles/gotchas digest (from
+    CONTEXT.md/AGENTS.md/ADRs) before the ticket body — workers read
+    before acting. (h) CLOSE-OUT AUDIT: wave merges go through the
+    `ticket-audit` skill (adversarial checklist, EXEMPT from ponytail —
+    a lazy auditor is how bad merges ship); ponytail rides with workers
+    (worker-context) and activates in main sessions only on explicit
+    invocation. Scaffolding: preset `sandcastle/templates/` — see
+    README「沙箱批跑」and ADR-0003.
+- ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
+  any bug/finding first lands in the issue tracker — create a new issue
+  or update the matching one — THEN process, THEN update the issue again
+  with the fix and its verification evidence ("update issue → process →
+  update issue"). Never silently fix inline, never silently ignore.
+  - Bucket A (blocks the current ticket or batch verification): create
+    a new issue → PAUSE the whole batch → wait for the human to decide.
+  - Bucket B (non-blocking, outside the batch): land the issue → fix
+    with full verification → update the issue → continue the batch.
+  - Bucket C (found at batch verification, e.g. red CI): locate the
+    issue/commit → update the issue → fix → re-verify → update the issue.
+  - Any plan/scope change follows the same "update issue → process →
+    update issue" loop.
+- BATCH-END SUMMARY GATE: before the batch ends, the summary must list
+  EVERY issue from the process (A/B/C, created and updated); the push
+  happens only after the human confirms that summary. The batch-end push
+  is therefore NOT pre-authorized — it is the normal report → confirm →
+  push flow, with a mandatory full-issue summary first. Every ticket
+  line in the wrap summary carries the three evidence elements (command,
+  exit code, evidence path — the test output itself counts); a line
+  missing any is BLOCKED, not done —
+  this adds evidence, it does NOT relax the CI confirmation (DONE and
+  the batch-end gate keep their full force).
+- AUTONOMY DIGEST (#49 Q6 — no new artifact, the wrap conclusion IS the
+  carrier): the wrap conclusion carries one fixed-format digest line per
+  autonomous action taken outside the declared batch authorization
+  (Bucket B / preference-tier moves):
+  `自主 <动作> · #<票号> · commit <sha> · 证据: <命令> → exit <code> · <输出路径>`.
+  In-batch actions are NOT re-copied into the digest — the batch-state
+  Progress rows already carry the three evidence elements; one pointer
+  line covers the batch. A digest line missing its evidence is marked
+  `未验证` and ESCALATED to an exception (D47), and a separate
+  `⚠ 无授权依据的动作` section lists every autonomous action that had no
+  authorization basis. Overreach/quality readings (#49 Q7 — no evaluation
+  rig): at each batch close-out, record one line — (count of
+  `⚠ 无授权依据的动作`) ÷ (total autonomous actions in the batch);
+  completion quality reads the existing O5 fresh-subagent spot check
+  after ticket closure; three batches' worth of these lines is the
+  production data AC③ asked for. Distortion readings (#163 batch-end
+  audit slot — async): a batch that ran auto-handoff hops records ONE
+  more line at close-out — per hop, the manifest re-verification
+  (claimed vs actual sha256) mismatches ÷ entries plus that hop's
+  orchestration metering (nudges, human relays); the line format is
+  canonized in `renderAuditReading` in `lib/autonomy-orchestration.mjs`
+  (single source — `docs/batch-state.md`「批末异步审计位」 carries the
+  slot, not a second copy of the format), and the B-side
+  verification-hit reading stays with the scoring face (rubric), not
+  the digest. Downstream seams, named so the readings
+  do not collide: #135 (L3 implementation) 承接 the #49 line format above —
+  its 越界三步止损 rides the digest's `⚠ 无授权依据的动作` section and
+  its ticket-face preconditions read the same 批外票清单; #163's batch-end
+  audit slot (失真率 readings) is a DIFFERENT reading from this overreach
+  line — neither replaces the other.
+- PUSH/COMMIT-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
+  richest retro material is the batch itself: many tickets, many
+  sessions, usually rework and handoff loss. Two obligations, keyed on a
+  REAL push or a REAL commit (a commit arms the LANDING face only):
+  - PER-TICKET PUSH OR COMMIT → WRITE CANDIDATES TO DISK: on a real push
+    or a real commit, run this session's retro at once and write the
+    candidates to .scratch/retro/<batch>-<session>.md — content = candidates
+    (ordered by severity) + evidence (command / output) + source (session id /
+    ticket number) + why it was not landed. `<session>` is the session id's
+    SHORT form — the 8-hex segment after `session-` (NOT the id's first 8,
+    which would be `dsh-matt`). CANDIDATES ONLY, never
+    land them (landing is still the human's call, D22/D27). Writing a
+    local candidate file is NOT an external action (D21 covers push /
+    closing / creating issues), so it is CONFIRMATION-FREE and
+    NON-BLOCKING: keep going, never stop the wrap to ask. Re-running in
+    the same session overwrites the same file (idempotent). A COMMIT arm
+    is per-session: once .scratch/retro/*-<session token>.md exists, later
+    commits (including --amend) stay silent — pure existence, no
+    batch-state parsing.
+  - BATCH-END PUSH → RUN THIS SESSION'S RETRO FIRST, THEN AGGREGATE: read
+    every landed file of the same batch, DEDUPE AND MERGE (the same
+    problem recurring across sessions is merged with a COUNT — that
+    merge is the whole point of aggregating), order by severity, and
+    present ONCE to the human, every line tagged with its source ticket
+    number / session. Never re-read the whole batch history at batch end
+    — the landed files replace that. Then wait for CI green (or the push
+    itself when the repo has no CI), and write the completion marker
+    `retro: done @ <commit>` into .scratch/batch-state.md. That marker says
+    the batch-end retro has RUN — it is NOT what keeps the presentation to
+    once per batch, because it is written BEFORE the batch-end push, so
+    every later session of the same batch would aggregate again. Two
+    markers, two facts: after actually PRESENTING the aggregation, APPEND
+    to the registry file `.scratch/retro/.aggregated` one line carrying
+    THIS batch's id (`<batch id> aggregated @ <date>`; the id is the
+    批次标识 / title id from .scratch/batch-state.md) — the per-batch
+    ENTRY is the CROSS-SESSION suppressor for THIS batch (每批至多一次
+    constrains the PRESENTATION, never the material): a later session of THIS batch does NOT aggregate
+    or re-present, while a NEW batch stays due (the check is "the current
+    batch id has an entry", never mere file existence — #140). A later
+    session in an already-aggregated batch does NOT aggregate or
+    re-present; it still runs its own retro and LANDS its candidates, so
+    no material is lost (不静默丢素材). Both markers are written by YOU
+    (this rule); the enforcer only READS them and writes no file. The
+    batch-state shape is
+    .scratch/batch-state.md per docs/batch-state.md.
+  - TRIGGER FACE — A REAL PUSH OR COMMIT CALL (宁严勿宽): the trigger
+    is the (toolName, argv) pair — the tool layer plus the command layer
+    of a shell tool, judged at the COMMAND POSITION (`git push` = landing
+    or aggregation; `git commit` = LANDING ONLY — it never aggregates,
+    and it is per-session: once the session's candidate file exists, later
+    commits are silently consumed by pure existence, no batch-state parsing).
+    This is what lets a batch ticket that never pushes leave material on
+    disk (#121). Words in a
+    session, in thinking, or in a document NEVER trigger it: merely
+    writing or discussing "推送 / push / git commit" — a plan, a retro
+    doc, a handoff body (this repo's handoffs are full of it) — must not
+    trigger anything. Indirect pushes (inside a script), option-laden commit
+    positions (git -C <dir> commit, git -c k=v commit) and PTY fragment
+    writes do NOT trigger either; they are DECLARED NOT COVERED, and a
+    false trigger costs more than a missed one (a wasted retro run plus
+    junk candidates polluting the batch-end aggregation), so the face
+    stays narrow and never grows a keyword fallback.
+  - FALLBACK — NEVER DROP MATERIAL SILENTLY: the injection rides the next
+    prompt assembly, so a push OR A COMMIT that is a session's LAST action
+    can lose its reminder, and indirect / PTY pushes plus option-laden
+    commit positions (git -C <dir> commit) sit outside the trigger face by
+    construction. Before session/disposed, probe FACTS — `git log
+    origin/<branch>..HEAD` and `git status -sb` — and when the probe says
+    "pushed/committed but nothing landed", re-run the retro or record a
+    marker. Silent loss of retro material is the one failure this rule
+    forbids.
+- BATCH DECLARATION INITIALIZES THE STATE FILE (this is what keeps batches
+  from piling up): when the human declares a batch, write
+  .scratch/batch-state.md — 成员 / 结束点 / 预授权清单 / 收口记录 / the progress
+  log / the unpushed-commit list — in the shape given by docs/batch-state.md
+  (the single source of truth for that shape; do not re-derive the fields
+  here). Update it after every ticket; each Progress row carries the evidence
+  pointer — proving command + exit code + evidence path (the test output
+  itself counts; no separate artifact needed); a row missing any element is
+  BLOCKED, not done. You must
+  always know you are in a batch, what is left, and where the last push
+  checkpoint was.
+- Docs (CHANGELOG/docs/AGENTS.md) commit locally only, ride along with
+  the next code push.
+- Anti-pileup guardrails: (a) a batch contains only its declared
+  members — adding a ticket requires an explicit human extension; (b)
+  at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push
+  checkpoint or permission to continue; (c) a batch must end in a push —
+  never finish a batch and leave it unpushed.
+- BATCH ALLOCATION — how existing issue backlogs become batches (the
+  planning side of batch mode; applies to any repo whose open issues
+  were never declared as batches):
+  - Never batch the whole backlog. Group by existing series (titles
+    usually carry it: #503 T1/T2/T3, ADR-045 rebuild stages); cap each
+    batch at 5 tickets (same ceiling as the anti-pileup guardrail).
+  - Triage before allocation: needs-triage issues must NOT enter a
+    batch (batch planning needs testable ACs and a decided priority);
+    a triage pass or the human's call comes first.
+  - Issues waiting on the human (ready-for-human) stay out of agent
+    batches; unrelated standalone tickets keep the per-issue rhythm.
+    Batching is a tool (CI minutes, unattended runs, series delivery),
+    not a backlog obligation.
+  - When a session opens on a repo with an un-batched backlog, CLASSIFY
+    it (series / needs-triage / ready-for-human / standalone) and
+    PROPOSE batches to the human instead of drifting per-issue.
+  - A batch declaration names members + end point (last ticket) + AC
+    check; that declaration is the license for autonomous execution.

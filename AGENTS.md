@@ -30,7 +30,7 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
 - **项目层（跨两仓）**：本工作区 = preset 仓 + 邻仓 `dsh-shell-host`；跨仓 tracker 路由、
   triage 标签映射、双域文档地图在 `.zcode/agents/`（项目作用域，git 排除，不进仓）
-- 决策与术语：`CONTEXT.md`（D1–D54）、`docs/adr/`
+- 决策与术语：`CONTEXT.md`（D1–D55）、`docs/adr/`
 - **会变的东西别抄当前值**：成员名单 / 当前读数 / 编号这类跨会话会变的东西，文档里写**现查命令**（或区间、
   指针），不抄当前值 —— 抄一份就是第二份清单，它一定会腐。现查命令的正则**照抄判据的正则**（手写简化
   版会静默漏报：#129 实测 `^ \* @slow` 比判据 `^[ \t]*\*[ \t]*@slow` 窄，标记写成 `  * @slow` 就漏掉）。
@@ -48,7 +48,7 @@ Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 - 源码部署 / 运行时可达性（`dsh` 从哪来；PATH 无 dsh ≠ 运行时缺席）/ **读上游源码查契约与先例**（系统提示里的 `app.asar\dsh\` 读不了；可读检出与 live 面的第二个 DSH_HOME 见 §3.1）/ 隔离契约 / 构建坑（ucrt64、宿主锚、clean、端口冲突）：`docs/dev-environment.md`
 - 驱动实例 / 读耐久证据 / RPC 参数名 / mock LLM：`docs/dsh-runtime-cheatsheet.md`
 - 沙箱批跑（opt-in）：`sandcastle/README.md`
-- **handoff 写法**：只写本会话现场事实 + 指针，不复述仓库纪律——写法三条与骨架见 workflow-body.txt「HANDOFF WRITING RULES」节（#159）
+- **handoff 写法**：只写本会话现场事实 + 指针，不复述仓库纪律——写法三条与骨架见 workflow-component-batch.txt「HANDOFF WRITING RULES」节（#159；#58 组件化后该节随 batch 组件入此文件）
 
 ## home 安全（硬规则）
 

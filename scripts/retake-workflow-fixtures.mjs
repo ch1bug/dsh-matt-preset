@@ -6,15 +6,21 @@
  * `persona-prefix-v1.txt` 是「正文随文本政策有意变更」时**必须同步重取**的基线
  * （`verify-workflow-core` 的 L1、`verify-workflow-core-render` 的 R4、
  * `verify-workflow-profiles` 的 AC1/AC3、`verify-batch-state` 的 C8 都在读它们）。
- * 重取的正确形态是**骨架往返**：`parseSections` → `joinSections`（骨架的恒等变换），
- * 而不是手抄一份新正文——手抄出来的是**第二份手写清单**（brief §3.1 问句①）。
+ * 重取的正确形态是**机械拼装**而不是手抄一份新正文——手抄出来的是**第二份手写
+ * 清单**（brief §3.1 问句①）。
  *
- * 两道自证（任一不成立就停下，绝不静默改写）：
+ * #58 起基线 = **组件开 standard 的注入文本**（默认 components = 全部注册组件——
+ * 与改动前行为一致），重取直接取 `workflow-core.profileBody('standard')`（机制
+ * 自己拼装，组件 delta 的组成变化自动跟随），不再手写骨架+组件的二次拼装。
+ *
+ * 自证（任一不成立就停下，绝不静默改写）：
  *   ① **对**（结构关系）：磁盘上的 `persona-prefix-v1.txt` == `prefix` +
  *      `"\n\n"` + `workflow-body-v1.txt`。不成立 → 有人手改过其中一份。
  *   ② **变换**（剥标记）：基线存的是**渲染后的正文**（`@@ <id>` 标记行不进模型），
- *      所以 `joinSections(parseSections(当前正文))` 必须比带标记的源**短**、且一行
+ *      所以骨架的 `joinSections(parseSections(骨架))` 必须比带标记的源**短**、且一行
  *      `@@` 都不含。不成立 → 解析/拼接语义变了，重取会写坏。
+ *   ②b **组合**（#58）：重取对象 `profileBody('standard')` 必须无标记、比骨架往返
+ *      长（batch 组件节在场）、且含 batch 节首行特征。不成立 → 组件组装面变了。
  * 行尾沿用 `workflow-body.txt` 的形态（CRLF）。
  *
  * 用法：
@@ -76,18 +82,29 @@ async function main(argv) {
   }
   console.log(`✓ 自证②：骨架往返剥标记（源 ${bodyText.length} → 渲染 ${next.body.length} chars，${next.sections} 节）`)
 
-  const nextPersona = prefix + '\n\n' + next.body
-  if (next.body === diskBody && nextPersona === diskPersona) {
+  // 自证 ②b（#58 组件组合面）：重取对象 = 组件开 standard 注入文本——必须无标记、
+  // 比骨架往返长（batch 组件节在场）、且含 batch 节首行特征。任一不成立 = 组件
+  // 组装面变了，重取会把缺组件的文本写进基线。
+  const composed = await core.profileBody('standard')
+  if (hasMarker(composed) || composed.length <= next.body.length || !composed.includes('BATCH MODE')) {
+    console.error('✗ 自证②b 失败：profileBody("standard") 组合面异常（含 "@@ " / 不比骨架往返长 / 缺 batch 组件节）')
+    console.error(`  骨架往返 ${next.body.length} chars → 组合 ${composed.length} chars；先修 workflow-core.mjs 再重取`)
+    return 1
+  }
+  console.log(`✓ 自证②b：组件开组合 = 重取对象（骨架往返 ${next.body.length} → 组合 ${composed.length} chars，batch 组件节在场）`)
+
+  const nextPersona = prefix + '\n\n' + composed
+  if (composed === diskBody && nextPersona === diskPersona) {
     console.log('✓ 基线已与当前正文同步（无需重取）')
     return 0
   }
   if (checkOnly) {
-    console.error(`✗ --check：基线未同步（workflow-body-v1 ${diskBody.length} → ${next.body.length} chars）`)
+    console.error(`✗ --check：基线未同步（workflow-body-v1 ${diskBody.length} → ${composed.length} chars）`)
     return 1
   }
-  writeFileSync(BODY_FIXTURE, crlf(next.body), 'utf8')
+  writeFileSync(BODY_FIXTURE, crlf(composed), 'utf8')
   writeFileSync(PERSONA_FIXTURE, crlf(nextPersona), 'utf8')
-  console.log(`✓ 重取：workflow-body-v1.txt ${diskBody.length} → ${next.body.length} chars`)
+  console.log(`✓ 重取：workflow-body-v1.txt ${diskBody.length} → ${composed.length} chars`)
   console.log(`✓ 重取：persona-prefix-v1.txt ${diskPersona.length} → ${nextPersona.length} chars`)
   return 0
 }

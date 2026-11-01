@@ -22,11 +22,17 @@
  * AC1: `profile: standard` is BYTE-IDENTICAL to the frozen baseline
  *      (tests/fixtures/workflow-body-v1.txt — captured before #55 and
  *      re-taken at #85 with the workflow text-policy change: an intentional
- *      baseline move, not drift; ADR-0010 precedent).
+ *      baseline move, not drift; ADR-0010 precedent). #58: the baseline is
+ *      the COMPONENT-ON standard render (default components = all registered),
+ *      so the batch component being mounted by default keeps AC1 green with
+ *      the SAME fixture bytes — no re-take.
  * AC2: `profile: cordis` injects the adapted text under a creator preset,
  *      with the seven gates present and unmodified in wording.
  * AC3: the delta structure duplicates no workflow section between profiles —
  *      the seven gates are edited in exactly one place (the skeleton).
+ * C-series (#58): the batch component toggle — off = no batch sections reach
+ *      the composed text (whatever carried them); on = byte-identical to the
+ *      baseline; an unknown component name is loud.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -71,7 +77,7 @@ try {
   report('WORKFLOW-PROFILES VERIFY')
 }
 
-const seam = ['profileBody', 'parseSections', 'composeSections', 'joinSections', 'PROFILES', 'DEFAULT_PROFILE']
+const seam = ['profileBody', 'parseSections', 'composeSections', 'joinSections', 'PROFILES', 'DEFAULT_PROFILE', 'COMPONENTS', 'DEFAULT_COMPONENTS']
 const missingSeam = seam.filter(k => core[k] === undefined)
 if (missingSeam.length === 0) ok('M. workflow-core.mjs exposes the profile seam', seam.join(', '))
 else {
@@ -85,6 +91,14 @@ else bad('P1. default profile', String(core.DEFAULT_PROFILE))
 if (Object.hasOwn(core.PROFILES ?? {}, 'standard') && Object.hasOwn(core.PROFILES ?? {}, 'cordis'))
   ok('P2. profiles registered', Object.keys(core.PROFILES).join(', '))
 else bad('P2. profiles registered', JSON.stringify(core.PROFILES))
+
+// #58: the batch component is registered and mounted by DEFAULT (the
+// pre-#58 behavior — standard stays byte-identical to the frozen baseline).
+if (Array.isArray(core.DEFAULT_COMPONENTS) && core.DEFAULT_COMPONENTS.length > 0 &&
+    Object.hasOwn(core.COMPONENTS ?? {}, core.DEFAULT_COMPONENTS[0]) &&
+    Array.isArray(core.COMPONENTS[core.DEFAULT_COMPONENTS[0]].sectionIds))
+  ok('P2b. components registered and mounted by default', `${core.DEFAULT_COMPONENTS.join(', ')} (sectionIds: ${core.DEFAULT_COMPONENTS.map(n => core.COMPONENTS[n].sectionIds.join('|')).join(', ')})`)
+else bad('P2b. component registry', JSON.stringify({ DEFAULT_COMPONENTS: core.DEFAULT_COMPONENTS, COMPONENTS: Object.keys(core.COMPONENTS ?? {}) }))
 
 // ── AC1: standard == the frozen baseline (verbatim) ──────────────────────────
 const standard = await core.profileBody('standard')
@@ -105,9 +119,13 @@ if (parsed.sections.length >= 10 && new Set(ids).size === ids.length)
   ok('S2. shared skeleton declares unique sections', `${ids.length}: ${ids.join(', ')}`)
 else bad('S2. skeleton sections unique', JSON.stringify(ids))
 
-if (core.joinSections(parsed.sections, parsed.trailingNewline) === BASELINE)
-  ok('S3. skeleton format is lossless (markers strip back to the baseline bytes)')
-else bad('S3. lossless rejoin', divergence(core.joinSections(parsed.sections, parsed.trailingNewline), BASELINE))
+// #58: the skeleton rejoins to the COMPONENT-OFF standard render — the batch
+// section lives in the component file now, so the baseline bytes come from the
+// composition, not the skeleton alone (C2 below pins component-on = baseline).
+const componentOff = await core.profileBody('standard', [])
+if (core.joinSections(parsed.sections, parsed.trailingNewline) === componentOff)
+  ok('S3. skeleton format is lossless (markers strip back to the component-off standard bytes)')
+else bad('S3. lossless rejoin', divergence(core.joinSections(parsed.sections, parsed.trailingNewline), componentOff))
 
 const mainBody = parsed.sections.find(s => s.id === 'main-flow')?.text ?? ''
 const overridden = core.composeSections(parsed.sections, [{ id: 'main-flow', after: null, text: 'OVERRIDE MAIN FLOW' }])
@@ -153,16 +171,25 @@ if (shippedDeltas.length > 0 && uncovered.length === 0)
   ok('P4. every shipped delta is covered by the payload rule (installer expandEntry)', shippedDeltas.join(', '))
 else bad('P4. payload coverage', uncovered.length > 0 ? `not covered: ${uncovered.join(', ')}` : 'no delta files found')
 
+// #58: the component file ships with the same payload rule.
+if (covered.has('workflow-component-batch.txt'))
+  ok('P4b. the batch component file is covered by the payload rule')
+else bad('P4b. component payload coverage', 'workflow-component-batch.txt not covered by package.json files')
+
 // ── AC3: the delta structure duplicates nothing ─────────────────────────────
 // (Mechanism-level, independent of the render: compose the shipped cordis
 // delta onto the skeleton and count bodies. A profile that copied a shared
 // section would show the skeleton body twice — or leave the skeleton body
-// behind an override.)
+// behind an override. #58: the SHARED text = skeleton + the batch component
+// file — its section is composed in by default, so it is judged with the
+// skeleton sections.)
 const CORDIS_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-cordis.txt', 'utf8'))
+const COMPONENT_RAW = lf(readFileSync(REPO + '/workflow-component-batch.txt', 'utf8'))
 const delta = core.parseSections(CORDIS_DELTA_RAW)
+const componentDelta = core.parseSections(COMPONENT_RAW)
 const skeletonIds = ids
 const deltaIds = delta.sections.map(s => s.id)
-const cordisSections = core.composeSections(parsed.sections, delta.sections)
+const cordisSections = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections])
 const cordisText = core.joinSections(cordisSections, parsed.trailingNewline)
 const countOf = (haystack, needle) => (needle === '' ? 0 : haystack.split(needle).length - 1)
 
@@ -171,7 +198,8 @@ if (new Set(composedIds).size === composedIds.length)
   ok('AC3a. composed cordis sections carry unique ids', `${composedIds.length} sections`)
 else bad('AC3a. composed ids unique', JSON.stringify(composedIds))
 
-const shadowed = skeletonIds.filter(id => countOf(cordisText, parsed.sections.find(s => s.id === id).text) !== 1)
+const sharedSections = [...parsed.sections, ...componentDelta.sections]
+const shadowed = sharedSections.filter(s => countOf(cordisText, s.text) !== 1).map(s => s.id)
 if (shadowed.length === 0) ok('AC3b. every shared section appears exactly once (override or untouched — never both)')
 else bad('AC3b. shared sections duplicated/shadowed', shadowed.join(', '))
 
@@ -253,4 +281,78 @@ if (override.includes('CUSTOM custom-model.') && !override.includes('MAIN FLOW')
   ok('AC2h. config.text still overrides the profile entirely (#54 escape hatch intact)')
 else bad('AC2h. config.text override', override.slice(0, 200))
 
-report('WORKFLOW-PROFILES VERIFY (mechanism + AC1/AC2/AC3)')
+// ── C: the batch component toggle (#58 — the ticket's substantive half) ────
+// The batch-mode rule block (D31–D33) moved out of the skeleton into
+// workflow-component-batch.txt, injected as a COMPONENT: off = no batch
+// sections in the composed text (whatever carried them — the component delta
+// or a profile's override); on = byte-identical to the frozen baseline.
+const batchSectionText = componentDelta.sections.find(s => s.id === 'batch-mode')?.text ?? ''
+
+// C1: OFF = no batch sections reach the text (the component section body is
+// absent wholesale — judged on the full section text, not a keyword).
+const componentOffAgain = await core.profileBody('standard', [])
+if (batchSectionText !== '' && !componentOffAgain.includes(batchSectionText) &&
+    !componentOffAgain.includes('STYLE PREFERENCE LAYER') && !componentOffAgain.includes('WAKE ORCHESTRATION'))
+  ok('C1. components:[] strips the whole batch section from the standard text', `${componentOffAgain.length} chars (component section ${batchSectionText.length} chars absent)`)
+else bad('C1. component-off text', batchSectionText === '' ? 'component delta unreadable' : 'batch section content still present')
+
+// C2: ON = verbatim-equivalent to the original text (the frozen baseline),
+// and naming ['batch'] explicitly renders identically to the default mount.
+const componentOn = await core.profileBody('standard', ['batch'])
+if (componentOn === BASELINE && componentOn === standard)
+  ok('C2. components:[batch] is verbatim-identical to the frozen baseline (and to the default mount)', `${componentOn.length} chars`)
+else bad('C2. component-on text', divergence(componentOn, BASELINE))
+
+// C3: an unknown component name is LOUD (a typoed switch must never silently
+// do nothing) — profileBody, resolveComponents AND the apply mount all throw
+// (apply resolves components before registering the handler, so the mount
+// fails loudly instead of degrading to an assembly warn).
+let c3BodyThrew = false
+let c3ResolveThrew = false
+let c3ApplyThrew = false
+try { await core.profileBody('standard', ['nope']) } catch { c3BodyThrew = true }
+try { core.resolveComponents(['nope']) } catch { c3ResolveThrew = true }
+try { core.apply({ on() {} }, { components: ['nope'] }) } catch { c3ApplyThrew = true }
+if (c3BodyThrew && c3ResolveThrew && c3ApplyThrew)
+  ok('C3. an unknown component name throws at all three seams incl. the apply mount (loud, never a silent no-op)')
+else bad('C3. unknown component name', `profileBody threw=${c3BodyThrew} resolveComponents threw=${c3ResolveThrew} apply threw=${c3ApplyThrew}`)
+
+// C4/C5/C6: the toggle applies under EVERY profile, and the composed section
+// ORDER is unchanged from the pre-#58 text — the batch section lands after a
+// profile's insert chain (same anchor), never between its links. The order
+// tables are written here on purpose, independent of the delta files
+// (deriving them from the deltas would make the check tautological).
+const expectedOrder = (inserted) => [
+  'main-flow', 'workflow-enforcement', 'enforcement-done', 'enforcement-tiering', 'enforcement-recovery',
+  ...inserted, 'batch-mode', 'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
+  'human-communication', 'on-ramps', 'health', 'standalone', 'utilities', 'precondition', 'initialization',
+]
+
+const cordisComposed = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections])
+const cordisOrder = cordisComposed.map(s => s.id)
+if (cordisOrder.join(',') === expectedOrder(['creator-context', 'creator-gate-extension', 'creator-inspect-first']).join(','))
+  ok('C4. cordis + batch component: section order unchanged (component lands after the creator chain)', `${cordisOrder.length} sections`)
+else bad('C4. cordis composed order', cordisOrder.join(', '))
+
+const cordisOffText = core.joinSections(cordisComposed.filter(s => s.id !== 'batch-mode'), parsed.trailingNewline)
+if (batchSectionText !== '' && !cordisOffText.includes(batchSectionText) && cordisOffText.includes('CREATOR CONTEXT'))
+  ok('C5. components:[] under cordis: creator sections stay, batch section goes')
+else bad('C5. cordis component-off', batchSectionText === '' ? 'component delta unreadable' : 'batch content present / creator content lost')
+
+const PTC_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-ptc.txt', 'utf8'))
+const ptcDelta = core.parseSections(PTC_DELTA_RAW)
+const ptcComposed = core.composeSections(parsed.sections, [...ptcDelta.sections, ...componentDelta.sections])
+const ptcOrder = ptcComposed.map(s => s.id)
+if (ptcOrder.join(',') === expectedOrder(['ptc-execution-shape', 'ptc-loop-surface', 'ptc-orchestration', 'ptc-gate-scope']).join(','))
+  ok('C6. ptc + batch component: section order unchanged (component lands after the ptc chain)', `${ptcOrder.length} sections`)
+else bad('C6. ptc composed order', ptcOrder.join(', '))
+
+const MIN_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-minimal.txt', 'utf8'))
+const minDeltaRaw = core.parseSections(MIN_DELTA_RAW)
+const minBatchText = minDeltaRaw.sections.find(s => s.id === 'batch-mode')?.text ?? ''
+const minimalOff = await core.profileBody('minimal', [])
+if (minBatchText !== '' && !minimalOff.includes(minBatchText))
+  ok('C7. components:[] under minimal: the profile\'s own batch override disappears too', `${minimalOff.length} chars`)
+else bad('C7. minimal component-off', minBatchText === '' ? 'minimal delta unreadable' : 'minimal batch section still present')
+
+report('WORKFLOW-PROFILES VERIFY (mechanism + AC1/AC2/AC3 + components)')
