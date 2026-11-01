@@ -26,6 +26,34 @@ Orthogonal batch-side labels: `scheduled` / `no-batch` / `tracking` (#141); `P0`
 
 Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
 
+## goal 规约：等 human 介入的流程不建 goal（#94）
+
+goal 的自动续跑机制假设「有可自主推进的工作」；**阻塞点在 human 手里的流程不满足这个假设**
+——「有目标」不等于「该自动续跑」。硬建 goal 只会每轮空转：先声明「在等某个问题的回答」，
+再找边角料干（查事实、写 `.scratch` 记录）——那不是进度，是烧轮次。
+
+**建 goal 前先问一句（判定问句）**：
+
+> **这个目标的推进，是否必须等 human 的中间输入？**
+> 是 → **不建 goal**：用普通对话轮推进，把待答项写进工作区记录（如 `.scratch`），
+> 等 human 答了再走下一步。
+> 否 → 建 goal，让自动续跑接管。
+
+**四类典型不建 goal（或必须暂停 goal）的流程**：
+
+1. **设计质询**（grilling / grill-with-docs 等评审式访谈）：每轮 frontier 依赖 human 决策，
+   「问 → 等 human 答 → 再问」是流程本体，不是可以后台挂起的子任务。
+2. **需 human 拍板的判断题**：triage 三选一、优先级翻转、AC 改写、范围扩张——拍板权在
+   human，agent 只能备好材料等决策。
+3. **外部动作门**（D21 口径，定义见 `CONTEXT.md`）：push / 装机 / 发版 / 打 tag / 建票等
+   外部可见或难恢复的动作，一律「验证完 → 报告 → 等确认」；自动续跑不能替代确认。
+4. **等待外部环境的验证**：无 podman 的 e2e、真 LLM 端点这类环境侧断言（当前恒 SKIP 的一类）
+   ——等的是环境就位，不是 agent 能推进的工作。
+
+**何时可以建**：流程进入**可自主阶段**后（例如「口径已定 → 实现 → 跑门禁到绿」），
+「有可自主推进的工作」的假设成立，此时再建 goal。跨过 human 拍板点后建，比一开始建
+然后空转便宜——晚建不丢东西，空转烧的是真轮次。
+
 ## Repo docs（导航指针；细节在各文件里，勿在此复述）
 
 - **项目层（跨两仓）**：本工作区 = preset 仓 + 邻仓 `dsh-shell-host`；跨仓 tracker 路由、
