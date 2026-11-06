@@ -60,7 +60,17 @@ async function runEnv(label, installArgs) {
 
   // 3a. 全量声明注册：broken 只允许 harness 缺的 host 服务（waiting for …），
   //     不允许 payload 错误（never started / 加载失败 = 安装副本坏了）。
-  const { broken: broken0 } = await ctx.agentPresets.resolve('matt-installed')
+  //     0.2.2-rc.1 起 resolve 对未注册 id 抛 agent-preset/not-found（rc.2 为静默）——
+  //     registration 走 Service.init 异步落定，先等 id 进册再读 broken（#176 重锚）。
+  let broken0
+  for (let i = 0; i < 50; i++) {
+    try { broken0 = (await ctx.agentPresets.resolve('matt-installed')).broken; break }
+    catch (error) {
+      if (error?.code !== 'agent-preset/not-found') throw error
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+  if (broken0 === undefined) throw new Error('matt-installed never registered within 5s')
   // loader 异步启动插件：轮询 settle，直到 broken 消失或只剩 waiting-for 行
   let broken = broken0
   for (let i = 0; i < 20 && broken?.split('\n').filter(Boolean).some((l) => !/: waiting for /.test(l)); i++) {

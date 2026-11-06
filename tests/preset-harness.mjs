@@ -34,6 +34,15 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+// 0.2.2-rc.1：base 组合新增 tool-executor-native 行（#176 重锚）——执行器必须显式装载，
+// 否则 tools.execute 一律 ToolExecutorUnavailableError（上游 packages/core/tool-executor-native；
+// 包导出面是命名导出，无 default，故照 StorageDomainPlugin 的形状组插件对象）。
+import * as ToolExecutorNativeMod from '@deepseek-ai/dsh-tool-executor-native'
+const ToolExecutorNative = {
+  name: ToolExecutorNativeMod.name,
+  apply: ToolExecutorNativeMod.apply,
+  inject: ToolExecutorNativeMod.inject,
+}
 
 export { default as AgentPreset } from '@deepseek-ai/dsh-agent-preset'
 export { default as AgentPresetRegistry } from '@deepseek-ai/dsh-agent-preset-registry'
@@ -103,6 +112,7 @@ export async function bootHarness(presets = [], dataRoot) {
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(ToolExecutorNative)
   await ctx.plugin(Commands)
   await ctx.plugin(SubprocessLocal)
   await ctx.plugin(AgentRegistry)
@@ -121,6 +131,36 @@ export async function bootHarness(presets = [], dataRoot) {
     await ctx.plugin(WorkspaceRegistry)
   }
   for (const { id, plugins } of presets) await ctx.plugin(AgentPreset, { id, plugins })
+  // 0.2.2-rc.1：服务改异步 Service.init——registry 的 provide、各 preset 的注册、agent
+  // factory 的 setFactory 都落在 `await ctx.plugin()` 之后（rc.2 是同步 apply，#176 重锚）。
+  // 返回前统一等三件事，消费方（resolve/mount/create）免竞态；5s 上界，缺席即响亮。
+  const want = presets.map((p) => p.id)
+  const deadline = Date.now() + 5_000
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  // ① registry 服务本身（零 preset 启动也会在这里等，别让消费方裸踩 undefined）
+  for (;;) {
+    if (ctx.agentPresets !== undefined) break
+    if (Date.now() > deadline) throw new Error('preset-harness: agentPresets service not provided within 5s')
+    await sleep(25)
+  }
+  // ② 全部 preset id 进册
+  for (;;) {
+    const have = new Set((await ctx.agentPresets.list()).map((row) => row.id))
+    if (want.every((id) => have.has(id))) break
+    if (Date.now() > deadline) {
+      throw new Error(`preset-harness: presets not registered within 5s (want ${want.join(', ')}, have ${[...have].join(', ') || 'none'})`)
+    }
+    await sleep(25)
+  }
+  // ③ agent factory（AgentLoop.init：两个 projection 注册之后才 effect setFactory；
+  //    inboxProjectionHandle 赋值后的下一条语句就是 setFactory，同一续体内同步执行，
+  //    故「看到 handle + 让出一个宏任务」即保证 factory 已落。）
+  for (;;) {
+    if (ctx.agentLoop?.inboxProjectionHandle !== undefined) break
+    if (Date.now() > deadline) throw new Error('preset-harness: agent factory not initialized within 5s')
+    await sleep(25)
+  }
+  await sleep(0)
   return ctx
 }
 

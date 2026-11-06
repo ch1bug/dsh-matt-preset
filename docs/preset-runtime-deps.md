@@ -21,8 +21,8 @@ core 包 + opt-in row，`tool-ralph` 是 in-box opt-in，两条都被它一致�
 
 | tier | 判据 | 例 |
 | --- | --- | --- |
-| **core-row** | row `id` 在官方出货 preset（`@deepseek-ai/dsh-web-app` tarball `presets/{standard,ptc,minimal,cordis}.patch.yml`）**或**出货宿主组合（`dsh-base` / `dsh-web-app` 的 `cordis.patch.yml`）中有**同 id 声明** | `persona` / `tool-fs` / `workflow-ptc`（base）；`tool-cordis`（官方 cordis 档）；`tool-presentation`（官方 ptc 档） |
-| **in-box opt-in** | 能力包随发布面 `@deepseek-ai/dsh` 的 dependencies 默认安装，但由 OPTIONAL_BUNDLES 控制默认**未启用**（Plugins 页开）；官方 preset/宿主无同 id row | `tool-ralph`；`str-replace-editor`（row 级） |
+| **core-row** | row `id` 在官方出货 preset（`@deepseek-ai/dsh-web-app` tarball `presets/{standard,ptc,minimal,cordis}.patch.yml`）**或**出货宿主组合（`dsh-base` / `dsh-web-app` 的 `cordis.patch.yml`）中有**同 id 声明** | `persona` / `tool-fs` / `workflow-ptc`（base）；`tool-cordis`（官方 cordis 档）；`tool-web`（官方 standard 档） |
+| **in-box opt-in** | 能力包随发布面 `@deepseek-ai/dsh` 的 dependencies 默认安装，但由 OPTIONAL_BUNDLES 控制默认**未启用**（Plugins 页开）；官方 preset/宿主无同 id row | `tool-ralph`；`str-replace-editor` / `tool-presentation`（row 级） |
 | **non-in-box** | 包不在发布面 dependencies，须另行安装 | `tool-subagent-codex` / `tool-subagent-claude-code`（常驻 `disabled: true` 声明位，opt-in 才激活） |
 | **in-repo** | `name` = `dsh-matt-preset/<file>.mjs`，随本 preset 包分发 | `workflow-core` / `workflow-enforcer` / `lang-enforcer` / `handoff-tool` |
 | **local-only** | 仅开发机桌面 profile 有——**不得进 roster** | 12 个 `experimental-*` 中不在发布面 dependencies 的 7 个；`danger-full-access` 沙箱 |
@@ -62,6 +62,18 @@ roster 里 `tool-ralph` 行（`agent.cordis.yml` 309–313，四档共用基线�
 `official-presets-roster-v1.json` 的 `registeredDiff.reasons.matt-str-replace-editor`）。
 包随默认安装提供、无额外启用步骤；若上游将来把该 row 收回 opt-in 分发，依赖链钉子
 （R4 的 `officialRows` 断言）会红。
+
+## tool-presentation（core 包 + opt-in row，matt-ptc 有意常驻）
+
+包 `@deepseek-ai/dsh-agent-tool-presentation` 是 core（发布面 dependencies）。
+**0.2.2-rc.1 起官方 ptc 档不再挂该 row**（原位换成 `tool-executor-ptc`——本包在 rc.1
+的依赖恰为 `dsh-tool-executor-ptc` + `dsh-tool-executor-native`，两者均入出货宿主
+组合 hostRows，故包能力随默认安装照常可用）；官方四档与宿主组合均无同 id row。
+matt-ptc **有意常驻挂它**（#116 交付的方向 A；#117 拍板 b 保留增量，登记于
+`official-presets-roster-v1.json` 的 `registeredDiff.reasons.matt-tool-presentation`
+与 `official-tool-executor-ptc`——matt 经本行（`mode: ptc` config）间接持有同执行器
+能力，不重复直挂官方新行）。若上游将来撤包或改依赖链，R1（无档可归）/ R4（依赖链
+断言）会红。
 
 ## cordis 档正文的能力前提（B 层：不得让缺能力 = 做不到）
 

@@ -483,15 +483,35 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 
 ## 2. 宿主锚点（ADR-0008）
 
-跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.1-rc.2-r1` ↔ 宿主 tag
-`dsh-v0.2.1-rc.2`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
+跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.2-rc.1-r1` ↔ 宿主 tag
+`dsh-v0.2.2-rc.1`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
 与锚不符 —— 必须显式 checkout tag。
 
 | 锚 | 宿主 tag | tag 指向的 commit | 落地 |
 | --- | --- | --- | --- |
-| **当前** | `dsh-v0.2.1-rc.2` | `687f282e` | 本条（2026-10-17，rc.2 追加） |
-| 上一锚 | `dsh-v0.2.1-rc.1` | `1600d8a1` | #88（2026-10-17） |
-| 上二锚 | `dsh-v0.2.0-rc.2` | `639ed015` | #42/#22 线 |
+| **当前** | `dsh-v0.2.2-rc.1` | `66491b05` | #176（2026-11-06） |
+| 上一锚 | `dsh-v0.2.1-rc.2` | `687f282e` | 本文件历史（2026-10-17，rc.2 追加） |
+| 上二锚 | `dsh-v0.2.1-rc.1` | `1600d8a1` | #88（2026-10-17） |
+| 上三锚 | `dsh-v0.2.0-rc.2` | `639ed015` | #42/#22 线 |
+
+**rc.2 → 0.2.2-rc.1 的漂移面（2026-11-06 实测取证，#176；跨了 rc.3/rc.4/rc.5 与
+0.2.2-alpha.1–3，源读数 = 各 tag 的 npm 包 exports + 上游树，非逐 commit compare——
+2623 commits 已超 compare API 的 300 文件截断）**：
+
+- **`@deepseek-ai/dsh-tool-subagent-control`：`./list-agents` 子路径 exports 在
+  `dsh-v0.2.2-alpha.1` 起移除**（`dsh-v0.2.1-rc.5` 尾版还在；rc.1 主模块
+  `src/index.ts:28` 无条件 `registerListAgents(ctx)`，上游 standard.patch.yml 只挂
+  主模块）。载体旧子路径行 never started → 整个 preset `agent-preset/invalid`
+  （#176 的故障本体，桌面端 0.2.2-rc.1 模式选择消失的根因）。
+- **官方 ptc 档：`tool-presentation` 原位换 `tool-executor-ptc`**（同在 alpha.1 线）；
+  旧包仍在发布面且 rc.1 起依赖 executor-ptc/native。matt-ptc 保留 #116 的
+  `tool-presentation` 行（#117 拍板 b），差异面登记进 roster fixture（见
+  `docs/preset-roster-alignment.md`「差异理由的票据指针」）。
+- **exports 精确键约束成为硬契约**：release notes 明写「配置项目按自身 ESM 规则解析
+  插件依赖子路径、包内导入和自引用」——#98 修的是本仓自身 exports，本锚起该约束同样
+  适用于**载体对上游插件子路径的引用**；新增载体行前先对目标 tag 现查 exports。
+- 升级 guide 仍缺：`docs/upgrade-guide/` 截至本锚只有 `v0.2.2-alpha.2`（部分主题），
+  无 rc.1 guide——漂移取证照旧走 release notes + 逐 tag 实读。
 
 **rc.1 → rc.2 的漂移面（2026-10-17 实测，避免下次重锚重复取证）**：rc.2 相对 rc.1
 是**纯追加**，对本仓**零影响** ——
@@ -514,7 +534,7 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 
 ```bash
 git clone https://github.com/deepseek-ai/deepseek-harness.git <src>
-cd <src> && git fetch --depth 1 origin tag dsh-v0.2.1-rc.2 && git checkout tags/dsh-v0.2.1-rc.2
+cd <src> && git fetch --depth 1 origin tag dsh-v0.2.2-rc.1 && git checkout tags/dsh-v0.2.2-rc.1
 pnpm install --ignore-scripts --package-import-method=copy     # 见 §4 工具链
 pnpm run clean                                                 # 见 §4 切 tag
 pnpm run build                                                 # 必须经 pnpm，见 §4
@@ -535,7 +555,7 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 | 用途 | 命令 |
 | --- | --- |
 | 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
-| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.1-rc.2` |
+| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.2-rc.1` |
 
 **PATH 型工具**（`bin/install.mjs`、测试里的 dsh 探针）现在走**运行时探测**（`lib/runtime-probe.mjs`，
 #47/#86），不再硬依赖字面 `dsh`：
@@ -615,7 +635,7 @@ pnpm** 的探测来源，但**测试挂具的依赖锚不能用它**——`@deep
 
 ```powershell
 $env:PATH = "<shim 目录>;$env:PATH"                     # 或用 --dsh / DSH_MATT_DSH 代替
-dsh --version                                           # → 0.2.1-rc.2
+dsh --version                                           # → 0.2.2-rc.1
 $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs
 $env:DSH_DESKTOP_ROOT='<app>'                          # 桌面应用根（含 resources 的那一层）→ 开 live 桌面端用例；设成 <app>\resources 也认
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）

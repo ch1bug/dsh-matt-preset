@@ -36,6 +36,18 @@ const results = []
 const ok = (name, detail = '') => { results.push(`  ✓ ${name}${detail ? ` — ${detail}` : ''}`) }
 const bad = (name, detail = '') => { results.push(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`) }
 
+// 0.2.2-rc.1：tools.execute 改批次形状（入参 `calls:[{id,name,arguments}]`，返回
+// `{results:[{callId,result:{content,isError}}],concluded}`，#176 重锚）。本套件的消费面
+// 全是旧单结果视图（`out.isError` / `out.value`），用适配器收第一个 outcome，下游零改动。
+const firstOutcome = (batch) => {
+  const r = batch?.results?.[0]?.result
+  if (r === undefined) return batch
+  const text = (r.content ?? []).map((p) => p?.text ?? '').join('')
+  return r.isError === true
+    ? { isError: true, error: text, value: undefined }
+    : { isError: false, value: text, error: undefined }
+}
+
 // `dataRoot` mounts the production storage/workspace stack isolated under a
 // temp dir (mirrors cordis.patch.yml rows: storage, storage-json,
 // storage-domain, session-persistence-jsonl, workspace).
@@ -137,13 +149,11 @@ try {
   const artifactSha = createHash('sha256').update(readFileSync(artifactAbs)).digest('hex')
   let out
   try {
-    out = await ctxA.tools.execute({
-      callId: ToolCallId('verify-handoff-1'),
-      name: 'handoff_tool',
-      arguments: { document: doc, mode: 'fresh', artifacts: [artifactAbs] },
+    out = firstOutcome(await ctxA.tools.execute({
+      calls: [{ id: ToolCallId('verify-handoff-1'), name: 'handoff_tool', arguments: { document: doc, mode: 'fresh', artifacts: [artifactAbs] } }],
       agent: agentA,
       signal: new AbortController().signal,
-    })
+    }))
   } catch (error) {
     bad('A. handoff_tool.execute', String(error?.message ?? error))
     out = undefined
@@ -235,13 +245,11 @@ try {
     // find 会拿到别人的 child（旧断言只数 userMsgs 恰好不炸；新断言读文档文本就串台了）。
     // 改照 A3 形态：调用前拍 id 集，取本次调用新增的那个。
     const idsBeforeDef = new Set(ctxA.sessions.list().map(s => String(s.id)))
-    const defOut = await ctxA.tools.execute({
-      callId: ToolCallId('verify-handoff-2'),
-      name: 'handoff_tool',
-      arguments: { document: doc },
+    const defOut = firstOutcome(await ctxA.tools.execute({
+      calls: [{ id: ToolCallId('verify-handoff-2'), name: 'handoff_tool', arguments: { document: doc } }],
       agent: agentA,
       signal: new AbortController().signal,
-    })
+    }))
     trackHandoffDoc(defOut)
     if (defOut && defOut.isError === false && ctxA.sessions.list().length === beforeDef + 1) {
       const childId = ctxA.sessions.list().map(s => String(s.id)).find(id => !idsBeforeDef.has(id))
@@ -271,13 +279,11 @@ try {
   {
     const idsBeforeP = new Set(ctxA.sessions.list().map(s => String(s.id)))
     const assignedDoc = doc + '\n\n## 本会话任务（human 已定向）\n\n- verify-ticket-A3\n- 凭据：#156（已落票，票 open）'
-    const pOut = await ctxA.tools.execute({
-      callId: ToolCallId('verify-handoff-3'),
-      name: 'handoff_tool',
-      arguments: { document: assignedDoc, skill: 'implement' },
+    const pOut = firstOutcome(await ctxA.tools.execute({
+      calls: [{ id: ToolCallId('verify-handoff-3'), name: 'handoff_tool', arguments: { document: assignedDoc, skill: 'implement' } }],
       agent: agentA,
       signal: new AbortController().signal,
-    })
+    }))
     const newIdP = ctxA.sessions.list().map(s => String(s.id)).find(id => !idsBeforeP.has(id))
     trackHandoffDoc(pOut)
     if (pOut && pOut.isError === false && newIdP !== undefined) {
@@ -332,13 +338,11 @@ try {
     let noCredError = ''
     let noCredOut
     try {
-      noCredOut = await ctxA.tools.execute({
-        callId: ToolCallId('verify-handoff-4'),
-        name: 'handoff_tool',
-        arguments: { document: noCredDoc, skill: 'implement' },
+      noCredOut = firstOutcome(await ctxA.tools.execute({
+        calls: [{ id: ToolCallId('verify-handoff-4'), name: 'handoff_tool', arguments: { document: noCredDoc, skill: 'implement' } }],
         agent: agentA,
         signal: new AbortController().signal,
-      })
+      }))
       noCredError = String(noCredOut?.error?.message ?? noCredOut?.error ?? '')
     } catch (error) {
       noCredError = String(error?.message ?? error)
@@ -361,13 +365,11 @@ try {
     let a5Error = ''
     let a5Out
     try {
-      a5Out = await ctxA.tools.execute({
-        callId: ToolCallId('verify-handoff-5'),
-        name: 'handoff_tool',
-        arguments: { document: outsideDoc, skill: 'implement' },
+      a5Out = firstOutcome(await ctxA.tools.execute({
+        calls: [{ id: ToolCallId('verify-handoff-5'), name: 'handoff_tool', arguments: { document: outsideDoc, skill: 'implement' } }],
         agent: agentA,
         signal: new AbortController().signal,
-      })
+      }))
       a5Error = String(a5Out?.error?.message ?? a5Out?.error ?? '')
     } catch (error) {
       a5Error = String(error?.message ?? error)
@@ -431,13 +433,11 @@ try {
 
   // handoff_tool child attaches
   const beforeHD = ctxD.workspaceRegistry.list()[0].sessionIds.length
-  const handoffOut = await ctxD.tools.execute({
-    callId: ToolCallId('verify-ws-handoff'),
-    name: 'handoff_tool',
-    arguments: { document: '# Handoff\n\nDummy.\n\n## suggested skills\n- tdd', mode: 'fork' },
+  const handoffOut = firstOutcome(await ctxD.tools.execute({
+    calls: [{ id: ToolCallId('verify-ws-handoff'), name: 'handoff_tool', arguments: { document: '# Handoff\n\nDummy.\n\n## suggested skills\n- tdd', mode: 'fork' } }],
     agent: agentD,
     signal: new AbortController().signal,
-  })
+  }))
   const afterHD = ctxD.workspaceRegistry.list()[0].sessionIds.length
   trackHandoffDoc(handoffOut)
   const accounted = ctxD.workspaceRegistry.list()[0].sessionIds.map(String)

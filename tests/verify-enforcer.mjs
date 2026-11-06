@@ -87,6 +87,17 @@ const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
 
+// 0.2.2-rc.1：tools.execute 改批次形状（入参 calls 数组，返回 {results:[{callId,result}]}，
+// #176 重锚）——本套件 V10 的消费面是旧单结果视图，用适配器收第一个 outcome。
+const firstOutcome = (batch) => {
+  const r = batch?.results?.[0]?.result
+  if (r === undefined) return batch
+  const text = (r.content ?? []).map((p) => p?.text ?? '').join('')
+  return r.isError === true
+    ? { isError: true, error: text, value: undefined }
+    : { isError: false, value: text, error: undefined }
+}
+
 /**
  * #77：临时根**创建即登记** —— 收尾块与进程级兜底都读这一份，不再手抄清单。
  * 病根正是"末尾清单会漏项"：#77 修的就是 9 处 `mkdtemp` 中漏在 8 项清单之外的
@@ -258,10 +269,10 @@ else bad('V9. push CI reminder', v9.slice(-220))
 agent.session.append('turn/start', { turn: 9 })
 agent.session.append('step/start', { turn: 9, step: 1 })
 agent.session.append('assistant/message', { turn: 9, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'some measurable context content for the meter' }] } }, { surfaceOp: 'append' })
-const cs = await ctx.tools.execute({
-  callId: ToolCallId('v10-cs'), name: 'context_status', arguments: {}, agent, signal: new AbortController().signal,
-})
-const csText = cs.isError === false ? (cs.value?.text ?? '') : `error ${cs.error}`
+const cs = firstOutcome(await ctx.tools.execute({
+  calls: [{ id: ToolCallId('v10-cs'), name: 'context_status', arguments: {} }], agent, signal: new AbortController().signal,
+}))
+const csText = cs.isError === false ? (typeof cs.value === 'string' ? cs.value : cs.value?.text ?? '') : `error ${cs.error}`
 if (csText.includes('context:') && csText.includes('used')) ok('V10. context_status tool returns measured context', csText.slice(0, 60))
 else bad('V10. context_status', csText.slice(0, 120))
 

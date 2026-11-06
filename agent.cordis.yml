@@ -258,11 +258,11 @@
   isolate:
     workflowEngine: true
   config:
+    # 0.2.2：list-agents 由主模块行自行注册（rc.1 src/index.ts:28 registerListAgents(ctx)
+    # 无条件调用）；0.2.2-alpha.1 起上游 exports 已移除 ./list-agents 子路径，独立行会
+    # never started 并拖垮整个 preset（agent-preset/invalid，#176）。
     - id: tool-subagent-control
       name: '@deepseek-ai/dsh-tool-subagent-control'
-
-    - id: tool-subagent-list-agents
-      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
     - id: tool-subagent
       name: '@deepseek-ai/dsh-tool-subagent'
