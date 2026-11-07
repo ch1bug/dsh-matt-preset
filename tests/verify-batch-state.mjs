@@ -373,6 +373,23 @@ const RULE_KEYWORDS = [
   ['批宣告预授权清单', /BATCH DECLARATION PRE-AUTHORIZATION LIST/],
   ['收口步', /CLOSE-OUT STEP/],
   ['显式未覆盖声明（套件不联网核票面）', /EXPLICITLY NOT GUARDED/],
+  // #181：门 3 三层分级 + BATCH MODE 采纳面（同上防回退：正文把三分法/跳票协议/
+  // 三段式关票删掉、或改回旧批纪律 cap 5 / 裸 stash / PAUSE the whole batch → 这里红）。
+  ['票外发现三分法', /OUT-OF-TICKET DISCOVERY — THREE-WAY DISPOSAL/],
+  ['三分法与门 3 互补（分级管决策，三分法管发现）', /COMPLEMENT of gate 3's L0\/L1\/L2[\s\S]*?grades DISCOVERIES/],
+  ['冲突感知跳票协议（修正案）', /CONFLICT-AWARE JUMP PROTOCOL/],
+  ['存档前判定（diff vs touch-set）', /next ticket's declared touch-set/],
+  ['分支留档（#103 升格批内执行形态）', /wip\/<票号>-<slug>/],
+  ['分支留档语义（WIP 不交叉、冲突在合并边界）', /one-ticket-per-branch[\s\S]{0,20}IN-BATCH shape/],
+  ['交接状态面写全（resume 条件）', /the conflict point, the resume condition/],
+  ['resume 显式化（禁凭记忆重做）', /never "redo from memory/],
+  ['批末 CI 语义不变（红 CI 二分不被 WIP 污染）', /red-CI bisection stays unpolluted/],
+  ['三段式关票（本地门禁链全绿 + code-review 双轴）', /THREE-STAGE CLOSE/],
+  ['关票交互判定（不绕过 enforcer 抽查 O5）', /still arms the fresh-subagent spot check/],
+  ['批容量 10–15', /capacity 10–15 tickets/],
+  ['候选垫队 5–10', /candidate queue of\s*\n?\s*5–10/],
+  ['积压护栏 10 票或 3 天（票数计）', /10 unpushed tickets \(counted per ticket[\s\S]*?or 3 days/],
+  ['批末红 CI 按 commit 边界二分', /bisected by commit boundary/],
 ]
 const missingRules = RULE_KEYWORDS.filter(([, re]) => !re.test(batchSection)).map(([n]) => n)
 if (missingRules.length === 0)

@@ -41,9 +41,35 @@ human will push back on:
    say why in one sentence.
 2. IMPLEMENT GATE — no code change beyond a trivial edit without
    planning artifacts (CONTEXT.md decisions, docs/adr/, spec/tickets).
-3. DECISION BOUNDARY — real decisions go to the human and wait; never
-   decide for the human; read AGENTS.md/CLAUDE.md early; destructive or
-   high-cost steps ask first.
+3. DECISION BOUNDARY — real decisions are never made for the human; the
+   gate face is unchanged — but GRADE before interrupting (attention is
+   the scarcest input: every interruption costs the human a reload).
+   Grade L0 → L1 → L2 in order; one unmet condition is out; ambiguity
+   grades UP — ask rather than self-decide, never the reverse.
+   L0 SELF-DECIDE — all four hold: git-revertible, no external side
+   effects ∧ inside the ticket's declared scope ∧ matches an existing
+   repo pattern (no new pattern) ∧ touches none of the seven gates →
+   decide it, RECORD each one (a "decided X because Y" line in the
+   ticket's decision log), and list the L0 items at the phase boundary
+   for the human's one-glance audit. L0 is hedged, not exempt: the audit
+   + running the gates green yourself before handover + grading a
+   high-blast-radius self-decision up to L1 even when reversible.
+   L1 BATCH — the human's input is needed but does NOT block the current
+   step → park it, keep working, ask the parked batch ONCE at the phase
+   boundary (an unparked L1 is a lost question — never silently drop it).
+   L2 ASK NOW — a blocker (this step cannot continue) / irreversible or
+   external side effects / recovery STOP-and-ask / scope expansion, AC
+   rewrite, triage three-way → ask and wait (the classic form of this
+   gate; destructive or high-cost steps are here). FOUR CLASSES NEVER
+   GRADE DOWN to L0/L1 — always L2: D21 external actions (gate 6);
+   recovery's STOP-and-ask; the privacy face (personal/machine
+   environment never enters the repo); scope expansion, AC rewrites,
+   triage three-ways (gates 5/7). L2 asking quality: ONE decision per
+   question (parallel tickets ask serially), always with 前因后果
+   (background: where the question comes from / the key facts / each
+   option's substance and cost / ties to prior decisions) — the grill
+   contract's four-piece block stacks, no new format. Read
+   AGENTS.md/CLAUDE.md early.
 4. PHASE DECLARATION — one-line phase opener at every boundary
    (grill → spec → tickets → implement → review, /handoff). Starting a
    flow skill (triage, to-spec, to-tickets, implement, code-review…) —

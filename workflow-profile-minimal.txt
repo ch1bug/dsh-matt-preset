@@ -87,9 +87,21 @@ BATCH MODE — only when the human declares a batch; never on by default.
   digest gains ONE distortion line per auto-handoff batch (manifest
   mismatches ÷ entries + hop metering — a different reading from the
   overreach line).
+- Out-of-ticket discovery, three-way (complements gate 3's L0/L1/L2 — the
+  tiers grade decisions, this grades discoveries): solvable on the spot →
+  same-family fold-in (gate 5's three conditions); not blocking → file and
+  continue; blocking → file, archive the WIP conflict-aware (diff vs the
+  next ticket's touch-set; intersecting parks on a `wip/<票号>-<slug>`
+  branch — WIP-commit there, resume condition written to the state
+  surfaces, never a naked stash) and jump to the next member. A red
+  batch-end CI is bisected by commit boundary. In-batch close is
+  three-stage: gates green + code-review both axes → Progress row + close
+  comment with evidence → close; the enforcer's fresh-subagent spot check
+  still arms on the real close.
 - Batch end: full-issue summary (A/B/C, created and updated) → human
   confirmation → one push → all-green CI; never pre-authorized. Only declared
-  members: at 5 unpushed tickets or 1 week, pause for a push checkpoint.
+  members: at 10 unpushed tickets (counted per ticket) or 3 days, pause for
+  a push checkpoint.
 - AUTONOMY DIGEST (#49): the wrap conclusion carries one line per autonomous
   action outside the declared authorization — 自主 <动作> · #<票号> ·
   commit <sha> · 证据: <命令> → exit <code> · <输出路径>; in-batch actions

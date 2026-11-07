@@ -40,9 +40,35 @@ human will push back on:
    say why in one sentence.
 2. IMPLEMENT GATE — no code change beyond a trivial edit without
    planning artifacts (CONTEXT.md decisions, docs/adr/, spec/tickets).
-3. DECISION BOUNDARY — real decisions go to the human and wait; never
-   decide for the human; read AGENTS.md/CLAUDE.md early; destructive or
-   high-cost steps ask first.
+3. DECISION BOUNDARY — real decisions are never made for the human; the
+   gate face is unchanged — but GRADE before interrupting (attention is
+   the scarcest input: every interruption costs the human a reload).
+   Grade L0 → L1 → L2 in order; one unmet condition is out; ambiguity
+   grades UP — ask rather than self-decide, never the reverse.
+   L0 SELF-DECIDE — all four hold: git-revertible, no external side
+   effects ∧ inside the ticket's declared scope ∧ matches an existing
+   repo pattern (no new pattern) ∧ touches none of the seven gates →
+   decide it, RECORD each one (a "decided X because Y" line in the
+   ticket's decision log), and list the L0 items at the phase boundary
+   for the human's one-glance audit. L0 is hedged, not exempt: the audit
+   + running the gates green yourself before handover + grading a
+   high-blast-radius self-decision up to L1 even when reversible.
+   L1 BATCH — the human's input is needed but does NOT block the current
+   step → park it, keep working, ask the parked batch ONCE at the phase
+   boundary (an unparked L1 is a lost question — never silently drop it).
+   L2 ASK NOW — a blocker (this step cannot continue) / irreversible or
+   external side effects / recovery STOP-and-ask / scope expansion, AC
+   rewrite, triage three-way → ask and wait (the classic form of this
+   gate; destructive or high-cost steps are here). FOUR CLASSES NEVER
+   GRADE DOWN to L0/L1 — always L2: D21 external actions (gate 6);
+   recovery's STOP-and-ask; the privacy face (personal/machine
+   environment never enters the repo); scope expansion, AC rewrites,
+   triage three-ways (gates 5/7). L2 asking quality: ONE decision per
+   question (parallel tickets ask serially), always with 前因后果
+   (background: where the question comes from / the key facts / each
+   option's substance and cost / ties to prior decisions) — the grill
+   contract's four-piece block stacks, no new format. Read
+   AGENTS.md/CLAUDE.md early.
 4. PHASE DECLARATION — one-line phase opener at every boundary
    (grill → spec → tickets → implement → review, /handoff). Starting a
    flow skill (triage, to-spec, to-tickets, implement, code-review…) —
@@ -213,7 +239,8 @@ per-issue push rhythm.
 - CLOSE-OUT STEP — BEFORE A BATCH IS DECLARED（收口步）: classify the open
   backlog (series / needs-triage / ready-for-human / standalone), MERGE the
   same-family tickets that one session or one edit would close together, and
-  only then allocate batches (cap 5 per batch). When counting "ready to start",
+  only then allocate batches (capacity 10–15 tickets, a candidate queue of
+  5–10 padded at the tail — a blocking gap fills from the tail). When counting "ready to start",
   DROP the tickets that are already DONE but not yet closed — a frontier that
   counts them overstates the queue (B-batch reading, 2026-10-19: 28 vs a true
   25). Record the close-out in the batch state (the classification line + the
@@ -230,7 +257,14 @@ per-issue push rhythm.
 - Inside a batch: work each ticket → local commit + local verification
   (L1/L2/clippy/fmt/code-review) → NO per-ticket push. Closing an issue
   may precede the remote CI (based on local verification + code-review);
-  the remote CI is confirmed once at the batch-end push.
+  the remote CI is confirmed once at the batch-end push. In-batch closing
+  is the THREE-STAGE CLOSE: local gate chain all green + code-review both
+  axes pass → the batch-state Progress row (three evidence elements) →
+  the close comment with the fix + verification evidence → `gh issue
+  close`. Interaction with the enforcer's close face (judged at wave-1):
+  the real `gh issue close` call still arms the fresh-subagent spot check
+  (O5) — in-batch closing rides the declaration's closing mode and never
+  bypasses that nudge or the three evidence elements.
 - ONE TICKET PER SESSION STILL HOLDS (human-mandated): batch mode never
   changes the session grain — each ticket gets its own implement
   session (one ticket + its verification), handing off through
@@ -322,7 +356,7 @@ per-issue push rhythm.
   to the transcribed values).
 - Batch end: after the summary gate, push all commits in one go; remote
     CI all-green is the completion gate — red means unfinished batch work,
-    fix and re-verify.
+    bisected by commit boundary to the offending ticket, fix and re-verify.
 - SANDBOX BATCH MODE (sandcastle; opt-in — only when the human asks for
     sandboxed/AFK parallel ticket runs, e.g. "沙箱批跑"): the main session
     ORCHESTRATES, sandboxed DSH-headless workers EXECUTE; human judgment
@@ -368,19 +402,56 @@ per-issue push rhythm.
     (worker-context) and activates in main sessions only on explicit
     invocation. Scaffolding: preset `sandcastle/templates/` — see
     README「沙箱批跑」and ADR-0003.
+- OUT-OF-TICKET DISCOVERY — THREE-WAY DISPOSAL（票外发现三分法）: the
+  COMPLEMENT of gate 3's L0/L1/L2 — the tiers grade DECISIONS, this
+  grades DISCOVERIES, and together they cover every in-batch reason to
+  stop and wait. A discovery that is itself an open DECISION grades
+  through gate 3, never through this disposal:
+  (i) solvable on the spot → same-family fold-in (gate 5's three
+      conditions: the current ticket is done, the link is stated, the
+      context evidence shows a healthy window);
+  (ii) not blocking the current step → file the ticket, continue the
+      current one;
+  (iii) blocking → file the ticket, archive the current ticket's WIP by
+      the conflict-aware jump protocol below, jump to the next member —
+      the batch never stalls on one ticket (the filed ticket waits for
+      the human; the batch does not).
 - ISSUE DISCIPLINE (anti-laziness; every discovery is an audited event):
   any bug/finding first lands in the issue tracker — create a new issue
   or update the matching one — THEN process, THEN update the issue again
   with the fix and its verification evidence ("update issue → process →
   update issue"). Never silently fix inline, never silently ignore.
-  - Bucket A (blocks the current ticket or batch verification): create
-    a new issue → PAUSE the whole batch → wait for the human to decide.
+  - Bucket A (blocks the current ticket): disposal (iii) above — file it,
+    archive the WIP by the jump protocol, jump to the next member.
   - Bucket B (non-blocking, outside the batch): land the issue → fix
     with full verification → update the issue → continue the batch.
   - Bucket C (found at batch verification, e.g. red CI): locate the
     issue/commit → update the issue → fix → re-verify → update the issue.
   - Any plan/scope change follows the same "update issue → process →
     update issue" loop.
+- CONFLICT-AWARE JUMP PROTOCOL (修正案 — replaces disposal (iii)'s naked
+  "stash and skip", whose hidden premise — the WIP diff and the next
+  ticket's writes are disjoint — fails exactly when blocking is CAUSED by
+  a write conflict; the three failure shapes it prevents: an unclean
+  archive that tangles the next ticket's start, silent WIP carry-over
+  that pollutes the red-CI attribution, a stash-pop conflict detonating
+  at batch end with the ticket's context lost): BEFORE archiving, run the
+  intersection check — the current ticket's `git diff` (including
+  staged) against the next ticket's declared touch-set. Disjoint →
+  archive and jump (the original path). Intersecting → BRANCH PARKING:
+  `git switch -c wip/<票号>-<slug>`, WIP-commit on the branch, back on
+  the main line open the NEXT ticket's branch — #103 one-ticket-per-branch
+  as the IN-BATCH shape: the WIP never crosses into the next ticket's
+  working face, conflicts surface at the merge boundary where they are
+  attributable, not in a stash; in-batch zero-push is unaffected (the
+  branches are local). The state surfaces carry the FULL handoff —
+  branch name, WIP commit, the conflict point, the resume condition
+  (batch-state.md / .scratch/progress.md / the goal + task list;
+  updating one ≠ the others are updated). Batch-end CI semantics are
+  unchanged: CI runs the main line's committed work only, branch WIP is
+  not in it, and the red-CI bisection stays unpolluted. Resume is
+  EXPLICIT: continue on the branch or merge it back, conflicts resolved
+  at the branch boundary — never "redo from memory on the main line".
 - BATCH-END SUMMARY GATE: before the batch ends, the summary must list
   EVERY issue from the process (A/B/C, created and updated); the push
   happens only after the human confirms that summary. The batch-end push
@@ -507,7 +578,8 @@ per-issue push rhythm.
   the next code push.
 - Anti-pileup guardrails: (a) a batch contains only its declared
   members — adding a ticket requires an explicit human extension; (b)
-  at 5 unpushed tickets or 1 week, PAUSE and report, asking for a push
+  at 10 unpushed tickets (counted per ticket — several commits of one
+  ticket count once) or 3 days, PAUSE and report, asking for a push
   checkpoint or permission to continue; (c) a batch must end in a push —
   never finish a batch and leave it unpushed.
 - BATCH ALLOCATION — how existing issue backlogs become batches (the
@@ -515,7 +587,8 @@ per-issue push rhythm.
   were never declared as batches):
   - Never batch the whole backlog. Group by existing series (titles
     usually carry it: #503 T1/T2/T3, ADR-045 rebuild stages); cap each
-    batch at 5 tickets (same ceiling as the anti-pileup guardrail).
+    batch at 10–15 tickets + the 5–10 candidate queue at the tail (same
+    ceiling as the anti-pileup guardrail).
   - Triage before allocation: needs-triage issues must NOT enter a
     batch (batch planning needs testable ACs and a decided priority);
     a triage pass or the human's call comes first.

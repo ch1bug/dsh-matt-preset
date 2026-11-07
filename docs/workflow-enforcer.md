@@ -53,7 +53,17 @@ face is the text layer.
   external/destructive actions → report + wait for confirmation; corrections →
   acknowledge + write down; routine actions whitelisted; one issue per session;
   batch mode → the batch-end push follows a batch-end summary confirmed by the
-  human; mid-batch out-of-scope pushes still wait).
+  human; mid-batch out-of-scope pushes still wait). #181 rides the gate-3
+  grading into the same section: **L0 self-decide** (all four — reversible
+  with no external side effects, in-ticket scope, an existing repo pattern,
+  no gate touched) → decide + record each, list the L0 items at the phase
+  boundary; **L1 batch** (input needed but not blocking) → park it, ask the
+  parked batch once at the boundary; **L2 ask now** (blocker / irreversible
+  or external side effects / recovery STOP / scope-AC-triage) → ask and wait.
+  Ambiguity grades up, and D21 externals / recovery STOP / privacy /
+  scope-AC-triage never grade down. The full three-tier wordface lives in the
+  workflow body's `DECISION BOUNDARY` gate (docs/adr/0017-attention-economy.md
+  §2); the reminder carries only the compact form.
 - A tool call matching the gate list gets a one-shot **⚠ High-risk action**
   line on the next assembly (consumed after firing), with the judgement made
   **structurally** on the call's declared action field (#79 — see 判定面 below).
