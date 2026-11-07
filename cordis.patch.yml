@@ -322,6 +322,48 @@
                   toolName: subagent_claude_code
                   maxDepth: provider-managed
 
+              # 0.2.2-rc.1 实验性一次性委派（#177）：`@deepseek-ai/dsh-experimental-subagent-oar`
+              # 是 OAR provider（一次性委派本机 Codex / Claude Code CLI——独立上下文、完成通知
+              # 回父、不支持续聊；不走 DSH subprocess provider，无 maxDepth 概念），
+              # `@deepseek-ai/dsh-experimental-tool-subagent-oar` 是 `subagent_oar` 工具（按
+              # providers 别名选 provider；toolName 用默认 `subagent_oar` 不显式写）。三行形态照
+              # 上游 packages/experimental/subagent-oar/README.md 的挂载样例（launchArgs 沿该
+              # 样例：codex = workspace-write 沙箱免审批；claude = dontAsk + permission-prompts
+              # none——无 DSH 审批 UI 的免权限参数，启用前复核）。
+              # 两包均**不在发布面 dependencies**（Production dsh 不预装，Plugins 页/显式安装才
+              # 在；official-runtime-deps-v1.json publishedDependencies 读数，#177 实测）——
+              # 三行常驻 disabled: true 声明位（同上两行口径），启用前提 = Plugins 页装
+              # subagent-oar 两包 **且** 本机装/认证 Codex / Claude Code CLI（native 可执行文件
+              # 须对 DSH Host 可见）；缺席退化：行不激活、subagent_oar 工具不可见，roster 其余
+              # 部分不受影响。登记与档位：docs/preset-runtime-deps.md（non-in-box）。
+              - id: experimental-subagent-oar-codex
+                name: '@deepseek-ai/dsh-experimental-subagent-oar'
+                disabled: true
+                config:
+                  runtime: codex
+                  providerName: oar-codex
+                  launchArgs:
+                    - -c
+                    - sandbox_mode="workspace-write"
+              - id: experimental-subagent-oar-claude
+                name: '@deepseek-ai/dsh-experimental-subagent-oar'
+                disabled: true
+                config:
+                  runtime: claude
+                  providerName: oar-claude
+                  launchArgs:
+                    - --permission-mode
+                    - dontAsk
+                    - --permission-prompts
+                    - none
+              - id: tool-subagent-oar
+                name: '@deepseek-ai/dsh-experimental-tool-subagent-oar'
+                disabled: true
+                config:
+                  providers:
+                    codex: oar-codex
+                    claude: oar-claude
+
               # 0.2.0: workflowEngine 由 dsh-workflow-ptc 提供（与内置 standard preset 一致；
               # 0.1.7 起旧形态 dsh-workflow-worker-thread 包已被移除，两端都跑不了）。
               - id: workflow-ptc

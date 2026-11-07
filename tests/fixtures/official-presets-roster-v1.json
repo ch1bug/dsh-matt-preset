@@ -162,6 +162,7 @@
     "matt-handoff-tool": "matt 特征面：/handoff 阶段边界执行器（初始 matt preset fc0c07e 起；会话级边界动作 agent 自身做不了）",
     "matt-str-replace-editor": "matt 特征面：内建文件编辑器行（fc0c07e 起）；官方 preset 未挂、本仓工作流采用（拍板 b 保留增量）",
     "matt-subagent-optional": "matt 特征面：可选 subagent provider 声明（常驻 disabled: true，opt-in 才激活；#92 常驻口径）",
+    "matt-subagent-oar-optional": "matt 特征面：0.2.2-rc.1 实验性一次性委派声明位（OAR provider codex/claude 两实例 + subagent_oar 工具行，常驻 disabled: true，opt-in 才激活；#177，启用前提与缺席退化见 docs/preset-runtime-deps.md）",
     "matt-tool-ralph": "matt 特征面：ralph 循环执行器（#92 常驻口径，ADR-0015 §4 明示不移出常驻）",
     "minimal-full-roster": "拍板 b：matt-minimal =「正文更短」非「能力更少」——roster 与标准档同一基线（ADR-0015 §4），官方 minimal 裁掉的这些能力面本仓保留；描述已明示「能力面与标准档完全一致」",
     "official-time-context": "不回补（#117 拍板 2026-10-24）：随 schedule-bundle 有意退役（ADR-0001），官方虽独立挂行，本仓维持退役口径",
@@ -204,6 +205,18 @@
         {
           "id": "tool-ralph",
           "why": "matt-tool-ralph"
+        },
+        {
+          "id": "experimental-subagent-oar-codex",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "experimental-subagent-oar-claude",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "tool-subagent-oar",
+          "why": "matt-subagent-oar-optional"
         }
       ],
       "omitted": [
@@ -254,6 +267,18 @@
         {
           "id": "tool-presentation",
           "why": "matt-tool-presentation"
+        },
+        {
+          "id": "experimental-subagent-oar-codex",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "experimental-subagent-oar-claude",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "tool-subagent-oar",
+          "why": "matt-subagent-oar-optional"
         }
       ],
       "omitted": [
@@ -400,6 +425,18 @@
         {
           "id": "tool-plugin-market",
           "why": "minimal-full-roster"
+        },
+        {
+          "id": "experimental-subagent-oar-codex",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "experimental-subagent-oar-claude",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "tool-subagent-oar",
+          "why": "matt-subagent-oar-optional"
         }
       ],
       "omitted": [
@@ -462,6 +499,18 @@
         {
           "id": "tool-ralph",
           "why": "matt-tool-ralph"
+        },
+        {
+          "id": "experimental-subagent-oar-codex",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "experimental-subagent-oar-claude",
+          "why": "matt-subagent-oar-optional"
+        },
+        {
+          "id": "tool-subagent-oar",
+          "why": "matt-subagent-oar-optional"
         }
       ],
       "omitted": [

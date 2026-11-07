@@ -23,7 +23,7 @@ core 包 + opt-in row，`tool-ralph` 是 in-box opt-in，两条都被它一致�
 | --- | --- | --- |
 | **core-row** | row `id` 在官方出货 preset（`@deepseek-ai/dsh-web-app` tarball `presets/{standard,ptc,minimal,cordis}.patch.yml`）**或**出货宿主组合（`dsh-base` / `dsh-web-app` 的 `cordis.patch.yml`）中有**同 id 声明** | `persona` / `tool-fs` / `workflow-ptc`（base）；`tool-cordis`（官方 cordis 档）；`tool-web`（官方 standard 档） |
 | **in-box opt-in** | 能力包随发布面 `@deepseek-ai/dsh` 的 dependencies 默认安装，但由 OPTIONAL_BUNDLES 控制默认**未启用**（Plugins 页开）；官方 preset/宿主无同 id row | `tool-ralph`；`str-replace-editor` / `tool-presentation`（row 级） |
-| **non-in-box** | 包不在发布面 dependencies，须另行安装 | `tool-subagent-codex` / `tool-subagent-claude-code`（常驻 `disabled: true` 声明位，opt-in 才激活） |
+| **non-in-box** | 包不在发布面 dependencies，须另行安装 | `tool-subagent-codex` / `tool-subagent-claude-code`（常驻 `disabled: true` 声明位，opt-in 才激活）；`experimental-subagent-oar-codex` / `experimental-subagent-oar-claude` / `tool-subagent-oar`（同口径，#177） |
 | **in-repo** | `name` = `dsh-matt-preset/<file>.mjs`，随本 preset 包分发 | `workflow-core` / `workflow-enforcer` / `lang-enforcer` / `handoff-tool` |
 | **local-only** | 仅开发机桌面 profile 有——**不得进 roster** | 12 个 `experimental-*` 中不在发布面 dependencies 的 7 个；`danger-full-access` 沙箱 |
 
@@ -75,6 +75,32 @@ matt-ptc **有意常驻挂它**（#116 交付的方向 A；#117 拍板 b 保留�
 能力，不重复直挂官方新行）。若上游将来撤包或改依赖链，R1（无档可归）/ R4（依赖链
 断言）会红。
 
+## subagent_oar 一次性委派（non-in-box 声明位，#177）
+
+delegation 组内三行 `experimental-subagent-oar-codex` / `experimental-subagent-oar-claude`
+/ `tool-subagent-oar`（四档共用基线）是 0.2.2-rc.1 起上游实验性委派机制的**声明位**：
+`@deepseek-ai/dsh-experimental-subagent-oar`（OAR provider，一次性委派本机 Codex /
+Claude Code CLI——独立上下文、完成通知回父、不支持续聊）+
+`@deepseek-ai/dsh-experimental-tool-subagent-oar`（`subagent_oar` 工具，按 providers
+别名选 provider，toolName 用默认）。三行全部 `disabled: true`，形态照上游
+`packages/experimental/subagent-oar/README.md` 的挂载样例。
+
+1. **双启用前提**（缺一即不可用）：① Plugins 页（或显式安装）装
+   `dsh-experimental-subagent-oar` 与 `dsh-experimental-tool-subagent-oar` 两包——
+   它们**不在发布面 dependencies**（Production dsh 不预装，
+   `official-runtime-deps-v1.json` 的 `publishedDependencies` 读数 90 项零命中，#177
+   票面实测）；② 本机装/认证 Codex / Claude Code CLI（native 可执行文件须对 DSH
+   Host 可见）——provider 不代装、代认证。`launchArgs` 沿上游样例的免审批权限参数
+   （codex `workspace-write` 沙箱；claude `dontAsk` + `permission-prompts none`，
+   无 DSH 审批 UI），启用前应复核。
+2. **缺席退化**：两包未装时三行**不激活**（声明位），`subagent_oar` 工具**不可见**，
+   roster 其余部分不受影响——与 `tool-subagent-codex` / `tool-subagent-claude-code`
+   的缺席形态同族。机械守卫：`tests/verify-row-deps.mjs` R1（无档可归即红）+
+   R2（`mustBeDisabled`——被翻 enabled 即红）；行集合差异登记于
+   `official-presets-roster-v1.json` 的 `registeredDiff`（`matt-subagent-oar-optional`）。
+3. **归属划界**：本票只交付声明位与登记；委派真跑（OAR 启动、权限、launchArgs
+   生效性）归上游与用户实测，本仓不冒认。
+
 ## cordis 档正文的能力前提（B 层：不得让缺能力 = 做不到）
 
 `workflow-profile-cordis.txt`（仅 matt-cordis 档注入）引用两组工具面，前提与退化
@@ -115,7 +141,7 @@ matt 的常驻 roster 与正文里**零假设**（机械守卫 R1 的分类面 +
 ## 相关
 
 - 票：#105（本票）、#92（已由 human 拍 A 关票，口径见上 Z6 节）、#117（登记差异）、
-  #97（market 跟 manager）
+  #97（market 跟 manager）、#177（subagent_oar 声明位）
 - 判据派生：S1（缺席必响亮——R4 的前提漂移红 + 重取配方）、S3（降级必显式——
   B 层退化路径显式声明）
 - 官方取证配方与版本锚现查口径：[preset-roster-alignment.md](preset-roster-alignment.md)

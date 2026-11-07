@@ -44,6 +44,45 @@
       "mustBeDisabled": true,
       "evidence": "同 tool-subagent-codex"
     },
+    "experimental-subagent-oar-codex": {
+      "tier": "non-in-box",
+      "mounted": false,
+      "mustBeDisabled": true,
+      "evidence": "npm view @deepseek-ai/dsh-experimental-subagent-oar@0.2.2-rc.1 version → 0.2.2-rc.1（npm 在发布）但本 fixture publishedDependencies 读数 subagent-oar 不在默认安装集（90 项零命中，#177 票面实测；对照 forge-bundle/tool-worktree 均 true）——Production dsh 不预装，Plugins 页/显式安装才在；上游 packages/experimental/subagent-oar/README.md 挂载样例即普通组合行；disabled: true 声明位（#177，同 tool-subagent-codex 口径）",
+      "docPath": "docs/preset-runtime-deps.md",
+      "docMustMention": [
+        "experimental-subagent-oar-codex",
+        "subagent_oar",
+        "Plugins",
+        "CLI"
+      ]
+    },
+    "experimental-subagent-oar-claude": {
+      "tier": "non-in-box",
+      "mounted": false,
+      "mustBeDisabled": true,
+      "evidence": "同 experimental-subagent-oar-codex（runtime: claude 实例，#177）",
+      "docPath": "docs/preset-runtime-deps.md",
+      "docMustMention": [
+        "experimental-subagent-oar-claude",
+        "subagent_oar",
+        "Plugins",
+        "CLI"
+      ]
+    },
+    "tool-subagent-oar": {
+      "tier": "non-in-box",
+      "mounted": false,
+      "mustBeDisabled": true,
+      "evidence": "同 experimental-subagent-oar-codex（@deepseek-ai/dsh-experimental-tool-subagent-oar，subagent_oar 工具行，toolName 用默认；providers 映射 codex/claude 两别名，#177）",
+      "docPath": "docs/preset-runtime-deps.md",
+      "docMustMention": [
+        "tool-subagent-oar",
+        "subagent_oar",
+        "Plugins",
+        "CLI"
+      ]
+    },
     "workflow-core": {
       "tier": "in-repo",
       "mounted": true,
