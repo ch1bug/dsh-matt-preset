@@ -59,5 +59,8 @@
     "./handoff-tool.mjs/icon": "./plugin-meta/handoff-tool/icon.svg",
     "./*": "./*",
     "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.12"
   }
 }
