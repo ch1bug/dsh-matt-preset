@@ -114,6 +114,26 @@ BATCH MODE — only when the human declares a batch; never on by default.
 - SANDBOX BATCH MODE (opt-in): the main session orchestrates, sandboxed workers
   execute; audit each ticket before launch, and every launch is an
   external-action-gate event.
+@@ batch-wrap-up after=batch-mode
+- BATCH WRAP-UP CARD（批末收口卡）: present the batch end ONCE in one of two
+  forms carrying the SAME five sections — (1) DELIVERED (per-ticket evidence
+  lines + aggregated delegation receipts; branch-archived WIP tickets
+  `wip/<票号>-<slug>` stay out of the delivered tally — not in batch-end CI),
+  (2) L0 LEDGER (empty = an explicit line, never silence), (3) OPEN (parked L1
+  questions asked once here, four-piece block), (4) D21 PENDING (summary gate
+  → CI green → push confirm; presents the list, never carries the
+  confirmation; a red CI presents its commit-boundary bisection result here
+  before re-push; a fired pileup checkpoint presents its counts — 10 unpushed
+  tickets or 3 days), (5) SESSION↔PR BINDINGS (pushed branch → PR from THIS
+  batch's own push records ONLY; unconfirmed says unconfirmed; the host-side
+  forge-session projection derives the same — the agent has no model-side
+  read, the human compares in the forge panel).
+  Form: ptc → prose (cards impossible); else load `batch-wrap-up`, see
+  propose_action → card (brief carries the five sections verbatim); absent or
+  refused → loud line「收口卡缺席（<原因>）——降级为正文收口段」then the five
+  sections inline. One wrap card per batch end; a missing card is not a
+  regression. Branch-WIP stays out of batch-end CI and the tally; the pileup
+  checkpoint line rides the wrap.
 @@ text-pushes-exclude-actions
 TEXT PUSHES EXCLUDE ACTIONS — a text/docs-only push must not trigger CI: keep
 paths-ignore for those paths in ci.yml.

@@ -149,6 +149,15 @@ const CLAIMS = [
   { claim: 'the skill catalog', kind: 'provider', rows: ['skill-filesystem', 'tool-skill'], via: 'agent', prose: true,
     anchor: { file: 'agent.cordis.yml', face: 'persona', sentence: 'skill catalog, read its instructions' },
     note: 'persona prefix 的声称面（自然语言）：技能目录+加载器由 roster 两行提供；具体技能名是跨会话可变清单，不进登记（否则第二份清单必腐）' },
+  {
+    claim: 'propose_action', kind: 'gap',
+    anchor: { file: 'workflow-component-batch.txt', sentence: '`propose_action` visible after the load → CARD form' },
+    gap: {
+      expectedRow: 'action-cards',
+      ticket: '#182',
+      why: 'propose_action 由 action-cards 服务注册（personalized-recommendations bundle 的依赖闭包，宿主侧 Plugins 页启用的可选增强）——不在也不应进本仓 roster（本仓 workflow-wrapup-card 只注册卡 kind，不提供工具）。缺席=批末收口走正文形态（S3 显式降级，组件 batch-wrap-up 节 FORM SELECTION）。期望行若在本仓三处出现（源/mutation/ptc 载体）即红：那时卡形态从可选增强变为常驻前提，登记须升级重估',
+    },
+  },
 ]
 
 /** backtick 内容里「工具样式」的判据：`tools.` 前缀 / `()` 结尾（函数形态）/ snake_case。

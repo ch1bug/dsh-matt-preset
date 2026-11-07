@@ -57,6 +57,8 @@
     "./lang-enforcer.mjs/icon": "./plugin-meta/lang-enforcer/icon.svg",
     "./handoff-tool.mjs/locale/*.json": "./plugin-meta/handoff-tool/locale/*.json",
     "./handoff-tool.mjs/icon": "./plugin-meta/handoff-tool/icon.svg",
+    "./workflow-wrapup-card.mjs/locale/*.json": "./plugin-meta/workflow-wrapup-card/locale/*.json",
+    "./workflow-wrapup-card.mjs/icon": "./plugin-meta/workflow-wrapup-card/icon.svg",
     "./*": "./*",
     "./package.json": "./package.json"
   },

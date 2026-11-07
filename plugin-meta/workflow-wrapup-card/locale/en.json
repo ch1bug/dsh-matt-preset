@@ -1,0 +1,1 @@
+{ "meta": { "title": "Batch Wrap-Up Card", "description": "Registers the batch_wrap_up action-card kind (#182, ADR-0017 §4): one card per batch end carrying the five wrap sections; absent card service degrades to the prose wrap section." } }

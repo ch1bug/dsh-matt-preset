@@ -403,6 +403,8 @@ const RULE_ANCHORS = ['MINIMAL FLOW', 'DONE — verification includes the remote
   // #128：压缩不等于删除 —— 票面契约 / 冲突归零 / 预授权清单 / 收口步必须仍在 minimal 里，
   // 否则 minimal 档位的会话会退回「什么问题都停下来问」的老病灶。
   'ENTRY CONTRACT', 'CONFLICT ZERO', 'PRE-AUTHORIZATION', 'CLOSE-OUT STEP',
+  // #182：批末收口卡（L1 阶段边界落点 + D21 顺序语义 + 修正案批末状态面）在 minimal 里压缩不删。
+  'BATCH WRAP-UP CARD',
   'TEXT PUSHES EXCLUDE ACTIONS', 'CONTEXT HYGIENE', 'METHODOLOGY', 'ON-RAMPS', 'HEALTH',
   'STANDALONE', 'UTILITIES', 'PRECONDITION', 'INITIALIZATION']
 const lostAnchors = RULE_ANCHORS.filter(anchor => !minText.includes(anchor))

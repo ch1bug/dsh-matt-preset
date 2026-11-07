@@ -122,7 +122,10 @@ export const PROFILES = {
 export const COMPONENTS = {
   batch: {
     delta: new URL('./workflow-component-batch.txt', import.meta.url),
-    sectionIds: ['batch-mode'],
+    // #182 (ADR-0017 §4 axis B): the batch-end wrap-up rides the same toggle —
+    // `components: []` removes the wrap-up section with the batch section, and
+    // minimal's compressed override wins over the component default per id.
+    sectionIds: ['batch-mode', 'batch-wrap-up'],
   },
 }
 

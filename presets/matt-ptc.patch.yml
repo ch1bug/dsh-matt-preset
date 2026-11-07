@@ -96,6 +96,18 @@
             config:
               baseline: true
 
+          # workflow-wrapup-card（内置插件，随 preset 分发；#182 注意力轴 wave-2 / ADR-0017 §4 轴 B）：
+          # 批末收口卡 kind（batch_wrap_up）——独立插件行（不并入 workflow-core），让工作流正文
+          # 注入永不依赖 action-cards 服务。inject ['actionCards']：服务缺席（personalized-
+          # recommendations 在默认安装集但默认禁用；ptc 档卡工具恒不可激活）时本插件 fiber 保持
+          # INACTIVE 不激活（cordis 语义，服务出现自动激活）——对应组件正文 batch-wrap-up 节的
+          # 双形态降级（卡 ⇄ 正文收口段，S3 缺席显式声明）；verbs 为空 = 卡只呈现不承载确认
+          # （D21 确认留在会话内门 6，不新建确认点）。前置装载件 = 随包分发的 skills/batch-wrap-up/
+          # （经 skill-filesystem customSkillDirs 进 catalog，零 roster 变更）；判据面守卫
+          # tests/verify-wrapup-card.mjs。
+          - id: workflow-wrapup-card
+            name: dsh-matt-preset/workflow-wrapup-card.mjs
+
           # lang-enforcer（内置插件，随 preset 分发）：语言知识包层——工作流（persona/七门/
           # workflow-enforcer）零改动（D31）。检测到项目语言（lang-packs/*.yml 的 detect 文件，
           # 如 Cargo.toml → rust）后注入"该查哪个技能"的知识指针：会话级基线 + tool/call 触发的

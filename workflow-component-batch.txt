@@ -466,3 +466,64 @@ per-issue push rhythm.
     PROPOSE batches to the human instead of drifting per-issue.
   - A batch declaration names members + end point (last ticket) + AC
     check; that declaration is the license for autonomous execution.
+@@ batch-wrap-up after=batch-mode
+BATCH WRAP-UP CARD（批末收口卡，#182 / ADR-0017 §4 轴 B — the wrap's
+PRESENTATION layer, one per batch end）: present the batch end ONCE, in
+ONE of two forms carrying the SAME five sections（换载体不换内容 — the
+five-section structure is identical in both forms）:
+(1) DELIVERED — what this batch landed: one line per ticket with its
+    three evidence elements (command → exit code → evidence path).
+    Branch-archived WIP tickets (`wip/<票号>-<slug>`) are NOT counted in
+    this batch's delivered tally — their work is not in the batch-end
+    CI (修正案); they re-enter the tally only after resume and
+    re-verification;
+(2) L0 LEDGER — every L0 self-decision of the batch, one "decided X
+    because Y" line each, for the human's one-glance audit; an empty
+    ledger is written as an explicit「（无 L0 自决）」line, never silence;
+(3) OPEN — the L1 questions parked during the batch, asked ONCE here
+    (this IS the phase boundary where L1 lands); each rides the grill
+    contract's four-piece block; unanswered parked questions are never
+    silently dropped;
+(4) D21 PENDING — the external actions awaiting confirmation, presented
+    in the fixed order: summary gate → CI all-green → THEN the push
+    confirmation (that order is canonical, #179 §6② — never inverted).
+    When the batch-end CI came back red, the commit-boundary bisection
+    RESULT is presented here (the offending ticket + its evidence)
+    before the re-push is confirmed; a fired pileup-guardrail
+    checkpoint is presented with its counts (10 unpushed tickets or
+    3 days). This section PRESENTS the list; it does not carry the
+    confirmation — every D21 confirmation stays a conversational gate-6
+    event, so the card creates NO new confirmation point.
+(5) SESSION↔PR BINDINGS（#178 Q2）— one line per pushed branch → its
+    PR/change request, written from THIS batch's own push records —
+    present ONLY what those records confirm; a binding you cannot
+    confirm is written unconfirmed, never guessed. The forge-session
+    service (host side) derives the same bindings from the same shell
+    results, but the agent has NO model-side read of that projection —
+    the human compares the two in the forge panel; this section must
+    not claim a mismatch check the agent cannot run.
+DELEGATION RECEIPTS（委派完成聚合，#177 / 轴 D）: completions that
+arrived from delegated subagent work during the batch are aggregated
+into section (1) — one line per delegation (what, its verification, its
+evidence path); they are never relayed piecewise while the work runs.
+FORM SELECTION (explicit, never silent — S3 降级必声明):
+- ptc profile → PROSE form, stated in one line（cards are impossible
+  there: skill loads dispatched from code never activate the card tool）.
+- otherwise load the `batch-wrap-up` skill, then check the tool list:
+  `propose_action` visible after the load → CARD form — propose exactly
+  once, the brief carrying the five sections verbatim (the card frame
+  folds a long brief; the full text survives unfolding; this kind ships
+  no card-body row, so the brief IS the presentation surface).
+- `propose_action` absent or the call refused (service disabled, queued
+  messages at the limit, one card already shown this turn) → PROSE form
+  behind a LOUD degradation line:「收口卡缺席（<原因>）——降级为正文收口段」
+  , then the five sections inline. A missing card is never silently
+  skipped, and a missing card is NOT a workflow regression (the prose
+  form carries the full structure).
+One card per turn is an upstream invariant — one WRAP card per batch
+end, never per ticket, never a second card in the closing turn.
+Batch-end state face rides the wrap unchanged (修正案): branch-WIP
+tickets are not in the batch-end CI and stay out of the delivered
+tally, a red CI presents its commit-boundary bisection result in
+section (4) before re-push, and the pileup-guardrail checkpoint
+(10 unpushed tickets or 3 days) is restated here with its counts.

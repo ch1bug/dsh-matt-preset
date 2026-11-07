@@ -292,8 +292,9 @@ const batchSectionText = componentDelta.sections.find(s => s.id === 'batch-mode'
 // absent wholesale — judged on the full section text, not a keyword).
 const componentOffAgain = await core.profileBody('standard', [])
 if (batchSectionText !== '' && !componentOffAgain.includes(batchSectionText) &&
-    !componentOffAgain.includes('STYLE PREFERENCE LAYER') && !componentOffAgain.includes('WAKE ORCHESTRATION'))
-  ok('C1. components:[] strips the whole batch section from the standard text', `${componentOffAgain.length} chars (component section ${batchSectionText.length} chars absent)`)
+    !componentOffAgain.includes('STYLE PREFERENCE LAYER') && !componentOffAgain.includes('WAKE ORCHESTRATION') &&
+    !componentOffAgain.includes('BATCH WRAP-UP CARD'))
+  ok('C1. components:[] strips the whole batch section from the standard text', `${componentOffAgain.length} chars (component section ${batchSectionText.length} chars absent, wrap-up section too)`)
 else bad('C1. component-off text', batchSectionText === '' ? 'component delta unreadable' : 'batch section content still present')
 
 // C2: ON = verbatim-equivalent to the original text (the frozen baseline),
@@ -324,7 +325,7 @@ else bad('C3. unknown component name', `profileBody threw=${c3BodyThrew} resolve
 // (deriving them from the deltas would make the check tautological).
 const expectedOrder = (inserted) => [
   'main-flow', 'workflow-enforcement', 'enforcement-done', 'enforcement-tiering', 'enforcement-recovery',
-  ...inserted, 'batch-mode', 'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
+  ...inserted, 'batch-mode', 'batch-wrap-up', 'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
   'human-communication', 'on-ramps', 'health', 'standalone', 'utilities', 'precondition', 'initialization',
 ]
 

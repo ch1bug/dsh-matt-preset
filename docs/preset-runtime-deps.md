@@ -24,7 +24,7 @@ core 包 + opt-in row，`tool-ralph` 是 in-box opt-in，两条都被它一致�
 | **core-row** | row `id` 在官方出货 preset（`@deepseek-ai/dsh-web-app` tarball `presets/{standard,ptc,minimal,cordis}.patch.yml`）**或**出货宿主组合（`dsh-base` / `dsh-web-app` 的 `cordis.patch.yml`）中有**同 id 声明** | `persona` / `tool-fs` / `workflow-ptc`（base）；`tool-cordis`（官方 cordis 档）；`tool-web`（官方 standard 档） |
 | **in-box opt-in** | 能力包随发布面 `@deepseek-ai/dsh` 的 dependencies 默认安装，但由 OPTIONAL_BUNDLES 控制默认**未启用**（Plugins 页开）；官方 preset/宿主无同 id row | `tool-ralph`；`str-replace-editor` / `tool-presentation`（row 级） |
 | **non-in-box** | 包不在发布面 dependencies，须另行安装 | `tool-subagent-codex` / `tool-subagent-claude-code`（常驻 `disabled: true` 声明位，opt-in 才激活）；`experimental-subagent-oar-codex` / `experimental-subagent-oar-claude` / `tool-subagent-oar`（同口径，#177） |
-| **in-repo** | `name` = `dsh-matt-preset/<file>.mjs`，随本 preset 包分发 | `workflow-core` / `workflow-enforcer` / `lang-enforcer` / `handoff-tool` |
+| **in-repo** | `name` = `dsh-matt-preset/<file>.mjs`，随本 preset 包分发 | `workflow-core` / `workflow-enforcer` / `lang-enforcer` / `handoff-tool` / `workflow-wrapup-card` |
 | **local-only** | 仅开发机桌面 profile 有——**不得进 roster** | 12 个 `experimental-*` 中不在发布面 dependencies 的 7 个；`danger-full-access` 沙箱 |
 
 **规约**：常驻（enabled）row 只允许 core-row；in-box opt-in 的常驻引用必须在本页
@@ -100,6 +100,27 @@ Claude Code CLI——独立上下文、完成通知回父、不支持续聊）+
    `official-presets-roster-v1.json` 的 `registeredDiff`（`matt-subagent-oar-optional`）。
 3. **归属划界**：本票只交付声明位与登记；委派真跑（OAR 启动、权限、launchArgs
    生效性）归上游与用户实测，本仓不冒认。
+
+## 批末收口卡 kind（in-repo 插件 + 外部服务前提，#182）
+
+`workflow-wrapup-card` 行（四档共用基线，`dsh-matt-preset/workflow-wrapup-card.mjs`）
+是 **in-repo** 行（随包分发，无安装前提），但它注册的卡 kind（`batch_wrap_up`）只在
+**action-cards 服务在场**时激活——这是它唯一的外部能力前提：
+
+1. **依赖**：`ctx.actionCards` 服务由 `@deepseek-ai/dsh-personalized-recommendations`
+   bundle 提供（其依赖闭包含 `dsh-action-cards` 服务与浏览器半边）。该 bundle 在发布面
+   `publishedDependencies`（90 项，#182 读数）——**默认安装、默认禁用**（上游
+   README：「shipped profiles leave it disabled」，Plugins 页启用）。
+2. **启用方式**：Plugins 页启用 Personalized recommendations；随后在 ask-matt 会话的
+   批末装载随包分发的 `batch-wrap-up` skill（经 `skill-filesystem` 的
+   `customSkillDirs` 进 catalog），根 Agent 的 `propose_action` 即可出卡。
+3. **缺席退化（双形态，S3）**：服务缺席/禁用时本插件 fiber 保持 INACTIVE（cordis
+   inject 语义，不报错、不影响 roster 其余行）；工作流正文（workflow-core）零依赖
+   此服务。ptc 档卡工具**恒不可激活**（skill 装载由 code 派发，上游不变量）。缺席
+   时批末收口走正文形态——batch 组件 `batch-wrap-up` 节的五段结构在两形态同构，
+   缺席显式声明（「收口卡缺席（<原因>）——降级为正文收口段」），判据面守卫
+   `tests/verify-wrapup-card.mjs`（W1–W8）。卡上的确认语义：kind `verbs` 为空，
+   卡只呈现不承载确认——D21 外部动作确认留在会话内门 6，不新建确认点。
 
 ## cordis 档正文的能力前提（B 层：不得让缺能力 = 做不到）
 

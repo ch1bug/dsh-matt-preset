@@ -103,6 +103,13 @@
       "mounted": true,
       "evidence": "dsh-matt-preset/handoff-tool.mjs（reasons.matt-handoff-tool）"
     },
+    "workflow-wrapup-card": {
+      "tier": "in-repo",
+      "mounted": true,
+      "evidence": "dsh-matt-preset/workflow-wrapup-card.mjs（随 preset 包分发，#182；action-cards 服务前提与缺席退化见 docs/preset-runtime-deps.md「批末收口卡 kind」——服务默认禁用属环境侧事实，正文形态为默认路径）",
+      "docPath": "docs/preset-runtime-deps.md",
+      "docMustMention": ["personalized-recommendations", "batch-wrap-up", "batch_wrap_up", "ptc"]
+    },
     "tool-presentation": {
       "tier": "in-box opt-in (row-level: core package, opt-in row)",
       "mounted": true,
