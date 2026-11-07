@@ -234,6 +234,8 @@ merely *mentions* `git push` fires nothing: a false ⚠ makes the agent stop and
 wait for a confirmation on a high-risk action that never happened, and it dilutes
 a reminder the model is supposed to obey.
 
+> **升权批准的存续语义（dsh-shell-host#190，批 R2 评估）**：`sandbox_permissions` 升权（per-call、fail-closed）与 `run_in_background` 可组合——批准的放宽模式随后台 job 存续（job 寿命由 owner 会话圈定、无过期：上游 `onExpiry: 'none'` 显式设计），即「批准一次」不等价于「用完即止」。门面不变：本表仍是 per-call 审批提醒；会话在**升权 + 后台**组合上应主动向 human 明示（放宽模式将在后台持续），批末收口时核对后台 job 清单。
+
 ### 判定面（#79：结构化，不做整串子串）
 
 | Surface | Action field | Where the gate is matched |
