@@ -48,6 +48,10 @@
   `N` 取自 `git rev-list --count origin/<branch>..HEAD`（**取数命令契约**见下节）；
   **develop 批未首推时**（`origin/develop` 缺席）`N` 改取 `main..develop`（同命令换
   range，批内「未推送」与「未合并」同量），C9 对账 loud SKIP（见契约节）。
+  **证据引用形态**：相对路径**以 `.scratch/` 本身为基准**（守卫剥一层前缀解析）——
+  写 `.scratch/verify<票号>/file.log` 会被解析成 `.scratch/.scratch/…` 而红；写裸
+  `file.log` 同红。正确形态 = `verify<票号>/file.log`。**计数括号内不写复合表述**
+  （「1 批外+1 本批」非票数单位，C9-claims 判据只认单一位数）。
 
 retro: done @ <commit>
 ```
@@ -198,6 +202,9 @@ code / 证据路径）；免确认的改标/关票动作进 wrap 的自主 diges
 （grep 只在仓内工作）——用忠实等价式：仓内文件照常 `git grep`，本机文件
 `(cd <user-scope-dir> && git grep --no-index -n …)`（#171 实测先例：skill 文件 + 仓内 brief
 双命中 exit 0）。判据本体（grep 什么）与票面同源，等价式只是执行形态——别为此改判据。
+**npm 命令的仓根副作用**：npm pack/view 在仓根跑会产 `package-lock.json` / `.tgz` 等
+未跟踪文件——用 `--pack-destination` 或临时目录指向 `.scratch/`，研究工件落地即进
+`.scratch/`，不滞留仓根（批 R' #180 对账实测教训）。
 
 **恢复时以本文件为唯一事实源**，不与记忆或环境「凭感觉对齐」：文件缺失、过期或与观测到的
 环境（git HEAD / worktree / 文件态）矛盾 → **停下问 human**，不猜、不自行修正记录（D39）。
