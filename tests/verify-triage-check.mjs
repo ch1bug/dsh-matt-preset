@@ -24,11 +24,13 @@ import { BLACKLIST, CONFLICT_FACES, HUMAN_JUDGED, PENDING_DECISION, checkTicketB
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = resolve(REPO, 'scripts/triage-check.mjs')
 const DOC = readFileSync(resolve(REPO, 'docs/agents/issue-tracker.md'), 'utf8').replace(/\r\n/g, '\n')
-/** 三份**模型真读到**的正文（skeleton、batch 组件件与 minimal 压缩版；#58 起骨架的
- *  batch-mode 节搬进组件文件——组件开 = 注入文本与原正文逐字等价，故组件件也是注入面）。 */
+/** 三份**模型真读到**的正文（skeleton、batch 组件件、lane 组件件与 minimal 压缩版；
+ *  #58 起骨架的 batch-mode 节搬进组件文件——组件开 = 注入文本与原正文逐字等价，故组件件
+ *  也是注入面；#137 起 lane 组件同批注册默认全开，同判据进列表）。 */
 const MODEL_TEXTS = {
   'workflow-body.txt': readFileSync(resolve(REPO, 'workflow-body.txt'), 'utf8').replace(/\r\n/g, '\n'),
   'workflow-component-batch.txt': readFileSync(resolve(REPO, 'workflow-component-batch.txt'), 'utf8').replace(/\r\n/g, '\n'),
+  'workflow-component-lane.txt': readFileSync(resolve(REPO, 'workflow-component-lane.txt'), 'utf8').replace(/\r\n/g, '\n'),
   'workflow-profile-minimal.txt': readFileSync(resolve(REPO, 'workflow-profile-minimal.txt'), 'utf8').replace(/\r\n/g, '\n'),
 }
 

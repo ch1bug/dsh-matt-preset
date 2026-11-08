@@ -83,15 +83,17 @@ async function main(argv) {
   console.log(`✓ 自证②：骨架往返剥标记（源 ${bodyText.length} → 渲染 ${next.body.length} chars，${next.sections} 节）`)
 
   // 自证 ②b（#58 组件组合面）：重取对象 = 组件开 standard 注入文本——必须无标记、
-  // 比骨架往返长（batch 组件节在场）、且含 batch 节首行特征。任一不成立 = 组件
-  // 组装面变了，重取会把缺组件的文本写进基线。
+  // 比骨架往返长（batch 组件节在场）、且含 batch 节首行特征。#137 起 lane 组件同批
+  // 注册且默认全开——组合面还必须含 lane 节首行特征，否则重取会把缺 lane 组件的
+  // 文本写进基线。任一不成立 = 组件组装面变了，重取会把坏字节写进基线。
   const composed = await core.profileBody('standard')
-  if (hasMarker(composed) || composed.length <= next.body.length || !composed.includes('BATCH MODE')) {
-    console.error('✗ 自证②b 失败：profileBody("standard") 组合面异常（含 "@@ " / 不比骨架往返长 / 缺 batch 组件节）')
+  if (hasMarker(composed) || composed.length <= next.body.length ||
+      !composed.includes('BATCH MODE') || !composed.includes('LANE BATCH')) {
+    console.error('✗ 自证②b 失败：profileBody("standard") 组合面异常（含 "@@ " / 不比骨架往返长 / 缺 batch 或 lane 组件节）')
     console.error(`  骨架往返 ${next.body.length} chars → 组合 ${composed.length} chars；先修 workflow-core.mjs 再重取`)
     return 1
   }
-  console.log(`✓ 自证②b：组件开组合 = 重取对象（骨架往返 ${next.body.length} → 组合 ${composed.length} chars，batch 组件节在场）`)
+  console.log(`✓ 自证②b：组件开组合 = 重取对象（骨架往返 ${next.body.length} → 组合 ${composed.length} chars，batch + lane 组件节在场）`)
 
   const nextPersona = prefix + '\n\n' + composed
   if (composed === diskBody && nextPersona === diskPersona) {

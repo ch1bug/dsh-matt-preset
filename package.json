@@ -25,6 +25,7 @@
     "workflow-core.mjs",
     "workflow-body.txt",
     "workflow-component-batch.txt",
+    "workflow-component-lane.txt",
     "workflow-profile-cordis.txt",
     "workflow-profile-ptc.txt",
     "workflow-profile-minimal.txt",

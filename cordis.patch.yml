@@ -74,8 +74,9 @@
           # 插入（marker 行永不出现在注入文本里）。本 preset 显式挂一个 profile——**正文逐字复制
           # 四份**（#99 起一个 bundle 四个模式，见 ADR-0015），故下面这行由
           # lib/bundle-patch.mjs 的生成器按模式替换，手改本文件只改除它以外的正文：
-          # 本模式挂 profile: standard（= 骨架 verbatim，与冻结基线逐字节一致——AC1 见
-          # tests/verify-workflow-profiles.mjs；基线于 #85 随文本政策变更重取，现 16 节）。
+          # 本模式挂 profile: standard（= 骨架 + 注册组件（batch/lane，#58/#137）默认全开
+          # 渲染，与冻结基线逐字节一致——AC1 见 tests/verify-workflow-profiles.mjs；基线于
+          # #85 随文本政策变更重取、#137 随 lane 组件再重取；骨架节序以 workflow-body.txt 为准）。
           # 另三档：
           # #55 cordis（创作者 preset：plugin_manager 变更纳入外部动作门 + inspect-first 契约）；
           # #56 ptc（PTC 执行形态：工具面即程序面 run_code + 生成 SDK、one-shot 程序状态落文件、

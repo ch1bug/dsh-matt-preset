@@ -176,6 +176,11 @@ if (covered.has('workflow-component-batch.txt'))
   ok('P4b. the batch component file is covered by the payload rule')
 else bad('P4b. component payload coverage', 'workflow-component-batch.txt not covered by package.json files')
 
+// #137: the lane component file ships under the same rule.
+if (covered.has('workflow-component-lane.txt'))
+  ok('P4c. the lane component file is covered by the payload rule')
+else bad('P4c. lane component payload coverage', 'workflow-component-lane.txt not covered by package.json files')
+
 // ── AC3: the delta structure duplicates nothing ─────────────────────────────
 // (Mechanism-level, independent of the render: compose the shipped cordis
 // delta onto the skeleton and count bodies. A profile that copied a shared
@@ -185,11 +190,13 @@ else bad('P4b. component payload coverage', 'workflow-component-batch.txt not co
 // skeleton sections.)
 const CORDIS_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-cordis.txt', 'utf8'))
 const COMPONENT_RAW = lf(readFileSync(REPO + '/workflow-component-batch.txt', 'utf8'))
+const LANE_COMPONENT_RAW_EARLY = lf(readFileSync(REPO + '/workflow-component-lane.txt', 'utf8'))
 const delta = core.parseSections(CORDIS_DELTA_RAW)
 const componentDelta = core.parseSections(COMPONENT_RAW)
+const laneComponentDelta = core.parseSections(LANE_COMPONENT_RAW_EARLY)
 const skeletonIds = ids
 const deltaIds = delta.sections.map(s => s.id)
-const cordisSections = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections])
+const cordisSections = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections, ...laneComponentDelta.sections])
 const cordisText = core.joinSections(cordisSections, parsed.trailingNewline)
 const countOf = (haystack, needle) => (needle === '' ? 0 : haystack.split(needle).length - 1)
 
@@ -198,7 +205,7 @@ if (new Set(composedIds).size === composedIds.length)
   ok('AC3a. composed cordis sections carry unique ids', `${composedIds.length} sections`)
 else bad('AC3a. composed ids unique', JSON.stringify(composedIds))
 
-const sharedSections = [...parsed.sections, ...componentDelta.sections]
+const sharedSections = [...parsed.sections, ...componentDelta.sections, ...laneComponentDelta.sections]
 const shadowed = sharedSections.filter(s => countOf(cordisText, s.text) !== 1).map(s => s.id)
 if (shadowed.length === 0) ok('AC3b. every shared section appears exactly once (override or untouched — never both)')
 else bad('AC3b. shared sections duplicated/shadowed', shadowed.join(', '))
@@ -281,28 +288,44 @@ if (override.includes('CUSTOM custom-model.') && !override.includes('MAIN FLOW')
   ok('AC2h. config.text still overrides the profile entirely (#54 escape hatch intact)')
 else bad('AC2h. config.text override', override.slice(0, 200))
 
-// ── C: the batch component toggle (#58 — the ticket's substantive half) ────
+// ── C: the component toggles (#58 batch + #137 lane) ────────────────────────
 // The batch-mode rule block (D31–D33) moved out of the skeleton into
 // workflow-component-batch.txt, injected as a COMPONENT: off = no batch
 // sections in the composed text (whatever carried them — the component delta
-// or a profile's override); on = byte-identical to the frozen baseline.
+// or a profile's override). #137 registers a second component (`lane`) the
+// same way: the default mount (and the frozen baseline) is skeleton + BOTH
+// components; a single-component list renders that component's sections on
+// the component-off bytes.
 const batchSectionText = componentDelta.sections.find(s => s.id === 'batch-mode')?.text ?? ''
+const laneSectionText = laneComponentDelta.sections.find(s => s.id === 'lane-batch')?.text ?? ''
 
-// C1: OFF = no batch sections reach the text (the component section body is
-// absent wholesale — judged on the full section text, not a keyword).
+// C1: OFF = neither component reaches the text (the component section bodies
+// are absent wholesale — judged on the full section text, not a keyword).
 const componentOffAgain = await core.profileBody('standard', [])
 if (batchSectionText !== '' && !componentOffAgain.includes(batchSectionText) &&
     !componentOffAgain.includes('STYLE PREFERENCE LAYER') && !componentOffAgain.includes('WAKE ORCHESTRATION') &&
-    !componentOffAgain.includes('BATCH WRAP-UP CARD'))
-  ok('C1. components:[] strips the whole batch section from the standard text', `${componentOffAgain.length} chars (component section ${batchSectionText.length} chars absent, wrap-up section too)`)
-else bad('C1. component-off text', batchSectionText === '' ? 'component delta unreadable' : 'batch section content still present')
+    !componentOffAgain.includes('BATCH WRAP-UP CARD') &&
+    laneSectionText !== '' && !componentOffAgain.includes(laneSectionText) &&
+    !componentOffAgain.includes('CAPABILITY PRECHECK') && !componentOffAgain.includes('LANE ORCHESTRATION'))
+  ok('C1. components:[] strips the batch AND lane sections from the standard text', `${componentOffAgain.length} chars (batch section ${batchSectionText.length} + lane section ${laneSectionText.length} chars absent)`)
+else bad('C1. component-off text', batchSectionText === '' || laneSectionText === '' ? 'component delta unreadable' : 'component section content still present')
 
-// C2: ON = verbatim-equivalent to the original text (the frozen baseline),
-// and naming ['batch'] explicitly renders identically to the default mount.
-const componentOn = await core.profileBody('standard', ['batch'])
+// C2: ON = verbatim-equivalent to the frozen baseline. Since #137 the default
+// mount is skeleton + batch + lane, so naming BOTH explicitly must render
+// identically to the default mount (and to `standard`).
+const componentOn = await core.profileBody('standard', ['batch', 'lane'])
 if (componentOn === BASELINE && componentOn === standard)
-  ok('C2. components:[batch] is verbatim-identical to the frozen baseline (and to the default mount)', `${componentOn.length} chars`)
+  ok('C2. components:[batch,lane] is verbatim-identical to the frozen baseline (and to the default mount)', `${componentOn.length} chars`)
 else bad('C2. component-on text', divergence(componentOn, BASELINE))
+
+// C2b (#137): a single-component list rides the component-off bytes plus that
+// component's sections — `['batch']` = batch sections present, lane sections
+// absent (and vice versa; C8 below).
+const componentBatchOnly = await core.profileBody('standard', ['batch'])
+if (componentBatchOnly.includes(batchSectionText) && laneSectionText !== '' &&
+    !componentBatchOnly.includes(laneSectionText))
+  ok('C2b. components:[batch] = batch sections on the component-off bytes, lane sections absent', `${componentBatchOnly.length} chars`)
+else bad('C2b. batch-only mount', `batchPresent=${componentBatchOnly.includes(batchSectionText)} laneLeaked=${laneSectionText !== '' && componentBatchOnly.includes(laneSectionText)}`)
 
 // C3: an unknown component name is LOUD (a typoed switch must never silently
 // do nothing) — profileBody, resolveComponents AND the apply mount all throw
@@ -325,11 +348,12 @@ else bad('C3. unknown component name', `profileBody threw=${c3BodyThrew} resolve
 // (deriving them from the deltas would make the check tautological).
 const expectedOrder = (inserted) => [
   'main-flow', 'workflow-enforcement', 'enforcement-done', 'enforcement-tiering', 'enforcement-recovery',
-  ...inserted, 'batch-mode', 'batch-wrap-up', 'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
+  ...inserted, 'batch-mode', 'batch-wrap-up', 'lane-batch', 'lane-orchestration',
+  'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
   'human-communication', 'on-ramps', 'health', 'standalone', 'utilities', 'precondition', 'initialization',
 ]
 
-const cordisComposed = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections])
+const cordisComposed = core.composeSections(parsed.sections, [...delta.sections, ...componentDelta.sections, ...laneComponentDelta.sections])
 const cordisOrder = cordisComposed.map(s => s.id)
 if (cordisOrder.join(',') === expectedOrder(['creator-context', 'creator-gate-extension', 'creator-inspect-first']).join(','))
   ok('C4. cordis + batch component: section order unchanged (component lands after the creator chain)', `${cordisOrder.length} sections`)
@@ -342,7 +366,7 @@ else bad('C5. cordis component-off', batchSectionText === '' ? 'component delta 
 
 const PTC_DELTA_RAW = lf(readFileSync(REPO + '/workflow-profile-ptc.txt', 'utf8'))
 const ptcDelta = core.parseSections(PTC_DELTA_RAW)
-const ptcComposed = core.composeSections(parsed.sections, [...ptcDelta.sections, ...componentDelta.sections])
+const ptcComposed = core.composeSections(parsed.sections, [...ptcDelta.sections, ...componentDelta.sections, ...laneComponentDelta.sections])
 const ptcOrder = ptcComposed.map(s => s.id)
 if (ptcOrder.join(',') === expectedOrder(['ptc-execution-shape', 'ptc-loop-surface', 'ptc-orchestration', 'ptc-gate-scope']).join(','))
   ok('C6. ptc + batch component: section order unchanged (component lands after the ptc chain)', `${ptcOrder.length} sections`)
@@ -355,5 +379,35 @@ const minimalOff = await core.profileBody('minimal', [])
 if (minBatchText !== '' && !minimalOff.includes(minBatchText))
   ok('C7. components:[] under minimal: the profile\'s own batch override disappears too', `${minimalOff.length} chars`)
 else bad('C7. minimal component-off', minBatchText === '' ? 'minimal delta unreadable' : 'minimal batch section still present')
+
+// ── C8: the lane component toggle (#137 — symmetric to C2b) ─────────────────
+// `['lane']` renders the lane sections on the component-off bytes with the
+// batch sections stripped — and it must RESOLVE at all: lane-batch anchors at
+// the skeleton's enforcement-recovery (never at a batch section), so mounting
+// lane without batch cannot hit an unknown-anchor throw.
+const componentLaneOnly = await core.profileBody('standard', ['lane'])
+if (componentLaneOnly.includes(laneSectionText) && batchSectionText !== '' &&
+    !componentLaneOnly.includes(batchSectionText) &&
+    !componentLaneOnly.includes('BATCH WRAP-UP CARD'))
+  ok('C8. components:[lane] = lane sections on the component-off bytes, batch sections absent (anchor resolves without batch)', `${componentLaneOnly.length} chars`)
+else bad('C8. lane-only mount', `lanePresent=${componentLaneOnly.includes(laneSectionText)} batchLeaked=${batchSectionText !== '' && componentLaneOnly.includes(batchSectionText)}`)
+
+// C9: both components registered with their section ids, default = all.
+if (core.DEFAULT_COMPONENTS.join(',') === 'batch,lane' &&
+    core.COMPONENTS.lane?.sectionIds?.join(',') === 'lane-batch,lane-orchestration' &&
+    core.COMPONENTS.batch?.sectionIds?.join(',') === 'batch-mode,batch-wrap-up')
+  ok('C9. components registry: batch + lane, default mount = both', core.DEFAULT_COMPONENTS.join(', '))
+else bad('C9. components registry', JSON.stringify({ DEFAULT_COMPONENTS: core.DEFAULT_COMPONENTS, lane: core.COMPONENTS.lane?.sectionIds, batch: core.COMPONENTS.batch?.sectionIds }))
+
+// C10 (#137, 复审意见 5): minimal × lane composition is INTENTIONAL — minimal
+// compresses the batch sections (pre-#58 text existed to preserve) but ships
+// the lane sections at full length (no pre-#137 text to compress). The
+// composition must therefore carry the lane sections VERBATIM into the
+// token-budget profile — asserted here on the real render, not derived from
+// the deltas (deriving would make the check tautological).
+const minimalLane = await core.profileBody('minimal')
+if (laneSectionText !== '' && minimalLane.includes(laneSectionText))
+  ok('C10. minimal render carries the lane sections verbatim (intentional no-compress, declared in workflow-core.mjs)', `${minimalLane.length} chars`)
+else bad('C10. minimal × lane composition', 'lane section text missing from the minimal render')
 
 report('WORKFLOW-PROFILES VERIFY (mechanism + AC1/AC2/AC3 + components)')

@@ -492,9 +492,12 @@ try {
 try {
   // #58 组件化：batch-mode 段搬进 workflow-component-batch.txt（组件开 = 与原正文逐字
   // 等价）——判据对象 = 注入文本的承载源并集（骨架 + 组件文件拼接；副本计数与节间分隔
-  // 无关）。组件文件缺席时这里是 throw → track F 响亮红，不静默。
+  // 无关）。#137 起并集含 lane 组件（第二批注册组件——lane 正文现不含凭据字面，拼入
+  // 不改计数，但「将来承载即漏计」的盲区一并堵上，复审意见 4）。组件文件缺席时这里是
+  // throw → track F 响亮红，不静默。
   const bodyF = readFileSync(join(MATT_DIR, 'workflow-body.txt'), 'utf8').replace(/\r\n/g, '\n') +
-    readFileSync(join(MATT_DIR, 'workflow-component-batch.txt'), 'utf8').replace(/\r\n/g, '\n')
+    readFileSync(join(MATT_DIR, 'workflow-component-batch.txt'), 'utf8').replace(/\r\n/g, '\n') +
+    readFileSync(join(MATT_DIR, 'workflow-component-lane.txt'), 'utf8').replace(/\r\n/g, '\n')
   const countF = (text, lit) => text.split(lit).length - 1
   // 每个字面的承载副本清单（现文三处：batch-mode 段（组件文件）+ 父端段 + child 段——
   // 增删副本时这里同步改计数，改漏 = 本项红，正是守卫要拦的漂移）。

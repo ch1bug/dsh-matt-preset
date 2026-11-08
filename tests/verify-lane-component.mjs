@@ -1,0 +1,161 @@
+/**
+ * verify-lane-component.mjs — #137：泳道组件正文与运行手册的判据一致性守卫。
+ *
+ * 为什么单独一个守卫：lane 的判据有**两处承载**——组件正文
+ * `workflow-component-lane.txt`（注入 Lead 会话的判据语义）与运行手册
+ * `docs/lane-batch.md`（操作 runbook）。票面 AC3 要求「能力检测与降级语义，组件正文
+ * 与手册各一处，判据一致」——两处各写一份就会漂，本守卫把一致性变成机械断言：
+ * 关键判据词形在**两个**文件都必须在场（多 carrier 断言，#135 P135_CARRIERS 同款），
+ * 组件引用的脚本/文档 target 必须存在（SG4 同款：引用必须是活的）。
+ *
+ * 断言面：
+ *   L1  组件文件与两节标记（锚序：lane-batch 锚骨架节 enforcement-recovery，
+ *       lane-orchestration 链在 lane-batch 后——lane 不依赖 batch 节在场）。
+ *   L2  注册面：workflow-core.mjs 的 COMPONENTS.lane 指向该文件、sectionIds 与
+ *       节标记一致（import 模块本身，不手抄注册表）。
+ *   L3  能力检测与降级判据双承载（组件 + 手册）：spawn_teammate / create_worktree
+ *       工具面检测、forge-bundle 指称、串行 batch 降级 + D47、装不齐顺延不造假。
+ *   L4  手册承载 AC1/AC3 操作要素：lane-audit 收敛、默认 3 上限 4、link-runtime-deps、
+ *       lane-disk-guard、20 GB 默认 + lane-gates.yml 覆写、batch-reconcile、
+ *       整批一 PR + merge 恒 human 门、npm alpha.2 不采、fresh context、notes 仓外、
+ *       target/ 红线。
+ *   L5  组件正文引用的文件 target 全部存在（缺席 = 死引用，响亮红）。
+ */
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const REPO = dirname(dirname(fileURLToPath(import.meta.url)))
+const read = (rel) => readFileSync(join(REPO, rel), 'utf8').replace(/\r\n/g, '\n')
+
+const results = []
+const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
+const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
+const report = (title) => {
+  console.log(`\n=== ${title} ===`)
+  console.log(results.join('\n'))
+  process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
+}
+
+let component
+let manual
+try {
+  component = read('workflow-component-lane.txt')
+} catch (error) {
+  bad('L0. 组件文件可读', String(error?.message ?? error))
+  report('LANE COMPONENT VERIFY (#137)')
+}
+try {
+  manual = read('docs/lane-batch.md')
+} catch (error) {
+  bad('L0. 手册可读', String(error?.message ?? error))
+  report('LANE COMPONENT VERIFY (#137)')
+}
+
+// ── L1: 组件结构与锚序 ────────────────────────────────────────────────────────
+{
+  const markers = [...component.matchAll(/^@@ (.+)$/gm)].map(m => m[1])
+  const want = ['lane-batch after=enforcement-recovery', 'lane-orchestration after=lane-batch']
+  if (markers.length === want.length && want.every((w, i) => markers[i] === w))
+    ok('L1. 组件两节标记与锚序正确（lane 锚骨架节，不依赖 batch 节在场）', markers.join(' | '))
+  else bad('L1. 组件节标记', `got: ${markers.join(' | ')}`)
+
+  const banned = [...component.matchAll(/^@@ .*(tight).*$/gm)]
+  if (banned.length === 0) ok('L1b. 组件 delta 不声明 tight（tight 属骨架位置，delta 声明即响亮抛）')
+  else bad('L1b. 组件 delta 带 tight 标记', banned.map(m => m[0]).join(' / '))
+}
+
+// ── L2: 注册面（读模块，不手抄）──────────────────────────────────────────────
+{
+  let core = null
+  try {
+    core = await import(pathToFileURL(join(REPO, 'workflow-core.mjs')).href)
+  } catch (error) {
+    bad('L2. workflow-core 可导入', String(error?.message ?? error))
+  }
+  if (core !== null) {
+    const lane = core.COMPONENTS?.lane
+    const deltaName = lane?.delta instanceof URL ? lane.delta.pathname.split('/').at(-1) : String(lane?.delta)
+    if (deltaName === 'workflow-component-lane.txt' && lane?.sectionIds?.join(',') === 'lane-batch,lane-orchestration')
+      ok('L2. COMPONENTS.lane 注册面与组件文件/节 id 一致', `sectionIds: ${lane.sectionIds.join(', ')}`)
+    else bad('L2. COMPONENTS.lane 注册面', JSON.stringify({ delta: deltaName, sectionIds: lane?.sectionIds }))
+    if (core.DEFAULT_COMPONENTS?.includes('lane'))
+      ok('L2b. lane 默认全开（DEFAULT_COMPONENTS 含 lane——注册即默认，#58 同款）')
+    else bad('L2b. lane 未默认挂载', JSON.stringify(core.DEFAULT_COMPONENTS))
+  }
+}
+
+// ── L3: 能力检测与降级判据双承载（组件 + 手册）─────────────────────────────────
+{
+  // 组件（英文正文）与手册（中文 runbook）各断各的词形——判据一致由**两处都在场**钉住。
+  const componentNeeds = [
+    ['spawn_teammate', /spawn_teammate/],
+    ['create_worktree', /create_worktree/],
+    ['工具面判据（非版本号猜测）', /SESSION TOOL SURFACE|tool names are callable|never a version/],
+    ['forge-bundle 指称', /forge-bundle/],
+    ['串行 batch 降级 + D47', /serial batch mode[\s\S]{0,200}D47|D47[\s\S]{0,200}serial batch/],
+    ['装不齐顺延不造假', /POSTPONED|fakes parallel lanes/],
+  ]
+  const manualNeeds = [
+    ['spawn_teammate', /spawn_teammate/],
+    ['create_worktree', /create_worktree/],
+    ['工具面判据（非版本号猜测）', /工具面/],
+    ['forge-bundle 指称', /forge-bundle/],
+    ['串行 batch 降级 + D47', /串行 batch/],
+    ['装不齐顺延不造假', /顺延/],
+    ['安装 = D21 外部动作', /D21/],
+  ]
+  for (const [file, text, needs, tag] of [['组件', component, componentNeeds, 'L3a'], ['手册', manual, manualNeeds, 'L3b']]) {
+    const missing = needs.filter(([, re]) => !re.test(text)).map(([label]) => label)
+    if (missing.length === 0) ok(`${tag}. ${file}承载能力检测与降级判据（全部词形在场）`, `${needs.length} 项`)
+    else bad(`${tag}. ${file}判据缺词形`, missing.join(' / '))
+  }
+}
+
+// ── L4: 手册操作要素（AC1/AC3 的承载点）──────────────────────────────────────
+{
+  const needs = [
+    ['lane-audit 收敛判据', /lane-audit\.mjs/],
+    // 判据绑不可删的具体 token（复审意见 2）：fallback 到标题词/常用词会把「内容删光仍绿」
+    // 的恒真分支藏进断言——冷启动只认实测区间数字、源码装法只认 rc.1、lane 数不设宽松分支。
+    ['默认 3 上限 4', /默认 3，硬上限 4/],
+    ['依赖补齐脚本', /link-runtime-deps\.mjs/],
+    ['冷启动成本区间（实测数字）', /1\.8–2\.2 s/],
+    ['磁盘守卫脚本', /lane-disk-guard\.mjs/],
+    ['默认 20 GB', /20 GB/],
+    ['lane-gates.yml 覆写', /lane-gates\.yml/],
+    ['批末对账', /batch-reconcile\.mjs/],
+    ['整批一 PR', /整批一 PR|一个 CR/],
+    ['merge 恒 human 门', /merge 恒为 human 门|merge 恒 human 门/],
+    ['ADR-0002 升级表述', /批末 PR 就绪门/],
+    ['npm alpha.2 不采', /alpha\.2/],
+    ['fresh context', /fresh context/i],
+    ['notes 仓外', /仓外/],
+    ['构建产物目录红线', /不共享构建产物目录|不共享 `target/],
+    ['experimental 面源码装法', /rc\.1/],
+  ]
+  const missing = needs.filter(([, re]) => !re.test(manual)).map(([label]) => label)
+  if (missing.length === 0) ok('L4. 手册承载 AC1/AC3 全部操作要素', `${needs.length} 项`)
+  else bad('L4. 手册缺要素', missing.join(' / '))
+
+  // 组件与手册的数字判据必须一致（3/4 与 20GB 两处各写一份，写漏/写岔即红）。
+  const consistent = /default 3 lanes, hard cap 4/.test(component) && /默认 3，硬上限 4/.test(manual) &&
+    /20 GB/.test(component) && /20 GB/.test(manual)
+  if (consistent) ok('L4b. 数字判据两处一致（lane 数 3/4、磁盘 20 GB）')
+  else bad('L4b. 数字判据两处不一致或缺席', '组件与手册的 3/4 与 20 GB 逐处核对')
+}
+
+// ── L5: 组件正文引用的 target 全部存在（死引用 = 响亮红）─────────────────────
+{
+  const refs = [...component.matchAll(/`(docs\/[\w./-]+|scripts\/[\w./-]+)`/g)].map(m => m[1])
+  const unique = [...new Set(refs)]
+  const dead = unique.filter(rel => !existsSync(join(REPO, rel)))
+  if (unique.length > 0 && dead.length === 0)
+    ok('L5. 组件正文引用的文件全部存在', unique.join(', '))
+  else if (unique.length === 0)
+    bad('L5. 组件正文没有可检验的引用（指针面退化成无锚散文）')
+  else
+    bad('L5. 组件正文死引用', dead.join(' / '))
+}
+
+report('LANE COMPONENT VERIFY (#137 — 组件 × 手册判据一致性)')

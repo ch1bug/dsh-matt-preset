@@ -345,20 +345,30 @@ else bad('AC2d. minimal/standard ratio', `${minimal.length} / ${standard.length}
 // override replaces it in place — nothing is left behind), and every delta
 // body appears once. #58: the SHARED text = skeleton + batch component file
 // (minimal rewrites the batch-mode section too — its "was" is the component
-// section now).
+// section now). #137: the lane component joins the shared set — minimal does
+// NOT compress it, so its sections must appear exactly once in the minimal
+// render under the same rule (复审意见 4：并集随新组件扩展，堵未来承载盲区).
 const COMPONENT_RAW_2 = lf(readFileSync(REPO + '/workflow-component-batch.txt', 'utf8'))
+const LANE_COMPONENT_RAW_2 = lf(readFileSync(REPO + '/workflow-component-lane.txt', 'utf8'))
 const componentDelta2 = core.parseSections(COMPONENT_RAW_2)
-const sharedSections2 = [...parsed.sections, ...componentDelta2.sections.filter(s => !ids.includes(s.id))]
+const laneComponentDelta2 = core.parseSections(LANE_COMPONENT_RAW_2)
+const sharedSections2 = [...parsed.sections, ...componentDelta2.sections.filter(s => !ids.includes(s.id)), ...laneComponentDelta2.sections]
 const sharedIds2 = sharedSections2.map(s => s.id)
 const sharedTextOf = (id) => sharedSections2.find(s => s.id === id)?.text
+// #137（复审意见 4/5）：结构判定对象 = **真实渲染**（profileBody('minimal')，骨架 +
+// minimal delta + 默认组件节）而不是骨架+delta 组合——组件节是 shared 的一部分，
+// 组合口径根本不含它们（batch 节靠「minimal 覆盖了它们」侥幸绕开，lane 节 minimal 不
+// 覆盖，组合口径恒 0 次 = 判据失明）。真实渲染下：untouched 节恰一次（含 lane 全文）、
+// 被覆盖节的原文本 0 次、delta 文本恰一次，三条才真正成立。
+const minRendered = minimal
 const minUntouchedShadowed = sharedIds2
   .filter(id => !minDeltaIds.includes(id))
-  .filter(id => countOf(minText, sharedTextOf(id)) !== 1)
+  .filter(id => countOf(minRendered, sharedTextOf(id)) !== 1)
 const overriddenCount = sharedIds2.filter(id => minDeltaIds.includes(id)).length
 const minLeftovers = sharedIds2
   .filter(id => minDeltaIds.includes(id))
-  .filter(id => countOf(minText, sharedTextOf(id)) !== 0)
-const minDeltaCopies = minDeltaIds.filter(id => countOf(minText, minDelta.sections.find(s => s.id === id).text) !== 1)
+  .filter(id => countOf(minRendered, sharedTextOf(id)) !== 0)
+const minDeltaCopies = minDeltaIds.filter(id => countOf(minRendered, minDelta.sections.find(s => s.id === id).text) !== 1)
 if (minUntouchedShadowed.length === 0 && minLeftovers.length === 0 && minDeltaCopies.length === 0)
   ok('AC2e. nothing is duplicated and nothing is left behind', `${sharedIds2.filter(id => !minDeltaIds.includes(id)).length} untouched, ${overriddenCount} rewritten`)
 else bad('AC2e. minimal structure', `shadowed: ${minUntouchedShadowed.join(', ') || 'none'}; leftover skeleton: ${minLeftovers.join(', ') || 'none'}; delta copies: ${minDeltaCopies.join(', ') || 'none'}`)

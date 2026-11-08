@@ -112,14 +112,16 @@ const read = (rel) => {
 // #58 组件化：`@@ batch-mode` 节正文搬进 workflow-component-batch.txt（组件受控注入，
 // 组件开 = 注入文本与原骨架逐字等价）。判据对象 = **注入文本的承载源并集** = 骨架 +
 // 组件文件（C3 的节切/C5 的词形/C6 的节 id 都与节间分隔无关，拼接文本即足）；
-// 组件文件缺席同样响亮红（它现在是 batch 规则的唯一载体）。
+// #137 起并集含 lane 组件（lane 正文现不含受钉字段/词形，拼入不改判定，防未来承载盲区，
+// 复审意见 4）。组件文件缺席同样响亮红（它现在是 batch 规则的唯一载体）。
 const DOC = read('docs/batch-state.md')
 const SKELETON = read('workflow-body.txt')
 const COMPONENT = read('workflow-component-batch.txt')
-const BODY = SKELETON === null || COMPONENT === null ? null : SKELETON + COMPONENT
+const LANE_COMPONENT = read('workflow-component-lane.txt')
+const BODY = SKELETON === null || COMPONENT === null || LANE_COMPONENT === null ? null : SKELETON + COMPONENT + LANE_COMPONENT
 const ENFORCER = read('workflow-enforcer.mjs')
 
-for (const [rel, text] of [['docs/batch-state.md', DOC], ['workflow-body.txt', SKELETON], ['workflow-component-batch.txt', COMPONENT], ['workflow-enforcer.mjs', ENFORCER]]) {
+for (const [rel, text] of [['docs/batch-state.md', DOC], ['workflow-body.txt', SKELETON], ['workflow-component-batch.txt', COMPONENT], ['workflow-component-lane.txt', LANE_COMPONENT], ['workflow-enforcer.mjs', ENFORCER]]) {
   if (text === null) bad(`C0. ${rel} 可读`, '文件缺失或不可读 —— 载体面缺一张脸')
 }
 if (DOC === null || BODY === null || ENFORCER === null) report('BATCH-STATE VERIFY (C1–C6)')

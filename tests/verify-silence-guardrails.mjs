@@ -91,7 +91,7 @@ else bad('SG2. AGENTS.md 指针', '缺指向 docs/silence-guardrails.md 的 S1�
 // ⚠ 显式声明不覆盖（D13/Y7d 口径）：本判据只匹配**中文判据短语**字面——四份注入正文
 // 是英文，判据表的**英文翻译版**复述进正文时此断言恒绿。跨语言复述是开放集（机械提取
 // 必误抓），交人判/复核；威胁模型弱（正文作者就是本仓会话，判据表锚点纪律在同会话视野内）。
-const injected = ['workflow-body.txt', 'workflow-component-batch.txt', 'workflow-profile-ptc.txt', 'workflow-profile-minimal.txt', 'workflow-profile-cordis.txt']
+const injected = ['workflow-body.txt', 'workflow-component-batch.txt', 'workflow-component-lane.txt', 'workflow-profile-ptc.txt', 'workflow-profile-minimal.txt', 'workflow-profile-cordis.txt']
   .map(f => read(f)).join('\n')
 const leaked = tableRows.filter(r => injected.includes(r.criterion))
 if (leaked.length === 0)

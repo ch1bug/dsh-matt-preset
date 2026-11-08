@@ -409,9 +409,11 @@ const planPoll = (plan) => { let i = 0; return async () => plan[Math.min(i++, pl
 // ── O8 文档同批落地（正文条 + 审计位节 + minimal 压缩面）───────────────────────
 {
   // #58 组件化：WAKE ORCHESTRATION / AUTONOMY DIGEST 条搬进 workflow-component-batch.txt
-  // （组件开 = 与原正文逐字等价）——判据对象 = 骨架 + 组件文件拼接。
+  // （组件开 = 与原正文逐字等价）——判据对象 = 骨架 + 组件文件拼接。#137 起并集含
+  // lane 组件（现不含受钉词形，防未来承载盲区，复审意见 4）。
   const body = readFileSync(join(REPO, 'workflow-body.txt'), 'utf8') +
-    readFileSync(join(REPO, 'workflow-component-batch.txt'), 'utf8')
+    readFileSync(join(REPO, 'workflow-component-batch.txt'), 'utf8') +
+    readFileSync(join(REPO, 'workflow-component-lane.txt'), 'utf8')
   const batchState = readFileSync(join(REPO, 'docs/batch-state.md'), 'utf8')
   const minimal = readFileSync(join(REPO, 'workflow-profile-minimal.txt'), 'utf8')
   const a = body.includes('WAKE ORCHESTRATION') && body.includes('subagentCatalog') && body.includes('lib/autonomy-orchestration.mjs')

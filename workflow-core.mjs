@@ -127,6 +127,18 @@ export const COMPONENTS = {
     // minimal's compressed override wins over the component default per id.
     sectionIds: ['batch-mode', 'batch-wrap-up'],
   },
+  // #137 (ADR-0018): the lane-batch rule block — same shape as `batch`: both
+  // sections anchor at the skeleton (`enforcement-recovery`), the second
+  // chained after the first INSIDE this delta (like batch-wrap-up after
+  // batch-mode), so mounting `lane` without `batch` still resolves (the
+  // anchor is a skeleton section, never a batch one). Both sections toggle
+  // together: `components: []` removes lane batching from the composed text
+  // under every profile; minimal does not compress them (no pre-#137 text
+  // existed to preserve — the lane rules are new, not moved).
+  lane: {
+    delta: new URL('./workflow-component-lane.txt', import.meta.url),
+    sectionIds: ['lane-batch', 'lane-orchestration'],
+  },
 }
 
 /** Components a mount gets when config does not name any — every registered

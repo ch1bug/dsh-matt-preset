@@ -696,6 +696,82 @@ tally, a red CI presents its commit-boundary bisection result in
 section (4) before re-push, and the pileup-guardrail checkpoint
 (10 unpushed tickets or 3 days) is restated here with its counts.
 
+LANE BATCH（泳道批）— only when the human declares a lane batch (泳道批 /
+lane 批); never on by default. Single-issue work and the plain serial batch
+keep their own shapes. The authoritative narrative is ADR-0018 (the DSH-
+native orchestration is the product target — Team Lead + teammates + worktree
+service + forge CR); the full runbook (procedure, task-board field mapping,
+experimental-face install, cold-start cost) lives in `docs/lane-batch.md` —
+this text points at it and never restates it: a second copy of the runbook
+is a drift seed.
+- CAPABILITY PRECHECK（能力前置检测 — before ANYTHING else in a lane batch）:
+  probe the SESSION TOOL SURFACE for `spawn_teammate` and `create_worktree`
+  — the check is whether those two tool names are callable from THIS
+  session's tool list, never a version-number or config-file guess. EITHER
+  MISSING → say it out loud: name the missing tool(s), point at the
+  forge-bundle install runbook (`docs/lane-batch.md`; the experimental face
+  is installed FROM SOURCE at the rc.1 checkout — npm alpha.2 is version-
+  misaligned and NOT adopted), and DEGRADE to the existing serial batch mode
+  (D47: never silent, never assume presence). If the face cannot be
+  installed, the lane batch is POSTPONED — installing the experimental face
+  needs the human's confirmation (an external action, D21); a degraded run
+  that fakes parallel lanes is worse than no run.
+- LANE GUARDRAILS（lane 数与收敛）: default 3 lanes, hard cap 4. The ACTUAL
+  lane count is decided by the ticket audit, not by preference: run
+  `scripts/lane-audit.mjs` (#136) — tickets whose touch-sets overlap are
+  SERIAL (same lane, one after another, or merged into one lane), never
+  parallel; the lane count equals the number of independent serial groups,
+  and groups beyond the cap wait for the next batch. A batch smaller than
+  the default takes its real size; the first live run starts at parallelism
+  2 (small- to mid-size tickets, disjoint touch-sets).
+- LANE ISOLATION（隔离原语 = create_worktree）: each lane implementer is a
+  teammate the Lead creates with `spawn_teammate` (FRESH context — no batch
+  history carries over); INSIDE its own session the teammate calls
+  `create_worktree` for an isolated worktree on its own branch. Checkout
+  pool, automatic naming and deleted-worktree recovery are the DSH worktree
+  service's job — the Lead does ZERO manual `git worktree` plumbing. Red
+  line: lanes never share `target/` (or any build-output directory); the
+  ONLY allowed cross-lane share is the backend / content-addressed cache.
+- DEP BOOTSTRAP（依赖补齐）: `node_modules` is not in git — EVERY new
+  worktree runs `scripts/link-runtime-deps.mjs` (D43) before its first
+  build or test run. Budget the cold-start cost per lane (the measured
+  range lives in `docs/lane-batch.md`; do not guess numbers here).
+- DISK SOFT GUARD（磁盘软守卫 — Windows has no per-directory hard quota）:
+  at each lane's close-out, run `scripts/lane-disk-guard.mjs` ONCE to
+  measure the worktree pool size. Default threshold 20 GB, overridable per
+  repo via `lane-gates.yml`. OVER the threshold → that lane STOPS taking
+  new work, a GC of the pool is due, and the digest carries ONE `⚠` line
+  with the measured size — never a silent continue (D47). The guard script
+  measures and reports; it never deletes anything itself.
+
+LANE ORCHESTRATION（四件编排语义 — the four semantics that make a lane batch
+more than N serial batches in parallel clothes; ADR-0018 §Decision 1/4）:
+- DYNAMIC KICK: when the frontier moves (a lane finishes and frees a slot,
+  or a blocked ticket turns ready), the Lead spawns the NEXT teammate right
+  away with `spawn_teammate` — no per-ticket wake-up messages, no waiting
+  for a human to hand out the next ticket.
+- MERGER DEDICATED: merging a finished lane is a DEDICATED worker's job (a
+  merger teammate owning the integration branch), NOT the implementer's and
+  NOT the Lead's — the Lead only does the final review.
+- EXPLORATION ONCE: the exploration subagent runs ONCE per batch; its notes
+  live in a directory OUTSIDE the repo (workspace-level, not per-lane, so
+  lane worktrees never inherit or dirty them) and every teammate in the
+  batch reads the SAME notes instead of re-exploring.
+- ONE PR PER BATCH（收口 = 整批一 PR）: the lane branches converge into ONE
+  CR (forge semantics, `forge-github` driving) — never one PR per lane.
+  Relation to ADR-0002, one binding sentence: ADR-0002's 「批末 push 门」 is
+  upgraded IN WORDING to the 「批末 PR 就绪门」 (batch-end PR-ready gate) —
+  pushing branches (non-force) and `gh pr create` sit inside the D21
+  pre-authorized face, MERGE is always a human gate (never pre-authorized),
+  and the first live run opens the CR WITHOUT merging it. ADR-0002's text
+  itself is NOT edited.
+- BATCH-END FACE: the serial batch's close-out machinery applies unchanged
+  — the wrap-up card, the push checkpoint and the mechanical reconciliation
+  (`scripts/batch-reconcile.mjs`, #165: task-board projection × git ×
+  ticket-board cross-check) run at the lane batch's end exactly as at a
+  serial batch's end; the task board (agent-team) is the authority for
+  ticket progress, git for the unpushed list.
+
 TEXT PUSHES EXCLUDE ACTIONS — a push whose diff contains only text/docs
 changes (CHANGELOG.md, docs/**, AGENTS.md, *.md, .github/**) must not
 trigger CI: the repo's ci.yml should carry paths-ignore for those paths,
