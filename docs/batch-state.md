@@ -34,7 +34,7 @@
 
 ## 结束点
 
-<批次收束的判据：全部完成 + 每票本地验证绿 + 批末全量 `node scripts/verify-all.mjs --all` 绿（develop 上）+ 未合并对账 `git rev-list --count main..develop` → 批末总结 + retro → human 确认 → 闸口：merge develop→main + push>
+<批次收束的判据：全部完成 + 每票本地验证绿 + 批末全量 `node scripts/verify-all.mjs --all` 绿（develop 上）+ 未合并对账 `git rev-list --count main..develop` → 批末总结 + retro → human 确认 → 闸口：merge develop→main + push；全量由**主会话**跑，编排环境的读数仅参考、不作为收口判据（两环境 PATH/bash 身份系统性不同——入口首行 `env-fingerprint` 指纹可归因，#183）>
 
 ## 进度日志（每票结束更新）
 

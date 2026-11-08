@@ -44,6 +44,18 @@
  * git 不可用时静默不猜、不带该段，且不改 exit code）；失败输出含 `ERR_MODULE_NOT_FOUND` 时
  * 额外给一行指路（`node scripts/link-runtime-deps.mjs`，D47 高危①）。末段给**本次总耗时**
  * （分层前后的读数就是靠它对的）。
+ *
+ * ── 环境指纹自检位（#183）：首行输出 `env-fingerprint: …` ────────────────────────
+ * **本进程打印的第一行**（在任何用例启动与参数解析之前——用法错误提前退出的运行也带指纹，
+ * tail 被截断的读数照样保得住这一行）：`node=… bash=… dsh=… path0=…`。为什么存在：编排
+ * 环境（world.run）与主会话交互环境的 PATH / bash 身份 / 工具链系统性不同，批 P/Q/R' +
+ * host 批 O/R 五次门禁假红、用例名不可恢复——**指纹不同的两份读数不要互相解释**，归因从
+ * 这一行开始。取数口径：`node=` = `process.execPath`；`bash=` = 本进程 PATH 上解析到的
+ * bash 自报路径（`$BASH`；探针失败时如实标注形态，不猜）；`path0=` = `PATH` 首条目原样
+ * 照抄（AC③ 的对照轴：编排环境与主会话至少这一项不同）；`dsh=` = **进程自身的
+ * `DSH_HOME`**（不是子进程隔离 home——那两套环境都是同样的临时目录，没有归因价值）的
+ * 8 位 sha256 短指纹：家目录原路径不进日志（AGENTS.md 隐私口径），两份读数比**等值**
+ * 照旧可做。不阻断、不判断好坏、不进退出码——它只是读数的来源标签。
  * 环境变量（未设置时对应项响亮跳过，不阻塞常规套件）：
  *   DSH_MATT_INSTALLER=1   跑 verify-installer.mjs（store 侧离线实跑；profile-link 断言需本机 dsh）
  *   DSH_MATT_E2E=1         跑 sandcastle-e2e.mjs（需要 podman）
@@ -52,12 +64,31 @@
  *   DEEPSEEK_API_KEY       真实 LLM 层（或 DSH_MATT_REAL_CREDENTIALS_SOURCE）
  */
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+// ── 环境指纹自检位（#183）：首行输出，契约见头注「环境指纹自检位」节 ─────────────
+// 放在一切之前（连参数解析都还没跑）：早退 / 被截断的读数也带着来源标签。
+const PATH_DELIM = process.platform === 'win32' ? ';' : ':'
+const path0 = (process.env.PATH ?? '').split(PATH_DELIM)[0]?.trim() || '(无)'
+const bashProbe = spawnSync('bash', ['-c', 'printf %s "$BASH"'], { encoding: 'utf8', timeout: 3000, windowsHide: true })
+// 探针失败**如实标注形态**（ENOENT = 本进程 PATH 上没有 bash；超时/其它也写明）——
+// "bash 解析差异"正是编排假红的根因之一（批 O），它本身就是要读出来的环境事实，不猜不粉饰。
+const bashField = bashProbe.error !== undefined
+  ? (bashProbe.error.code === 'ENOENT' ? 'bash=(不在 PATH)' : `bash=(探针失败:${bashProbe.error.code ?? bashProbe.error.message})`)
+  : bashProbe.stdout?.trim() ? `bash=${bashProbe.stdout.trim()}` : 'bash=(无读数)'
+// DSH_HOME 指纹取**进程自身**的值（编排环境 vs 主会话的差异就在这里；子进程的隔离 home
+// 是统一临时目录，没有归因价值）。8 位 sha256 短指纹：原路径不进日志（隐私口径），等值比较照旧。
+const dshHome = process.env.DSH_HOME
+const dshField = dshHome === undefined || dshHome === ''
+  ? 'dsh=(未设置)'
+  : `dsh=sha256-${createHash('sha256').update(dshHome).digest('hex').slice(0, 8)}`
+console.log(`env-fingerprint: node=${process.execPath} ${bashField} ${dshField} path0=${path0}`)
 
 // ── 参数：分层开关 + 每项 watchdog（#129）。未知参数硬失败，见头注。 ──────────────
 const USAGE = '用法: node scripts/verify-all.mjs [--all] [--timeout=<毫秒>]'

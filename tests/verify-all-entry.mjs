@@ -41,6 +41,11 @@
  *      且 `verify-isolated-git.mjs`（机制面）仍带至少一条标记。这**不是** E15 拒绝的那份成员
  *      名单，是与 I2 的 MUST_MATCH 同款「反空洞点名」——钉 #169 AC 的防线存活；判据 = 标记
  *      形状的最朴素扫描（正则同 E15），正文伪装形态的辨析由 E13 在夹具层钉住，此处不重复
+ *   E17 环境指纹自检位（#183）：入口**首行** = `env-fingerprint: node=… bash=… dsh=… path0=…`
+ *      （四字段齐、node/path0 取得到值；不阻断不判断好坏——它只是读数的来源标签），且同一
+ *      入口在两个不同 PATH 下 `path0` **可区分**（AC③ 的机械形态——复用 first 真跑与 E8 的
+ *      doctored PATH 两份现成输出，不另跑）。非空洞：夹具跑的是入口**真副本**（readFile 复制
+ *      真仓那份脚本，见夹具装配段），摘掉指纹行 → 本条红（已实测）
  *
  * **环境隔离**：子进程清掉全部 `DSH_MATT_*`（门禁变量会把夹具那档从 SKIP 变成执行，计数随之
  * 漂移；2026-10-17 在 msys 全流程口径下实测红）**与全部 `GIT_*`**（本仓上一个版本在
@@ -48,7 +53,8 @@
  * `.git/config` 的 `core.bare` 改成了 true，需手工 `git config core.bare false` 修复；同时夹具的
  * "未设置"假设被外层配置污染 → E3 红）。门禁方向由 E4 显式钉住。
  *
- * 非空洞：把入口的 `loud` 判定改成 `false`（PASS* 退化成 PASS）→ E1/E2 红（已实测）。
+ * 非空洞：把入口的 `loud` 判定改成 `false`（PASS* 退化成 PASS）→ E1/E2 红（已实测）；
+ * 摘掉入口的指纹行 → E17 红（已实测）。
  */
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -366,10 +372,38 @@ try {
     ok('E16. #169 拆层在位：结构面在快集层（文件在、全文件无 @slow 标记），机制面仍在 @slow 层',
       `${STRUCTURE_CASE} 无标记 / ${MECHANISM_CASE} 带 ${mechSlow.length} 条标记`)
   }
+
+  // ── E17：环境指纹自检位（#183）—— 首行 env-fingerprint + 不同环境可区分 ─────────────
+  // 契约见头注。判据 ①：first 真跑的首行 = env-fingerprint，四字段齐、node/path0 取得到值
+  // （值本身允许是 (未设置)/(不在 PATH) 一类如实标注——那是环境事实，键在场才是判据）。
+  // 判据 ②：E8 的 noGit 运行已把 PATH 换成夹具下的不存在目录——两次运行的 path0 必须不同，
+  // 这就是 AC③「编排环境 vs 主会话至少 PATH 首条目不同」的机械形态，不为此另跑入口。
+  // 解析按写入侧的**固定字段序**切（node → bash → dsh → path0；值可含空格，不能用空白切）。
+  const fingerprintParse = (out) => {
+    const line = out.split('\n')[0] ?? ''
+    if (!line.startsWith('env-fingerprint: ')) return null
+    const f = {
+      node: / node=([\s\S]*?) bash=/.exec(line)?.[1],
+      bash: / bash=([\s\S]*?) dsh=/.exec(line)?.[1],
+      dsh: / dsh=([\s\S]*?) path0=/.exec(line)?.[1],
+      path0: / path0=(.*)$/.exec(line)?.[1],
+    }
+    return Object.values(f).some(v => v === undefined) ? null : f
+  }
+  const fpFirst = fingerprintParse(first.out)
+  const fpNoGit = fingerprintParse(noGit.out)
+  if (fpFirst !== null && fpFirst.node !== '' && fpFirst.path0 !== ''
+    && fpNoGit !== null && fpNoGit.path0 !== fpFirst.path0) {
+    ok('E17. 环境指纹首行在场（四字段齐、node/path0 有值），且 PATH 不同的两次运行 path0 可区分（#183 AC③）',
+      `${fpFirst.path0} ≠ ${fpNoGit.path0}`)
+  } else {
+    bad('E17. 环境指纹自检位不对（首行缺指纹 / 字段缺失 / path0 无值 / 不同 PATH 读数区分不出来）',
+      `first=${JSON.stringify(fpFirst)} noGit=${JSON.stringify(fpNoGit)}`)
+  }
 } finally {
   await rm(root, { recursive: true, force: true })
 }
 
-console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E16) ===')
+console.log('\n=== VERIFY-ALL ENTRY VERIFY (E1–E17) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)
