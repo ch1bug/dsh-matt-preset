@@ -29,6 +29,7 @@
 - **插件行（plugin row）** — 组合树上的一个挂载点：声明"用哪个模块、带什么配置"。是否"是插件"由有没有行挂它决定，不由包的 manifest 决定。
 - **挂载级独立 / 分发级独立 / 演进级独立（L1 / L2 / L3）** — 组件脱离宿主复用的三级强度：L1 = 行能被别的 preset 单独挂；L2 = 有独立包名、版本线与安装通道；L3 = 有独立仓与发布栈。本工作流组件停在 L1（D46）。
 - **workflow bundle（本语境正名）** — 指本包内那组工作流组件行 + 承载它们的 preset 声明；**不是**独立包、**也不是**独立 preset（D46 / ADR-0014）。
+- **PRODUCT.md / DESIGN.md** — impeccable 工作流的产品契约与视觉方向两个文件（product truth vs visual direction），与本文 + `docs/adr/` 的拆分同构，**并存不冲突**：目标仓带它们时，UI 审查门（`docs/code-review-brief.md` §9）把它们当输入读，本仓不因此改自己的单一语境载体（#32）。
 ## 已核实的环境事实
 
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
