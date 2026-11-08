@@ -561,7 +561,7 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 #47/#86），不再硬依赖字面 `dsh`：
 
 ```powershell
-$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 15/15、exit 0
+$env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # 判据：exit 0、无 FAIL；用例数随代次增改（现查，不抄文档），loud skip 逐条打印成因
 ```
 
 **探测顺序（dsh 与 pnpm 同构，`lib/runtime-probe.mjs` 的纯函数、可注入测试）**：
@@ -571,8 +571,19 @@ $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs   # → 15/15、exi
 | 1 | `--dsh <path>` | `--pnpm <path>` | 显式参数说了算；给了就不回落其它来源 |
 | 2 | `DSH_MATT_DSH` | `DSH_PNPM`（别名 `DSH_MATT_PNPM` 亦认） | 脚本 / CI 的稳定出口 |
 | 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） | 平台候选名按 PATHEXT 惯例 |
-| 4 | `DSH_DESKTOP_ROOT` → `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` | 桌面安装版惯例；**`DSH_DESKTOP_ROOT` = 桌面应用根目录**（含 `resources` 的那一层）。设成 `<app>/resources` 也认 —— 该档对每个候选都试「先 `<root>/resources/…`、再 `<root>/…` 回落」两种读法，实测两种读法收敛到**同一条真实路径**（2026-10-18）；档位顺序不变，回落只在**本档内**发生 |
+| 4 | `DSH_DESKTOP_ROOT` → `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`；**档内回落（#111）**：dsh 已命中且是桌面形态（`…/runtime/cli/bin/dsh.*`）时，追加「从 dsh 路径同根推导」的 `…/primary-runtime/dependencies/pnpm/bin/pnpm.cjs\|pnpm.js` | 桌面安装版惯例；**`DSH_DESKTOP_ROOT` = 桌面应用根目录**（含 `resources` 的那一层）。设成 `<app>/resources` 也认 —— 该档对每个候选都试「先 `<root>/resources/…`、再 `<root>/…` 回落」两种读法，实测两种读法收敛到**同一条真实路径**（2026-10-18）；档位顺序不变，回落只在**本档内**发生。#111 回落：桌面运行时**自带 primary-runtime**，dsh 与 pnpm 同根——`--dsh <app>/…/dsh.cmd` 而 `DSH_DESKTOP_ROOT` 未设的形态由此解析出桌面 pnpm（取证 .scratch/verify111 C5 红态→C6 转绿）；pnpm 仍**按形态条件必需**（检出档必需，桌面档从同根推导） |
 | 5 | `DSH_MATT_DSH_SRC` → `<src>/apps/cli/lib/bin.js`（**经 `node` 跑**） | — | 源码检出惯例 |
+
+**命中候选先真跑一次 `--version` 再挂载（#111 点 2）**：探测按**存在性**命中（纯函数、
+顺序契约不变），「存在但不可执行」的候选会**假命中**——取证（.scratch/verify111 C3a/C3b）：
+PATH 上唯一的垃圾 dsh.cmd 假命中后，失败点后移到挂载（`'this' is not recognized`）；坏
+pnpm.cmd 假命中后 plugin-manager 隔一层报 `Command failed: pnpm add`。新行为：
+`lib/runtime-probe.mjs` 的 `verifyProbeHit()`（exec 可注入，`probeTool` 纯判定路径不 spawn）
+在真挂载前把命中候选真跑一次 `--version`，坏件在探测阶段响亮 die
+（`解析到的 dsh/pnpm 无法执行（…真跑被拒绝…）`）；**缺件判定（`missing pnpm`）仍在验证之前**
+——一次只报一件可执行的错。`.cmd`/`.bat` 经 `cmd.exe`（**ComSpec 绝对路径**——验证子进程
+PATH 可能被剥空，字面 `cmd.exe` 解析不到）`/c` 参数数组，脚本形态经 `node`，与真调用同一套
+起进程规则。
 
 **桌面安装版 ≠ 挂具运行时锚（0.2.1，#88 实测）**：上表第 4 档让 `DSH_DESKTOP_ROOT` 能当 **dsh CLI /
 pnpm** 的探测来源，但**测试挂具的依赖锚不能用它**——`@deepseek-ai` 包表在 `resources/app.asar`
@@ -608,26 +619,36 @@ pnpm** 的探测来源，但**测试挂具的依赖锚不能用它**——`@deep
 | dsh 未命中 | 保留前缀 `dsh not found on PATH — skipped profile mount` + 一行 `missing dsh — 给一条即可: --dsh … \| DSH_MATT_DSH …`；store 照落、profile 不动 | **0**（响亮降级，不是失败） |
 | dsh 命中、pnpm 未命中 | 一次可执行的失败：`missing pnpm — …（不是 preset 坏了）` + `--pnpm` / `DSH_PNPM` 指路 | **1** |
 
-**「dsh 在、pnpm 不在」是一个独立的格子，别与上面第一行混**（2026-10-18 Lead 拍板 B）：
+**「dsh 在、pnpm 不在」是一个独立的格子，别与上面第一行混**（2026-10-18 Lead 拍板 B；#111 收窄边界）：
 
 - 它是**真实存在的机器形态** —— 实测 `dsh --version` / `dsh plugin --list` 都**不需要**同级 pnpm，
   只有 `dsh plugin add` 内部起 pnpm 才需要（`packages/boot/plugin-manager/lib/index.js` 的
   `runProfilePnpm`，`execa(options.command ?? "pnpm")`）。
-- installer 在这里**硬红（exit 1 + 一行指路）** 是**有意为之**：此时 dsh 已经在手、差的就是那一件，
-  静默落 store 会让用户以为装上了。**store 侧仍然落盘**（失败点只在挂载那半边）。
+- **#111 收窄**：pnpm 必要性**按 dsh 命中形态分**——桌面运行时**自带 primary-runtime**，dsh 从
+  桌面惯例/桌面形态路径命中时 pnpm 从**同根推导**（上表第 4 档回落），不再硬红；**源码检出档**
+  （没有 primary-runtime，plugin-manager 按 PATH 找字面 `pnpm`）仍硬红——取证
+  （.scratch/verify111 C1/C2 真跑对照）：检出档无 pnpm 时 `dsh plugin add` 报
+  `'pnpm' 不是内部或外部命令` exit 1，pnpm 可达时 `Done in 553ms using pnpm v11.28.5`。
+- 检出档上 installer 在这里**硬红（exit 1 + 一行指路）** 是**有意为之**：此时 dsh 已经在手、
+  差的就是那一件，静默落 store 会让用户以为装上了。**store 侧仍然落盘**（失败点只在挂载那半边）。
 - 对应地，`tests/verify-installer.mjs` 的**挂载断言**在这个格子上**响亮跳过**（`SKIP (loud)`，
   理由串独立写 `needs pnpm for the mount step (#86)` —— 与缺 dsh 的理由串分开，成因不同、混用会让
   读数骗人）。套件**不**替 installer 兜底判红：installer 自己的行为已经被
   `#86 stub perturbation: with no pnpm reachable at all the installer dies with a runnable hint` 钉住。
 
-**三档读数（2026-10-18 实测，`DSH_MATT_INSTALLER=1 node tests/verify-installer.mjs`）**：
+**三档读数（**历史读数**：2026-10-18 实测，当时用例数 16–18；用例数随代次增改——本票 #111
+加 2 条 verify-layer 用例后为 21，绝对计数**不抄文档**，判据写相对形态）**：
 
-| 档 | 机器形态 | 读数 |
-| --- | --- | --- |
-| 1 | 无 dsh、无 pnpm（默认） | **16/16 通过、exit 0、无 FAIL**；loud skip 逐条打印（profile-link / 桌面形态 / e2e / live 桌面端） |
-| 2 | pnpm 在场（`DSH_PNPM`）、无 dsh | 同上；`· pnpm probe on THIS machine: found=true (env)` |
-| 3 | dsh（PATH shim）+ pnpm 都在场 | **17/17 通过、exit 0、零 loud skip** —— 挂载断言**真的全跑了**（这是"门禁没有过度跳过"的证明） |
-| 4 | `DSH_DESKTOP_ROOT` 指桌面安装版（dsh+pnpm 都由它提供） | **18/18 通过、exit 0、零 loud skip**，含 live 桌面端用例（真 `dsh.cmd` + 真 `pnpm.cjs` 走转发 shim 挂载成功） |
+| 档 | 机器形态 | 判据（相对形态） | 历史读数（2026-10-18） |
+| --- | --- | --- | --- |
+| 1 | 无 dsh、无 pnpm（默认） | exit 0、无 FAIL；loud skip 逐条打印成因（profile-link / 桌面形态 / e2e / live 桌面端） | 16/16 通过 |
+| 2 | pnpm 在场（`DSH_PNPM`）、无 dsh | 同档 1；另打 `· pnpm probe on THIS machine: found=true (env)` | 16/16 通过 |
+| 3 | dsh（PATH shim）+ pnpm 都在场 | **exit 0、零 loud skip** —— 挂载断言**真的全跑了**（这是"门禁没有过度跳过"的证明） | 17/17 通过 |
+| 4 | `DSH_DESKTOP_ROOT` 指桌面安装版（dsh+pnpm 都由它提供） | 同档 3 + live 桌面端用例（真 `dsh.cmd` + 真 `pnpm.cjs` 走转发 shim 挂载成功） | 18/18 通过 |
+
+现查命令（档 1 形态本机即可复测；档 3/4 需 dsh+pnpm / 桌面根在场）：
+`DSH_MATT_INSTALLER=1 node tests/verify-installer.mjs`——档 1 的 21/21、8 条 loud skip
+见 .scratch/verify111/verify-installer-dsh_matt_installer.log（#111）。
 
 档 3/4 的"零 loud skip"是关键：若门禁写错（例如恒假），档 1 的读数看起来一样 —— 所以
 `#86 gate counter-case` 用例把 `mountable` 逐格对齐两个探测结果，并断言"pnpm 在场 ⇒ 挂载步骤真的走到"。旧口径的 shim 写法仍然可用（PATH 上加一个临时目录放 `dsh.cmd`，`<src>\node_modules\.bin` 提供 pnpm）；
@@ -693,7 +714,7 @@ B1/D1 红；把实例改到保留口 → B5 红。
 放在含空格的路径下）断言参数透传与 PATH 注入，不需要本机有任何运行时；另有**非空洞对照**
 （探测不到 pnpm → 必须 die 且给可执行指路；相对 `--dsh` → 证明"绝对路径"判据可红；注入目录里没有
 `pnpm` 这个名字 → 假 dsh 的 `spawn('pnpm')` 必须失败；**门禁对照** → `mountable` 逐格对齐两个探测结果）。
-当前读数见上文「三档读数」表（无 dsh 基线 16/16；dsh+pnpm 都在场 17/17；桌面根 18/18，后两档**零 loud skip**）。
+当前读数**现查**（`DSH_MATT_INSTALLER=1 node tests/verify-installer.mjs`；判据 = exit 0、无 FAIL，档 3/4 形态下**零 loud skip**）——上文「三档读数」表是历史读数（2026-10-18，当时用例数 16–18，绝对计数不抄文档）。
 
 **profile 的"面"由初始化模板决定**（2026-10-16 实测，#75）：起 **web 面**的 profile 必须由 shipped
 web 模板初始化（`--profile <p> --from-default-profile web …`）。⚠ 0.2.1 起 `--from-default-profile

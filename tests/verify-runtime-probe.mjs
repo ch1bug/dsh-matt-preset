@@ -689,6 +689,136 @@ test('R10c. 跳过分支的 upgrade / uninstall 收尾同样不得谎报', () =>
   }
 })
 
-console.log(`\n=== verify-runtime-probe (R1–R13) ===`)
+// ── R14/R15/R16：#111 两点（pnpm 档内 dshHit 推导 + 执行性验证层）────────────
+// 取证（.scratch/verify111/）：C5 = explicit --dsh 桌面形态 + DSH_DESKTOP_ROOT 未设 +
+// PATH 无 pnpm → 旧实现 die `missing pnpm`（硬失败误伤桌面档）；C3a/C3b = 存在但不可执行
+// 的候选假命中，失败点后移到挂载/子进程。实现后 C6（同 C5 构造）exit 0、C3a/C3b 在探测
+// 阶段就响亮 die。本组把两条行为钉在纯函数 + CLI 两个层面。
+import { desktopRootsFromDsh, verifyProbeHit } from '../lib/runtime-probe.mjs'
+
+test('R14a. desktopRootsFromDsh：两布局（resources/runtime 与 runtime 直下）都推导出 runtime 根', () => {
+  assert.deepEqual(
+    desktopRootsFromDsh(join('X:\\app', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')),
+    [join('X:\\app', 'resources', 'runtime')],
+  )
+  assert.deepEqual(
+    desktopRootsFromDsh(join('X:\\app', 'runtime', 'cli', 'bin', 'dsh.cmd')),
+    [join('X:\\app', 'runtime')],
+  )
+})
+
+test('R14b. 非桌面形态 → 空（PATH 字面名 / 源码检出 / 空值都不推导）', () => {
+  assert.deepEqual(desktopRootsFromDsh('dsh.cmd'), [], 'PATH 字面名不带目录形态')
+  assert.deepEqual(desktopRootsFromDsh(join('X:\\src', 'apps', 'cli', 'lib', 'bin.js')), [], '源码检出不是桌面形态')
+  assert.deepEqual(desktopRootsFromDsh('X:\\random\\bin\\dsh.cmd'), [], '无 runtime/cli/bin 段不推导')
+  assert.deepEqual(desktopRootsFromDsh(''), [])
+  assert.deepEqual(desktopRootsFromDsh(null), [])
+})
+
+test('R15a. pnpm 档内 dshHit 推导：dsh 命中桌面形态 → 同根 pnpm 命中（source=desktop）', () => {
+  const dshPath = join('X:\\app', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')
+  const pnpmCjs = join('X:\\app', 'resources', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+  const r = probePnpm({ env: {}, platform: WIN, pathEntries: [], dshHit: dshPath, exists: mkExists([dshPath, pnpmCjs]) })
+  assert.equal(r.found, true, r.detail.join(' | '))
+  assert.equal(r.source, 'desktop', '推导候选仍在 desktop 档内（来源标签不变）')
+  assert.equal(r.path, pnpmCjs)
+})
+
+test('R15b. 扰动：dshHit 换非桌面形态 → 不推导（同 exists 集合下必须落空）', () => {
+  const pnpmCjs = join('X:\\app', 'resources', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+  const r = probePnpm({ env: {}, platform: WIN, pathEntries: [], dshHit: join('X:\\elsewhere', 'dsh.cmd'), exists: mkExists([pnpmCjs]) })
+  assert.equal(r.found, false, '非桌面形态的 dshHit 不得触发推导——否则 PATH/检出档会被硬塞桌面 pnpm')
+  assert.equal(r.source, null)
+})
+
+test('R15c. dshHit 桌面形态但同根无 pnpm → 如实落空，detail 点名推导候选', () => {
+  const dshPath = join('X:\\app', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')
+  const r = probePnpm({ env: {}, platform: WIN, pathEntries: [], dshHit: dshPath, exists: mkExists([dshPath]) })
+  assert.equal(r.found, false)
+  assert.match(r.detail.join(' | '), /推导/u, `detail 应记录推导候选未命中: ${r.detail.join(' | ')}`)
+})
+
+test('R15d. 不越档：PATH 上有 pnpm 时，dshHit 推导候选不得抢先（冻结顺序不变）', () => {
+  const dshPath = join('X:\\app', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')
+  const pnpmCjs = join('X:\\app', 'resources', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+  const r = probePnpm({
+    env: {}, platform: WIN, pathEntries: ['X:\\onpath'], dshHit: dshPath,
+    exists: mkExists([dshPath, pnpmCjs, join('X:\\onpath', 'pnpm.cmd')]),
+  })
+  assert.equal(r.source, 'path', '推导候选只做档内回落，不得越过 PATH 档（照 R12d 先例）')
+})
+
+test('R15e. 档内先后：DSH_DESKTOP_ROOT 候选仍在推导候选之前', () => {
+  const dshPath = join('X:\\app', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd')
+  const derivedCjs = join('X:\\app', 'resources', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+  const rootCjs = join('X:\\other', 'runtime', 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.cjs')
+  const r = probePnpm({
+    env: { DSH_DESKTOP_ROOT: 'X:\\other' }, platform: WIN, pathEntries: [], dshHit: dshPath,
+    exists: mkExists([dshPath, derivedCjs, rootCjs]),
+  })
+  assert.equal(r.path, rootCjs, 'DSH_DESKTOP_ROOT 档内候选先于 dshHit 推导候选被试到')
+})
+
+test('R16a. verifyProbeHit：好候选真跑 --version → ok=true 且版本非空（真实 spawn）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-probe-verify-'))
+  try {
+    const good = join(dir, 'good-pnpm.cjs')
+    writeFileSync(good, 'console.log("11.28.5-fake");\n')
+    const r = verifyProbeHit('pnpm', { found: true, path: good, source: 'path' })
+    assert.equal(r.ok, true, `好候选应通过验证: ${JSON.stringify(r)}`)
+    assert.match(r.version, /11\.28\.5-fake/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('R16b. verifyProbeHit：存在但不可执行的候选 → ok=false 且 problem 可读（C3 形态）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-probe-verify-'))
+  try {
+    const junk = join(dir, 'junk.cmd')
+    writeFileSync(junk, 'this is not a command\r\n')
+    const r = verifyProbeHit('pnpm', { found: true, path: junk, source: 'path' })
+    assert.equal(r.ok, false, '垃圾候选必须被验证层拒绝（旧行为假命中，失败点后移到挂载）')
+    assert.match(r.problem, /--version/u, `problem 应含真跑语义: ${r.problem}`)
+    // 对照：同目录放好候选 → ok（证明拒绝的是候选本身，不是验证层恒假）
+    const good = join(dir, 'good.cmd')
+    writeFileSync(good, '@echo off\r\nexit /b 0\r\n')
+    assert.equal(verifyProbeHit('pnpm', { found: true, path: good }).ok, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('R16c. verifyProbeHit：未命中的探测结果不进验证（调用方 bug 响亮）', () => {
+  const r = verifyProbeHit('pnpm', { found: false, path: null })
+  assert.equal(r.ok, false)
+  assert.match(r.problem, /nothing to verify/u)
+})
+
+test('R16d. verifyProbeHit：起进程形态与真调用同一套（脚本经 node、.cmd 经 cmd.exe /c）', () => {
+  const calls = []
+  const fakeExec = (cmd, args) => { calls.push([cmd, args]); return { status: 0, stdout: '9.9.9\n' } }
+  // dsh 脚本形态（F1）：无论来源都经 node
+  verifyProbeHit('dsh', { found: true, path: join('X:\\src', 'apps', 'cli', 'lib', 'bin.js') }, { exec: fakeExec })
+  assert.deepEqual(calls.at(-1), [process.execPath, [join('X:\\src', 'apps', 'cli', 'lib', 'bin.js'), '--version']])
+  // pnpm 脚本形态：经 node
+  verifyProbeHit('pnpm', { found: true, path: join('X:\\rt', 'pnpm.cjs') }, { exec: fakeExec })
+  assert.deepEqual(calls.at(-1), [process.execPath, [join('X:\\rt', 'pnpm.cjs'), '--version']])
+  // Win .cmd 形态：cmd.exe /c 参数数组（直接 spawn 得 EINVAL）；cmd 用 ComSpec 绝对路径
+  // （探测子进程 PATH 可能被剥空，字面 cmd.exe 解析不到——#86 stub 形态实测 ENOENT）
+  if (process.platform === 'win32') {
+    verifyProbeHit('dsh', { found: true, path: 'X:\\bin\\dsh.cmd' }, { exec: fakeExec })
+    const comspec = process.env.ComSpec ?? 'cmd.exe'
+    assert.deepEqual(calls.at(-1), [comspec, ['/c', 'X:\\bin\\dsh.cmd', '--version']])
+  }
+  // 超时/错误：status null + error → ok=false
+  const rT = verifyProbeHit('pnpm', { found: true, path: 'X:\\rt\\pnpm.exe' }, {
+    exec: () => ({ status: null, error: Object.assign(new Error('process killed'), { code: 'ETIMEDOUT' }) }),
+  })
+  assert.equal(rT.ok, false)
+  assert.match(rT.problem, /ETIMEDOUT/u, `超时应把成因写进 problem: ${rT.problem}`)
+})
+
+console.log(`\n=== verify-runtime-probe (R1–R16) ===`)
 console.log(`${process.exitCode ? 'FAILED' : `all ${passed} tests passed`}${skips > 0 ? ` (${skips} 条 loud skip)` : ''}`)
 if (process.exitCode) loudSkip('存在失败用例，环境侧结论不可用')

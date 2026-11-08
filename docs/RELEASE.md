@@ -49,7 +49,7 @@ node bin/install.mjs --version
 | 1 | `--dsh <path>` | `--pnpm <path>` |
 | 2 | `DSH_MATT_DSH` | `DSH_PNPM`（别名 `DSH_MATT_PNPM` 亦认） |
 | 3 | PATH（`dsh.cmd`/`dsh.exe`/`dsh`） | PATH（`pnpm.cmd`/`pnpm.exe`/`pnpm`） |
-| 4 | `DSH_DESKTOP_ROOT` 下的 `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs` |
+| 4 | `DSH_DESKTOP_ROOT` 下的 `<root>/resources/runtime/cli/bin/dsh.cmd` | `<root>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`；**档内回落（#111）**：dsh 已命中且是桌面形态（`…/runtime/cli/bin/dsh.*`）时，追加「从 dsh 路径同根推导」的 `…/primary-runtime/dependencies/pnpm/bin/pnpm.cjs\|pnpm.js`（`DSH_DESKTOP_ROOT` 未设也生效，仍在第 4 档内、不越档） |
 | 5 | `DSH_MATT_DSH_SRC` 下的 `<src>/apps/cli/lib/bin.js`（经 `node` 跑） | — |
 
 ```bash
@@ -61,9 +61,20 @@ node bin/install.mjs install --profile desktop --dsh "<app>/resources/runtime/cl
 ```
 
 - **pnpm 只在真要挂载时要求**：`--version`、`--root`（纯存储）不需要它（#86 AC④）。
+  **pnpm 的必要性由运行时形态决定**（#111 点 1）：桌面运行时**自带 primary-runtime（含
+  pnpm）**——dsh 从桌面惯例或桌面形态路径命中时，pnpm 从**同根推导**解析出
+  `primary-runtime/dependencies/pnpm/bin/pnpm.cjs`，PATH 上没有 pnpm 也不再硬失败；
+  **源码检出档必需 pnpm**（检出没有 primary-runtime，plugin-manager 按字面 `pnpm` 找
+  PATH——#111 取证 C1：无 pnpm 时 `dsh plugin add` 报 `'pnpm' 不是内部或外部命令`）。
 - **两个工具都缺席时的表现不同，别混说**：dsh 未命中 → **响亮降级**（store 照落、profile 不动，
   打印 `dsh not found on PATH — skipped profile mount` + 一行指路，**exit 0**）；pnpm 未命中 →
   一次**可执行的失败**（`missing pnpm …` + 一行指路），因为此时 dsh 已经在手、差的就是那一件（#86 AC①）。
+- **命中候选先真跑一次 `--version` 再挂载**（#111 点 2）：探测按**存在性**命中，
+  「存在但不可执行」的候选会假命中——旧行为把失败留给挂载/子进程
+  （取证 C3a：垃圾 dsh.cmd 假命中后 `dsh plugin add` 炸出 `'this' is not recognized`；
+  C3b：坏 pnpm.cmd 假命中后 plugin-manager 隔一层报 `Command failed: pnpm add`）。
+  新行为下坏件在探测阶段就响亮 die（`解析到的 dsh/pnpm 无法执行（…真跑被拒绝…）`）；
+  缺件判定（`missing pnpm`）仍在验证之前——一次只报一件可执行的错。
 - harness 分发的 `pnpm` 是 `*.cjs`（不是可执行）：installer 会在临时目录生成转发 shim
   （`pnpm.cmd` + `pnpm`）再把它前置进 `dsh` 子进程的 `PATH` —— 所以 `--pnpm` 直接指 `.cjs` 就行。
 - 第 4 档的 `DSH_DESKTOP_ROOT` 按**桌面应用根目录**（含 `resources` 的那一层）写；设成

@@ -25,6 +25,23 @@
  *      形如 `<app>/resources`，内含 `runtime/cli/bin/dsh.cmd` 与
  *      `runtime/primary-runtime/dependencies/pnpm/bin/pnpm.cjs`）；未设 → `SKIP (loud)`。
  *      当场 PATH 上没有 pnpm 也能装上（这正是 #86 要证的）。
+ *
+ * #111（pnpm 必要性收窄 + 执行性验证层，2026-11-08）新增两块：
+ *   - **dshHit 同口径**：installer 会把 dsh 命中路径传给 pnpm 探测（desktop 档档内追加
+ *     同根推导候选），本文件顶部 `pnpm` 探针消费同一份 `dshHit`——否则桌面形态 dsh +
+ *     无 PATH pnpm 的机器会出现「installer 能解析、门禁判缺席」的假 skip。
+ *   - **verify-layer 两用例**（`#111 verify-layer` 前缀）：「存在但不可执行」的候选在
+ *     旧行为下假命中、失败点后移到挂载/子进程（取证 .scratch/verify111 C3a/C3b）；
+ *     新行为下 `verifyProbeHit` 在真挂载前真跑 `--version` 把坏件响亮拒绝。**对照面
+ *     分担**：dsh 侧带**同位**对照（垃圾件原位改写好件重跑 → 走到挂载，防「验证层恒
+ *     拒绝」）；pnpm 侧不做同位重跑，其在场档对照由 E6 步骤 1（installer 级：好 pnpm
+ *     走到挂载）与 verify-runtime-probe R16b（函数级：同位好件）承担——两用例对
+ *     「验证层恒 ok」真红由扰动 B 实证（.scratch/verify111/perturb-verifylayer.txt）。
+ *   - stub 断言工具 `parseStubArgv` 的 `needle` 参数、dsh-env PATH 断言的多行形态，
+ *     都是验证层让假件多收一次 `--version` 的适配（**在场路径**上记录里验证调用与挂载
+ *     调用并存，判据指向**挂载语义**那行，不是第一行）。pnpm **缺件**路径上 die 发生在
+ *     验证层之前（install.mjs 顺序），假 dsh 连 `--version` 都收不到——那两处反向判据
+ *     保持「记录为空」（见 :703 / :900 注释），它们是「缺件判定仍在验证之前」的机械钉。
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -141,11 +158,16 @@ const dshReachable = dshOnPath || haveDesktop
  * 所以与 dsh 同款：**响亮跳过**；但**理由串必须独立**（`needs pnpm for the mount step (#86)`）
  * —— 两个成因不同，混用会让读数骗人（把"缺 pnpm"读成"缺 dsh"）。
  *
+ * **`dshHit` 同口径**（#111 点 1）：installer 现在会把 dsh 命中路径传给 pnpm 探测
+ * （desktop 档**档内追加**同根推导候选）——本门禁若不传，桌面形态 dsh（`--dsh` 指向
+ * `<app>/…/dsh.cmd`）+ 无 PATH pnpm 的机器上会出现「installer 能解析、门禁判缺席」的
+ * 假 skip（正是文件头注释要消灭的分叉），所以这里与 installer 消费同一份 `dshHit`。
+ *
  * 这条门禁**不能**顺带把「pnpm 在场」那一档也跳过：`mountable` 为真时 `assertLink` 必须
  * 真跑，`#86 stub` 组里的 E6 门禁对照钉住这一半（实测：dsh+pnpm 都在场时读数 17/17、
  * **零** loud skip）。
  */
-const pnpm = probePnpm({ env: { ...process.env, DSH_MATT_DSH_SRC: '' } })
+const pnpm = probePnpm({ env: { ...process.env, DSH_MATT_DSH_SRC: '' }, dshHit: dsh.found ? dsh.path : null })
 const pnpmReachable = pnpm.found || haveDesktop
 /** 挂载产物的总门禁：dsh **且** pnpm 都可解析（两者成因不同、理由串分开报）。 */
 const mountable = dshReachable && pnpmReachable
@@ -311,10 +333,15 @@ process.exit(0)
 }
 /** 读一行记录（没有就返回 ''，让断言给出可读的失败信息而不是 ENOENT）。 */
 const readLog = (p) => (existsSync(p) ? readFileSync(p, 'utf8') : '')
-/** 从 stub 记录里解析出唯一一次调用的 argv 数组。 */
-function parseStubArgv(text, tag) {
-  const m = new RegExp(`^${tag} (\\[.*\\])$`, 'mu').exec(text)
-  return m === null ? null : JSON.parse(m[1])
+/**
+ * 从 stub 记录里解析出一次调用的 argv 数组。`needle` 过滤出含该实参的行：
+ * #111 起 `verifyProbeHit` 会让假件**先收一次 `--version`**（执行性验证层），断言若仍取
+ * 「第一行」会抓到验证调用而不是真挂载调用——用 needle 指向挂载语义（'plugin' / 'add'）。
+ */
+function parseStubArgv(text, tag, needle = null) {
+  const lines = String(text).split(/\r?\n/u).filter((l) => l.startsWith(`${tag} [`))
+  const hit = needle === null ? lines[0] : lines.find((l) => l.includes(JSON.stringify(needle).slice(1, -1)))
+  return hit === undefined ? null : JSON.parse(hit.slice(tag.length + 1))
 }
 
 await test('install: copies payload to the stable store, stamps version + manifest', async () => {
@@ -628,20 +655,21 @@ if (stubRootHasSpace) {
     const home = join(tmp, 'pnpm-ok')
     const r = await installWithStubs(home)
     assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH')
+    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH', 'plugin')
     assert.ok(argv !== null, `stub dsh was never invoked — installer did not use --dsh (log: ${JSON.stringify(readLog(stubs.dshArgv))})`)
     const store = storeOf(home)
     assert.deepEqual(argv, ['plugin', '--profile', 'web', 'add', store],
       `argv verbatim mismatch: ${JSON.stringify(argv)}`)
-    // PATH 注入：第一段就是假 pnpm 的所在目录（`pnpmPathInjection` 对 .cmd 形态返回其目录）
-    const pathHead = (readLog(stubs.dshEnv).match(/^PATH (.*)$/mu)?.[1] ?? '')
-    const first = pathHead.split(';')[0]
-    assert.ok(samePath(first, dirname(stubs.pnpmCmd)),
-      `pnpm dir not prepended to the child PATH — head=${JSON.stringify(pathHead.slice(0, 160))}, want ${dirname(stubs.pnpmCmd)}`)
+    // PATH 注入：#111 起假 dsh 会先收一次 --version（验证层，PATH 未注入），mount 那次才带
+    // 注入目录——断言「存在一行 PATH 其首段 = 注入目录」，不是「第一行」。
+    const pathLines = readLog(stubs.dshEnv).split(/\r?\n/u).filter((l) => l.startsWith('PATH '))
+    const heads = pathLines.map((l) => l.replace(/^PATH /u, '').split(';')[0])
+    assert.ok(heads.some((h) => samePath(h, dirname(stubs.pnpmCmd))),
+      `pnpm dir not prepended to the child PATH — lines=${JSON.stringify(pathLines.slice(0, 3))}, want ${dirname(stubs.pnpmCmd)}`)
     // 端到端：假 dsh 模拟的 plugin-manager 按字面 `pnpm` 起子进程 → 命中的是这个假件
     const spawned = readLog(stubs.pnpmSpawn)
     assert.match(spawned, /SPAWN status=0/u, `literal \`pnpm\` did not resolve in the child (log: ${JSON.stringify(spawned)})`)
-    const pnpmArgv = parseStubArgv(readLog(stubs.pnpmArgv), 'PNPM')
+    const pnpmArgv = parseStubArgv(readLog(stubs.pnpmArgv), 'PNPM', 'add')
     assert.deepEqual(pnpmArgv, ['add', 'dsh-matt-preset'], `pnpm stub never ran with the plugin args: ${JSON.stringify(pnpmArgv)}`)
   })
 
@@ -674,7 +702,11 @@ if (stubRootHasSpace) {
       `the hint is not runnable (no --pnpm / DSH_PNPM in it): ${combined.slice(-300)}`)
     // 关键：这不是"preset 坏了"——store 侧照常落盘（失败点只在挂载那半边）
     assert.ok(existsSync(join(storeOf(home), 'VERSION.json')), 'store should still land; only the mount half needs pnpm')
-    // 反向：假 dsh **不该**被调用（还没到挂载就该 die —— pnpm 检查必须在挂载动作之前）
+    // 反向：假 dsh **根本不被调用**（记录为空）。这条用例里 pnpm 探测就落空，
+    // missing-pnpm 的 die 在执行性验证层（install.mjs 的 verifyProbeHit）**之前**——
+    // 假 dsh 连验证层的 `--version` 都不该收到。本判据机械钉住「缺件判定仍在验证之前」
+    // 这条顺序承诺：若未来把验证层提到缺件判定之前，假 dsh 会先收一次 `--version`，
+    // 本条即红（复审 #111 指正：不判据收紧成「无 plugin 行」会把这条顺序钉静默放掉）。
     assert.equal(readLog(stubs.dshArgv), '', 'dsh was invoked even though pnpm was missing — the check is too late')
   })
 
@@ -701,7 +733,7 @@ if (stubRootHasSpace) {
       const home = join(tmp, 'pnpm-rel')
       const r = run(['install', '--profile', 'web', '--dsh', relArg, '--pnpm', stubs.pnpmCmd], home)
       assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-      const argv = parseStubArgv(readLog(join(relDir, 'dsh-argv.txt')), 'DSH')
+      const argv = parseStubArgv(readLog(join(relDir, 'dsh-argv.txt')), 'DSH', 'plugin')
       assert.ok(argv !== null,
         `stub not reached via a relative --dsh — probe/exists resolution and spawn path disagree`)
       // 反例核心：**同一个文件**被跑到了，但命令行里那串不是绝对路径 —— 主断言里
@@ -735,7 +767,7 @@ if (stubRootHasSpace) {
       await stubs.reset()
       const r = run(['install', '--profile', 'web', '--dsh', jsDsh, '--pnpm', stubs.pnpmCmd], home)
       assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-      const argv = parseStubArgv(readLog(join(jsDir, 'dsh-argv.txt')), 'DSH')
+      const argv = parseStubArgv(readLog(join(jsDir, 'dsh-argv.txt')), 'DSH', 'plugin')
       assert.ok(argv !== null,
         `the .js stub was not executed by node — dshRunner regressed to spawning it directly ` +
         `(pre-fix this opens the OS file association and the mount is silently lost)`)
@@ -771,6 +803,66 @@ if (stubRootHasSpace) {
   })
 
   /**
+   * #111 点 2（dsh 侧）：**存在但不可执行**的候选必须被执行性验证拒绝。
+   * 取证（.scratch/verify111 C3a）：旧行为下 PATH 上唯一的垃圾 dsh.cmd 会假命中
+   * （回声 `(path)`）→ 失败点后移到挂载，炸出 `'this' is not recognized` 一类难定位报错。
+   * 新行为：真挂载前 `verifyProbeHit` 真跑一次 `--version`，坏件在探测阶段响亮落选。
+   * **扰动对照**：同一位置换上可执行的 dsh.cmd → 必须走到挂载（防「验证层恒拒绝」骗过本条）。
+   */
+  await test('#111 verify-layer: a PATH dsh.cmd that exists but cannot execute dies with a readable reason', async () => {
+    const dir = join(stubRoot, 'verify-dsh')
+    await mkdir(dir, { recursive: true })
+    const junkDsh = join(dir, 'dsh.cmd')
+    await writeFile(junkDsh, 'this is not a command\r\n')
+    const sep = process.platform === 'win32' ? ';' : ':'
+    const pathOnly = `${dir}${sep}${process.env.PATH ?? process.env.Path ?? ''}`
+    const blocked = { PATH: pathOnly, DSH_MATT_DSH: undefined, DSH_MATT_DSH_SRC: undefined, DSH_DESKTOP_ROOT: undefined }
+    const home = join(tmp, 'verify-junk-dsh')
+    await stubs.reset()
+    const r = run(['install', '--profile', 'web', '--pnpm', stubs.pnpmCmd], home, blocked)
+    assert.notEqual(r.status, 0, `junk dsh.cmd must fail loudly, got exit 0: ${r.stdout}`)
+    const combined = `${r.stdout}${r.stderr}`
+    assert.match(combined, /无法执行/u, `verify-layer must name the rejection: ${combined.slice(-400)}`)
+    assert.match(combined, /真跑/u, `must say it came from a real --version run: ${combined.slice(-400)}`)
+    assert.ok(!/mounted into profile/u.test(combined), 'must not claim mounted')
+    // 扰动对照：同一位置换上可执行的 dsh.cmd（记录型假件）→ 探测命中它、验证通过、挂载走到。
+    await writeFile(junkDsh, `@echo off\r\n"${testNode}" "%~dp0dsh-stub.cjs" %*\r\nexit /b %ERRORLEVEL%\r\n`)
+    await cp(join(dirname(stubs.dshCmd), 'dsh-stub.cjs'), join(dir, 'dsh-stub.cjs'))
+    const home2 = join(tmp, 'verify-good-dsh')
+    await stubs.reset()
+    const ok = run(['install', '--profile', 'web', '--pnpm', stubs.pnpmCmd], home2, blocked)
+    assert.equal(ok.status, 0, `same spot with a good dsh must succeed: ${ok.stderr}`)
+    // 记录落在复制后的目录（假件记的是自己所在目录的 dsh-argv.txt）
+    assert.ok(parseStubArgv(readLog(join(dir, 'dsh-argv.txt')), 'DSH', 'plugin') !== null,
+      'the mount step must be reached with a good dsh (log: '
+      + JSON.stringify(readLog(join(dir, 'dsh-argv.txt'))) + ')')
+  })
+
+  /**
+   * #111 点 2（pnpm 侧）：显式 `--pnpm` 指向**存在但坏掉**的候选（exit 1）→ 探测命中
+   * （存在性）、验证拒绝（真跑）。取证（C3b）：旧行为假命中 → plugin-manager 隔一层炸出
+   * `Command failed: pnpm add`，比 dsh 侧更难定位。die 必须发生在**挂载之前**
+   * （假 dsh 不被调用、profile 层不出现），且文案点名坏路径。
+   */
+  await test('#111 verify-layer: an explicit --pnpm that exists but fails --version dies before mounting', async () => {
+    const badPnpmDir = join(stubRoot, 'verify-bad-pnpm')
+    await mkdir(badPnpmDir, { recursive: true })
+    const badPnpm = join(badPnpmDir, 'pnpm.cmd')
+    await writeFile(badPnpm, '@echo off\r\nexit /b 3\r\n')
+    const home = join(tmp, 'verify-bad-pnpm')
+    await stubs.reset()
+    const r = run(['install', '--profile', 'web', '--dsh', stubs.dshCmd, '--pnpm', badPnpm], home)
+    assert.notEqual(r.status, 0, `bad pnpm must fail loudly, got exit 0: ${r.stdout}`)
+    const combined = `${r.stdout}${r.stderr}`
+    assert.match(combined, /无法执行/u, `verify-layer must name the rejection: ${combined.slice(-400)}`)
+    assert.ok(combined.includes(badPnpm), `must name the bad pnpm path: ${combined.slice(-400)}`)
+    assert.equal(parseStubArgv(readLog(stubs.dshArgv), 'DSH', 'plugin'), null,
+      'the mount step must NOT be reached with a bad pnpm — the rejection happens before mounting')
+    assert.ok(!existsSync(join(home, 'profiles', 'web', 'package.json')),
+      'no profile layer may appear when verification rejected the candidate')
+  })
+
+  /**
    * 门禁对照 E6：**pnpm 在场那一档不得被新门禁顺带跳过**（Lead 拍板 B 的收口要求）。
    *
    * 光"加了 pnpm 门禁、读数变成 PASS*"证明不了什么 —— 若门禁写错（例如恒假），
@@ -800,7 +892,7 @@ if (stubRootHasSpace) {
     await stubs.reset()
     const ok = await installWithStubs(home)
     assert.equal(ok.status, 0, `exit ${ok.status}: ${ok.stderr}`)
-    assert.ok(parseStubArgv(readLog(stubs.dshArgv), 'DSH') !== null,
+    assert.ok(parseStubArgv(readLog(stubs.dshArgv), 'DSH', 'plugin') !== null,
       'with a reachable pnpm the installer must reach the mount step (stub dsh never invoked)')
 
     const gone = join(stubRoot, 'definitely-absent-pnpm.cmd')
@@ -811,6 +903,8 @@ if (stubRootHasSpace) {
     assert.notEqual(bad.status, 0, 'an explicit --pnpm pointing nowhere must fail loudly')
     assert.match(`${bad.stdout}${bad.stderr}`, /missing pnpm|不存在/u,
       `expected the explicit-path failure to be readable: ${`${bad.stdout}${bad.stderr}`.slice(-260)}`)
+    // 同 :703 判据（pnpm 缺件 die 在验证层之前 → 假 dsh 连 --version 都不该收到；
+    // 本条是「缺件判定仍在验证之前」顺序承诺的第二处机械钉）。
     assert.equal(readLog(stubs.dshArgv), '',
       'the mount step must NOT be reached when pnpm is unreachable — this is exactly what the pnpm-side loud skip reports')
     assert.ok(!existsSync(join(absentHome, 'profiles', 'web', 'package.json')),
@@ -860,7 +954,7 @@ if (stubRootHasSpace) {
     await stubs.reset()
     const r = run(['uninstall', '--dsh', stubs.dshCmd, '--pnpm', stubs.pnpmCmd], home) // 裸形态：不给 --profile
     assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`)
-    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH')
+    const argv = parseStubArgv(readLog(stubs.dshArgv), 'DSH', 'plugin')
     assert.ok(argv !== null,
       `stub dsh was never invoked on uninstall — no rm happened (log: ${JSON.stringify(readLog(stubs.dshArgv))})`)
     assert.deepEqual(argv, ['plugin', '--profile', 'web', 'rm', 'dsh-matt-preset'],

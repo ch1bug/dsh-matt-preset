@@ -44,7 +44,7 @@ import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { payloadOf } from '../lib/payload.mjs'
-import { dshRunner, probeDsh, probeFailureHint, probePnpm, pnpmPathInjection } from '../lib/runtime-probe.mjs'
+import { dshRunner, probeDsh, probeFailureHint, probePnpm, pnpmPathInjection, verifyProbeHit } from '../lib/runtime-probe.mjs'
 import { homeRootProblem, targetProblem } from '../lib/safe-target.mjs'
 
 const PKG_DIR = fileURLToPath(new URL('..', import.meta.url))
@@ -149,10 +149,13 @@ function withPathPrefix(dir) {
  *
  * `pnpm` 的命中判定推迟到**真要挂载**时（mountOrWarn）——`--version` / `--root` 纯 store
  * 操作不要求 pnpm（#86 AC④）。dsh 未命中时**不 die**：调用方要降级成一行响亮告警。
+ * pnpm 探测带 `dshHit`（#111 点 1）：dsh 命中且是桌面形态时，desktop 档**档内追加**同根
+ * 推导候选——桌面运行时自带 primary-runtime，`--dsh <app>/…/dsh.cmd` 而 DSH_DESKTOP_ROOT
+ * 未设的形态不再硬失败（取证 .scratch/verify111 C5）。
  */
 function resolveRuntime({ dsh: explicitDsh, pnpm: explicitPnpm }) {
   const dsh = probeDsh({ explicit: explicitDsh ?? null })
-  const pnpm = probePnpm({ explicit: explicitPnpm ?? null })
+  const pnpm = probePnpm({ explicit: explicitPnpm ?? null, dshHit: dsh.found ? dsh.path : null })
   return { dsh, pnpm, pnpmDir: null }
 }
 
@@ -248,7 +251,9 @@ function unmount(profile, runtime) {
  *  **但 `--dsh` 给错路径是操作者错误**（非环境缺席）→ **die**，且文案点明显式路径本身
  *  （Lead 2026-10-18 拍板：若只说 `missing dsh`，读者会把方向引到 PATH——而他明明给了参数）。
  *  **pnpm 未命中** → 只在**真要挂载**时 die（#86 AC①：一行指路，不是「preset 坏了」），
- *  文案同样按 `probeFailureHint` 区分「显式给错」与「环境缺席」。 */
+ *  文案同样按 `probeFailureHint` 区分「显式给错」与「环境缺席」。
+ *  **命中候选先真跑一次 `--version` 再挂载**（#111 点 2：存在但不可执行的候选在此响亮
+ *  落选，不把失败留给挂载/子进程去炸出难定位的报错）；纯 store 操作不受影响（AC④）。 */
 function mountOrWarn(profile, step, what, runtime) {
   if (!runtime.dsh.found) {
     // 显式 --dsh 指了个不存在的路径 → 操作者错误，不许降级成「跳过」（那会让人以为
@@ -261,7 +266,25 @@ function mountOrWarn(profile, step, what, runtime) {
     console.error(`  !! ${probeFailureHint('dsh', runtime.dsh)}`)
     return false
   }
+  // 缺件判定先行（#86 AC① 顺序保持）：pnpm 全落空 → die missing pnpm——执行性验证
+  // 排在缺件判定之后，否则「pnpm 缺件」的 die 点会被验证层的 spawn 后移（一次只报
+  // 一件可执行的错：先报缺的那件，缺件补齐后才轮到坏件暴露）。
   if (!runtime.pnpm.found) die(probeFailureHint('pnpm', runtime.pnpm))
+  // 执行性验证（#111 点 2）：探测按存在性命中，「存在但不可执行」的候选会假命中——
+  // 失败点后移到挂载（取证 C3a：垃圾 dsh.cmd 假命中，`dsh plugin add` 里炸出
+  // `'this' is not recognized`）。真挂载前真跑一次 `--version`，坏件在这里就响亮落选。
+  const dshVerify = verifyProbeHit('dsh', runtime.dsh)
+  if (!dshVerify.ok) {
+    die(`解析到的 dsh 无法执行（探测按存在性命中、真跑被拒绝: ${dshVerify.problem}）。\n` +
+      `路径见上方回声行。核对 --dsh / DSH_MATT_DSH 指向的是可用的 dsh，或把坏候选移出 PATH。`)
+  }
+  // pnpm 同一层验证（取证 C3b：坏 pnpm.cmd 假命中，plugin-manager 隔一层炸出
+  // `Command failed: pnpm add`，更难定位）。与真调用同一套起进程规则（.cjs 经 node）。
+  const pnpmVerify = verifyProbeHit('pnpm', runtime.pnpm)
+  if (!pnpmVerify.ok) {
+    die(`解析到的 pnpm 无法执行（探测按存在性命中、真跑被拒绝: ${pnpmVerify.problem}）。\n` +
+      `路径: ${runtime.pnpm.path}。核对 --pnpm / DSH_PNPM（或 DSH_MATT_PNPM）指向的是可用的 pnpm，或把坏候选移出 PATH。`)
+  }
   runtime.pnpmDir = pnpmDirFor(runtime.pnpm)
   try {
     step()
