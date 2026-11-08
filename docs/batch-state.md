@@ -370,6 +370,47 @@ retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字
 | **沙箱夜批 Y**（ADR-0003，落地 #73） | 同上：批末 push + CI 全绿 → **主会话**跑批末 retro（聚合 `.scratch/retro/*.md` → 去重一次呈现 → 写 `.aggregated` → 写 `retro: done @ <commit>`）。 | **复用 #71 的标记**（`.scratch/batch-state.md` + `retro:` / `.aggregated`）——**无专用状态文件、无专用标记、无新机制**。容器内**不跑 retro**：夜间只把 digest 的「retro 素材」段当**喂料**（喂料不参与判定）；候选交 human 的**决策路径只在清晨主会话**（CI 全绿信号正好落在那一刻）。 |
 | **Teams 流水线**（ADR-0006） | 同上：批末 push + CI 全绿 → **Lead 会话**跑批末 retro（聚合 `.scratch/retro/*.md` → 去重一次呈现 → 写 `.aggregated` → 写 `retro: done @ <commit>`）。流水线是"一个会话一条流水线"，票的 grain 降到 teammate 任务，**收尾动作恒由主 cwd 的 Lead 执行**。 | **复用 #71 的规则与标记**（`.scratch/batch-state.md` + `retro:` / `.aggregated`）——**无专用信号、无专用状态、无新机制**：收尾处主 cwd 里有 batch-state.md、批末 push 后有既有 CI 绿信号，两个前提**按构造即成立**，故无需为本车道另立任何东西。 |
 
+## 批末投影与机械对账（泳道批，#165 —— batch-state.md = 批末投影，非权威）
+
+**泳道批**（DSH Agent Teams lane，权威叙述 = ADR-0018）下，在飞状态的载体归属换位——
+同一事实只在一个载体上可写，其他面只读投影：
+
+| 事实 | 权威载体（唯一可写面） | 其他面 |
+| --- | --- | --- |
+| 票进度（每票完成态） | **任务板**（`TeamTaskView.status`） | batch-state.md 只读投影 |
+| 停驻登记（阻塞边） | **任务板**（`blockedBy` / `ready`） | 投影面不承载停驻——无双写面 |
+| 未推清单（未推送笔） | **git**（`rev-list` / `log` 实测） | batch-state.md 只读投影 |
+
+`.scratch/batch-state.md` 降级为**批末从任务板/git 导出的投影**，不再是在飞状态的权威
+（#115 手抄漂移两次复发；泳道批 3-4 lanes 并发推进，手抄必死——它是**并行的前置条件**，
+不是并行的一部分）。首跑批全程不在 batch-state.md 上手写进度，成员表「状态」列由批末
+投影从任务板回填。**串行批不受影响**：手抄照旧、C9 照旧只报不阻断（上一节的既有口径不动）。
+
+**任务板读取通道（勘察结论，2026-11-08 上游树读 66491b05 = dsh-v0.2.2-rc.1）**：唯一
+原生可编程读面 = **Lead 会话内模型工具 `team_task_list`**（输出即 TeamTaskView JSON，
+形态权威 = 上游 `tool-agent-team` 的 TASK_VIEW_SCHEMA）；上游 `agent-team` /
+`tool-agent-team` 无 RPC 端点；进程外直读 session 文件不可靠（zstd 压缩 + **批量落盘** +
+`team/task` 事件需累积投影——`docs/dsh-runtime-cheatsheet.md`「别拿会话文件当实时证据」
+的既有口径）。**批末流程**（顺序有向——对账消费投影面，投影不先行在盘对账跑不起来，
+脚本对缺席投影响亮 exit 1）：
+
+1. Team Lead 会话跑 `team_task_list`（**翻页取全**），工具输出 JSON **原样**落盘导出文件；
+2. **回填批末投影行**：从权威面**抄写生成**，不是手写进度（首跑批「全程不在 batch-state.md
+   手写进度」的语义不变——状态列与清单行的值都来自导出与 git 读数，agent 不产生数值）：
+   成员表「状态」列自任务板导出回填；未推清单行自 git 取数命令（`rev-list --count` +
+   `log --format=%H`，见「取数命令契约」）产出 N 与 sha；
+3. 跑 `node scripts/batch-reconcile.mjs --board-export <导出文件>`（判据面以该脚本头注为
+   权威：票集合双向 diff / 成员表 done ↔ 任务板 completed 对齐 / 未推笔数 + sha 双向
+   对账 / 工作树净；不一致**响亮 exit 1 + 逐项差异**，绝不静默——#157 S1/S2 同族）；
+   **对账绿才算批末收口**，红 = 回到第 2 步修投影或核对事实，不静默放行。导出带
+   `nextCursor` 残留 = 分页未取全 = **截断导出** → 对账红（追加型工件禁存在性判定——
+   截断的导出禁被读成完整）。
+
+**对账基准**：常态 `origin/<branch>..HEAD`；lane / develop 分支未首推（`origin/<branch>`
+缺席）→ fallback `main..HEAD`（「未推送 = 未合并」同量，输出**显式声明** fallback）；
+两个基准都缺席 → 响亮 exit 1（批末收口没有基准 ≠「没有差异」）。取数命令契约
+（**只许 `git rev-list --count`**）沿用上文「取数命令契约」节，此处只留指针、不另立第二份。
+
 ## 指针（只留指针，不复述）
 
 - 决策：`CONTEXT.md` **D31**（批次模式 / 护栏 a·b·c / 状态显式化）、**D33**（一票一会话，
@@ -389,3 +430,7 @@ retro + 垃圾候选污染批末聚合，比漏一次更贵）。判定面逐字
   才喊（⚠ 只报不阻断；笔数只作展示、**不参与**比较），票数解析不到 → **✗**；**C9d/C9e** 解析器与
   判据自检（5 不喊 / 6 喊）、**C9f** 护栏读数必须在场；活文件缺席则**响亮跳过**
   ——**守卫只读、绝不替 agent 写文件**）。
+- 泳道批批末机械对账：[`scripts/batch-reconcile.mjs`](../scripts/batch-reconcile.mjs) +
+  [`tests/verify-batch-reconcile.mjs`](../tests/verify-batch-reconcile.mjs)（**#165**；判据
+  面以脚本头注为权威——投影 × 任务板导出 × git 三源交叉，不一致响亮 exit 1 + 逐项差异；
+  真夹具仓漂移实测 = 验收②的机械形态）。
