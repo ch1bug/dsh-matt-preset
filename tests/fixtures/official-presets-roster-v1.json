@@ -161,6 +161,7 @@
     "matt-lang-enforcer": "matt 特征面：语言知识包层——知识指针与流程门职责隔离（D31，docs/lang-enforcer.md）",
     "matt-handoff-tool": "matt 特征面：/handoff 阶段边界执行器（初始 matt preset fc0c07e 起；会话级边界动作 agent 自身做不了）",
     "matt-wrapup-card": "matt 特征面：批末收口卡 kind 插件（batch_wrap_up，#182/ADR-0017 §4 轴 B）——卡形态的可选增强，action-cards 服务缺席时 fiber 不激活、正文形态降级（S3 显式）；官方 preset 无此形态",
+    "matt-ps7-reminder": "matt 特征面：Windows-only 的 PowerShell 7 安装提醒（#60）——主机只有 5.x 线且 PATH 无 pwsh 时每会话一次注入 MS Store 提醒；reminder only 不阻断不自动装；官方 preset 无此形态",
     "matt-str-replace-editor": "matt 特征面：内建文件编辑器行（fc0c07e 起）；官方 preset 未挂、本仓工作流采用（拍板 b 保留增量）",
     "matt-subagent-optional": "matt 特征面：可选 subagent provider 声明（常驻 disabled: true，opt-in 才激活；#92 常驻口径）",
     "matt-subagent-oar-optional": "matt 特征面：0.2.2-rc.1 实验性一次性委派声明位（OAR provider codex/claude 两实例 + subagent_oar 工具行，常驻 disabled: true，opt-in 才激活；#177，启用前提与缺席退化见 docs/preset-runtime-deps.md）",
@@ -194,6 +195,10 @@
         {
           "id": "workflow-wrapup-card",
           "why": "matt-wrapup-card"
+        },
+        {
+          "id": "ps7-reminder",
+          "why": "matt-ps7-reminder"
         },
         {
           "id": "str-replace-editor",
@@ -256,6 +261,10 @@
         {
           "id": "workflow-wrapup-card",
           "why": "matt-wrapup-card"
+        },
+        {
+          "id": "ps7-reminder",
+          "why": "matt-ps7-reminder"
         },
         {
           "id": "str-replace-editor",
@@ -326,6 +335,10 @@
         {
           "id": "workflow-wrapup-card",
           "why": "matt-wrapup-card"
+        },
+        {
+          "id": "ps7-reminder",
+          "why": "matt-ps7-reminder"
         },
         {
           "id": "str-replace-editor",
@@ -500,6 +513,10 @@
         {
           "id": "workflow-wrapup-card",
           "why": "matt-wrapup-card"
+        },
+        {
+          "id": "ps7-reminder",
+          "why": "matt-ps7-reminder"
         },
         {
           "id": "str-replace-editor",

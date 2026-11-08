@@ -1,0 +1,1 @@
+{ "meta": { "title": "PowerShell 7 提醒", "description": "仅 Windows：主机只有 PowerShell 5.x 时每会话一次的提醒，建议从 Microsoft Store 安装 PowerShell 7。仅提醒——不阻断、不自动安装（#60）。" } }

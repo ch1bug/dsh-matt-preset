@@ -1,0 +1,1 @@
+{ "meta": { "title": "PowerShell 7 Reminder", "description": "Windows-only, once-per-session notice when the host has only PowerShell 5.x: suggests installing PowerShell 7 from the Microsoft Store. Reminder only — never blocks or auto-installs (#60)." } }

@@ -59,6 +59,8 @@
     "./handoff-tool.mjs/icon": "./plugin-meta/handoff-tool/icon.svg",
     "./workflow-wrapup-card.mjs/locale/*.json": "./plugin-meta/workflow-wrapup-card/locale/*.json",
     "./workflow-wrapup-card.mjs/icon": "./plugin-meta/workflow-wrapup-card/icon.svg",
+    "./ps7-reminder.mjs/locale/*.json": "./plugin-meta/ps7-reminder/locale/*.json",
+    "./ps7-reminder.mjs/icon": "./plugin-meta/ps7-reminder/icon.svg",
     "./*": "./*",
     "./package.json": "./package.json"
   },

@@ -120,6 +120,24 @@
             config:
               baselineMode: session
 
+          # ps7-reminder（内置插件，随 preset 分发；#60）：Windows-only 的 PowerShell 7 安装
+          # 提醒——主机只有 5.x 线（powershell.exe）而 PATH 上无 pwsh 7+ 时，每会话一次注入
+          # 「从 Microsoft Store 安装 PowerShell 7.x」的显式提醒。同族 workflow-enforcer /
+          # lang-enforcer：reminder only，永不阻断、永不自动安装。检测口径：「Only 5.x」=
+          # pwsh 7+ **缺席**（不是 5.1 并存与否；pwsh.exe 这个名字只属于 7+）；非 Windows 平台
+          # hook 完全惰性。探测用 lstatSync 扫 PATH——不能用 existsSync/statSync：MS Store
+          # 版 PowerShell 7（恰是本提醒建议的安装通道）在
+          # %LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe 放的是 app execution alias
+          # reparse point，existsSync 对它 false-negative（#60 实测：existsSync=false /
+          # statSync EACCES / lstatSync OK）。检测在会话首次 prompt 组装时惰性跑一次并按
+          # session 消费（WeakMap）——装好 pwsh 后新会话自动静默，无需重启 host；注入节
+          # env:ps7（order 97，在 workflow:gates 95 与 lang:packs 96 之后——流程归门、知识归
+          # 语言包、环境事实归这里）。scope 守卫默认 marker（ask-matt），同 enforcer 惯例；
+          # 非 matt preset 单行挂载时显式 config scope: 'all'。判据面守卫
+          # tests/verify-ps7-reminder.mjs。
+          - id: ps7-reminder
+            name: dsh-matt-preset/ps7-reminder.mjs
+
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

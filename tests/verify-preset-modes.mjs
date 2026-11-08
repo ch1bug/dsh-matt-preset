@@ -98,7 +98,7 @@ const OFFICIAL_IDS = ['standard', 'ptc', 'minimal', 'cordis']
 const DECLARATION_NAME = '@deepseek-ai/dsh-agent-preset'
 /** The plugin rows THIS REPO adds. A harness failure must never name one of
  *  them — that would mean the carrier is broken, not the harness incomplete. */
-const MY_ROWS = ['workflow-core', 'workflow-enforcer', 'lang-enforcer', 'handoff-tool']
+const MY_ROWS = ['workflow-core', 'workflow-enforcer', 'lang-enforcer', 'handoff-tool', 'ps7-reminder']
 
 // ── guard: the manifest this suite reads must be the shipped one ────────────
 const pkg = (() => {
