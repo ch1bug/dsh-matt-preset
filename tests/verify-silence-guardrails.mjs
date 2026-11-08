@@ -188,6 +188,14 @@ const NON_TOOL = new Map([
   // tests/verify-autonomy-orchestration.mjs O2c/O3e 钉（词形从提取面消失 →
   // 白名单陈旧 → SG9 红，防腐口径同上）。
   ['ask_user_question', '#163 唤醒编排检测的运行时事件名（编排件 pendingHumanQuestion 判据），非 preset 模型工具；行为由 verify-autonomy-orchestration O2c/O3e 钉'],
+  // #135：正文 TICKET-FACE DOUBLE PRECONDITION / AUTONOMY DIGEST 条引用的三个
+  // **enforcer 导出纯函数**（双层前置 / 越界判定 / WIP checkpoint 行形状的判定入口）。
+  // 它们是会话侧决策用的插件常量面，不是模型可调工具（enforcer reminder-only，
+  // 不提供工具）；存在性与行为由 tests/verify-enforcer.mjs V39/V40 钉（词形从
+  // 提取面消失 → 白名单陈旧 → SG9 红，防腐口径同上）。
+  ['ticketFacePrecheck()', '#135 双层前置判定纯函数（workflow-enforcer.mjs 导出），非模型工具；行为由 verify-enforcer V39 钉'],
+  ['isOverreach()', '#135 越界判据（三授权基座并集成员）纯函数（workflow-enforcer.mjs 导出），非模型工具；行为由 verify-enforcer V40e 钉'],
+  ['checkpointLine()', '#135 WIP checkpoint 行形状纯函数（workflow-enforcer.mjs 导出），非模型工具；行为由 verify-enforcer V40d/V40f 钉'],
 ])
 
 /** persona prefix 文本（agent.cordis.yml 的 `prefix: |` 块）——B3 的 persona 提取面。 */

@@ -246,6 +246,83 @@ a reminder the model is supposed to obey.
 
 > **升权批准的存续语义（dsh-shell-host#190，批 R2 评估）**：`sandbox_permissions` 升权（per-call、fail-closed）与 `run_in_background` 可组合——批准的放宽模式随后台 job 存续（job 寿命由 owner 会话圈定、无过期：上游 `onExpiry: 'none'` 显式设计），即「批准一次」不等价于「用完即止」。门面不变：本表仍是 per-call 审批提醒；会话在**升权 + 后台**组合上应主动向 human 明示（放宽模式将在后台持续），批末收口时核对后台 job 清单。
 
+### Gate authorization（#51 Q1 / #135——22+2 条门逐条打标）
+
+`DEFAULT_GATES` 的每一条门带**恰好一个**打标（声明式表 = `workflow-enforcer.mjs`
+的 `GATE_AUTHORIZATION`；本表由 `tests/verify-enforcer.mjs` V38 与它**双向**钉住——
+删一条标 / 改一侧 → 红，V17/V23c 同一纪律）。打标判据是 #51 Q1 的**可撤回性**：
+一次操作内能完全撤回且不留外部可见副作用 → 可预授权；否则永远事前。
+
+| Gate | Authorization | 条件 / 出处 |
+| --- | --- | --- |
+| `git push` | **pre-authorized** | **非 force**、自家分支（#51 Q1）；批内仍不逐票 push（批末总结门口径 D31/#161 不变）；force 形态走 destructive 门 = always-ask |
+| `gh issue create` | **pre-authorized** | **须过双层前置**（TICKET_FACE_PREAUTH，见判定面表）：①范围 ②内容（#51 Q9′） |
+| `gh pr create` | **pre-authorized** | 正文同样过内容门（事前模式 exit 0，#51 Q1） |
+| `gh release create` | always-ask | 发布面，不可撤回（#51 Q1） |
+| `gh repo create` | always-ask | 同上 |
+| `npm publish` | always-ask | 同上 |
+| `cargo publish` | always-ask | 同上 |
+| `sandcastle` | always-ask | 成本不可撤回，且触发外部执行（#51 Q1） |
+| `run-ticket` | always-ask | 同上 |
+| `plugin_manager install_bundle` | always-ask | 改宿主运行时（#51 Q1） |
+| `plugin_manager set_plugin` | always-ask | 同上 |
+| `plugin_manager set_bundle` | always-ask | 同上 |
+| `plugin_manager remove_bundle` | always-ask | #96 扩面，同族 mutation 判据归类（改宿主运行时） |
+| `plugin_manager set_version_exemption` | always-ask | 同上 |
+| `git reset --hard` | always-ask | 全部 destructive 恒 always-ask（不可逆，#51 Q1） |
+| `git clean -f` | always-ask | 同上 |
+| `rm -rf` | always-ask | 同上 |
+| `docker compose down -v` | always-ask | 同上 |
+| `docker volume rm` | always-ask | 同上 |
+| `docker system prune` | always-ask | 同上 |
+| `drop database` | always-ask | 同上 |
+| `truncate table` | always-ask | 同上 |
+| `delete from` | always-ask | 同上 |
+| `git push --force` | always-ask | 同上 |
+
+**打标只改确认时机，不改门的存在**：本插件 reminder-only（见文首），`pre-authorized`
+动作的 ⚠ 行照旧触发——预授权的含义是「先做后报、进 digest」（#49 Q6 的 AUTONOMY
+DIGEST 行格式），`always-ask` 是「事前报告并等 human」。预授权集**封闭**于上述三门；
+票面四跳里不在门词表的成员各有承接面：`gh issue close`（关票 nudge 判定面 + 批宣告的
+关票确认方式三选一）、`gh issue comment` / `edit`（双层前置同判——写正文的动作内容前置
+同①②；不写正文的改标只判①）、**批末 merge 到集成线**（#161 闸口：human 确认后的
+develop→main，不在门词表、不由本表打标）。
+
+### 票面类双层前置（#51 Q9′ / #135——免确认的两个前置）
+
+票面类**不能整类预授权**（在公开仓发评论 / 建票 = 在公网新建可见内容，正是「外部可见
+副作用」）。`gh issue create / comment / edit` 免确认**须同时满足**，任一不满足 → 不
+预授权，走 ⚠ 门（停下来问）：
+
+1. **范围**：目标票 ∈ 本批**成员** 或 **已登记批外票**（读 `.scratch/batch-state.md`
+   的批外票清单；登记写权在 human——自行登记的票没有授权依据，进 digest `⚠` 段）；
+2. **内容**：正文先过事前模式 exit 0（`node scripts/privacy-scan.mjs --text-file
+   <草稿>`，复用仓扫同一份判据）。
+
+`gh issue close` / 改标不写正文 → 只判①。**fail-closed**：内容门没跑（无 exit 0 证据）
+= 不满足——「扫过且净」必须是证据，不能是假设。两句必须记下的限制（#51 Q9′）：
+**内容干净 ≠ 无副作用**（watchers 的邮件通知发出即收不回）；扫描器只抓**已知形态**
+（本机身份 / 布局形态 / denylist 词），业务性敏感信息仍需 digest 兜底。判定入口 =
+`workflow-enforcer.mjs` 的 `ticketFacePrecheck()`（纯函数，会话决策用它；enforcer 本体
+reminder-only、不读文件不拦截）。
+
+### 越界三步止损（#51 Q2 = A / #135）
+
+一个动作若不落在「routine 白名单」∪「批内预授权四列」∪「风格档 + 例外清单」三者之
+并集之内，即为**越界**（机械判定 = `isOverreach()`，并集成员判定）。越界 = **收回授权，
+不是回滚结果**，三步止损（声明 = `OVERREACH_STOPGAP`，逐条断言 = V40）：
+
+1. **STOP**：立即停止开新票、停止 push；门面动作一律重新问 human；
+2. **DEGRADE**：本会话剩余按 `保守` 档跑（只做本地可逆活；改档本身必须 human 动手，
+   承接 #49 Q4：偏好文件 agent 只读）；
+3. **CHECKPOINT**：WIP 落盘（分支 + batch-state checkpoint 行记 sha，
+   `checkpointLine()`）+ digest **首条** `⚠`（越界动作在 `⚠ 无授权依据的动作` 段
+   **置顶**）。
+
+**不自动 revert**（契约字段 `revert: false`）：已做的动作保留，由 human 裁决——revert
+本身就是一次写操作，其判定依据还是 agent 自己的越界识别，判错就是拿同一个判断力再赌
+一次，且 revert 冲突会把状态与证据一起搅脏（#51 Q2=A）。
+
 ### 判定面（#79：结构化，不做整串子串）
 
 | Surface | Action field | Where the gate is matched |
@@ -257,6 +334,8 @@ a reminder the model is supposed to obey.
 | **#71 push 触发面**（retro：每票落盘 / 批末聚合，`RETRO_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**：push = 命令位置词串 `git push`（`RETRO_TRIGGER.push.words`），判定输入**恒为** `(toolName, argv)`；工具层 + 命令层都经 `matchesSurface`，与 ⚠ 门的 push 追随行**同一次判定、同一个声明**（两者不可能分歧）。**#121 commit 面**：`RETRO_TRIGGER.commit.words` = 命令位置词串 `git commit`，同一结构化核、同一个 `matchesSurface`；它**只 arm 落盘面**（聚合面仍只由真 push 驱动），consume 加「本会话在 `.scratch/retro/` 下尚无 `*-<session token>.md`」的**纯存在性** guard（token = `session-` 之后那 8 位 hex，**不是**整个 id 的前 8 位；完整 id 也接受；同会话多次 commit 含 amend 只提醒一次，**不解析** `batch-state.md`）。**声明边界（与 push 同核）**：选项在前的命令位置（`git -C <dir> commit` / `git -c k=v commit`）不覆盖；`git commit --dry-run/--help` 也命中（词串语义，成本一次本地提醒）。**文本事件层永不 arm push**（`assistant/message` / `user/message` / `text-chunks` / `agent/inbox/spliced` 结构上无动作字段；会话/思考里讨论"推送/push"、retro 文档、handoff 正文一律不触发——宁严勿宽）。**批宣告是唯一允许文本面的面**：`RETRO_TRIGGER.batchDeclare` 的关键词组（`攒批`/`批量模式`/`系列处理`/`大系列`/`这批攒批`）——宣告是**人说的话**，根本没有工具调用，文本层是它唯一可能的判定面（与 `BATCH_CLOSE_KEYWORDS` 同构），读成两个**存在性** marker——`RETRO_TRIGGER.retroMarker`（`retro:`）与 `RETRO_TRIGGER.aggregatedMarker`（`.scratch/retro/.aggregated`），都只判**存在性**、不解析任何表格/内容，两者组合决定落盘 vs 聚合（`retro:` 且无 `.aggregated` → 聚合；`retro:` 且有 `.aggregated` → 落盘，不聚合但不丢素材）。**探针失败是独立的响亮路径**：读 `` `.scratch/batch-state.md` `` 失败（非 `ENOENT`）走 `Batch-state probe FAILED` 节（**无 `⚠` 前缀**），绝不静默降级成"无 marker"。**声明不覆盖**：PTY 分片写（`pty_send`）、经脚本/`xargs`/`node deploy.mjs` 间接 push、其它工作区工具面（`write`/`edit` 无动作字段）一律不触发——与 #79 declared-not-covered 同口径，交**事实探测**兜底（`git log origin/<branch>..HEAD` / `git status -sb`），本插件**不为它长模糊匹配** |
 | **#113 home-delete 提醒面**（`HOME_DELETE_TRIGGER`） | 同上（shell `arguments.command`） | 与 ⚠ 门**同一结构化核**（删除动词半边走 `matchesSurface`，与 ⚠ 门同一匹配器，故 `sudo rm …`、`cd x && rm …`、`bash -c "rm …"` 与其它面一致地免费覆盖），但判定是**组合**而非更长的词表：**删除动词**（`Remove-Item` / `ri` / `rm` / `rmdir` / `del` / `erase` / `rd`，取命令位置、经 `commandToken` 归一化）**且**该命令 argv 里有**home 形态目标**（`$env:DSH_HOME` / `$HOME` / `~/.dsh` / `%USERPROFILE%\.dsh`）。事故命令 `Remove-Item -Recurse -Force $env:DSH_HOME` 对旧 ⚠ 门**完全隐形**（cmdlet 形态不含任何门词），故新增此面。**两半必须落在同一条命令段**，这正是负例的判据：`echo "Remove-Item -Recurse $env:DSH_HOME"` 里 `echo` 占**命令位置**（删除动词只出现在 `echo` 的**参数**里，不是命令位置），`rm -rf ./dist` / `Remove-Item ./build` 无 home 目标 —— **均不触发**；`write`/`edit`/`pty_send` 正文结构上永不 arm。⚠ **token 口径**：本面读的是 `shellWords` 产出的 token，而该分词器（与 ⚠ 门共用）会**丢掉未加引号的 `$`**（`shellWords` 明文行为）——未加引号的 `$env:DSH_HOME` 到达时是 `env:DSH_HOME`、`$HOME` 是 `HOME`，加引号的 `"$HOME\.dsh"` 才保留 `$`；故 predicates 同时接受 shell 拼写与其分词残留（实测：只按 shell 拼写匹配会漏掉**全部未加引号形态**，正是事故命令那条）。目标里的 `$env:TEMP` / `%TEMP%` 之类**故意不匹配**（那是**安全**目标，提醒它等于教模型忽略本提醒）——变量名按**整 token** 匹配（`DSH_HOME`/`HOME`/`USERPROFILE`），不是"任意 `$env:` 展开"（第一版正是后者，实测 `$env:TEMP` 会触发）。**声明不覆盖**：选项在前的命令位置、PTY 分片、脚本间接触发一律不触发——与 #79 declared-not-covered 同口径，**不为它长模糊匹配** |
 | **#49 风格偏好层**（`STYLE_PREFERENCE`） | —（**零新判定面**：偏好层不是 tool/call 面，其提醒**复用** `RETRO_TRIGGER.batchDeclare` 的文本关键词面——首次触发 = 首次建批，Q5 拍板零新钩子；偏好文件在 `<DSH_HOME>` 仓外，本插件**从不读也从不写**它，只把契约写进批宣告注入） | 声明元素两枚：`tiers` = 恰好两档 `保守`/`标准`（**常量侧封闭**——改 `tiers` 数组加/减档 V37b 即红；**载体侧加未知第三档 declare not covered**，自由文本不可负向枚举，D16b 判据 ⇒ 交 code review）、`file` = `<DSH_HOME>/batch-style-preference.md`（**值不入库**；形状唯一事实源在 `docs/batch-state.md`「风格偏好层」）。两档都**不含 push**（push 预授权属 L3 门模型改造：决策 #51 已拍板、实现 #135）；偏好只改**确认时机**、不改动作性质（out-of-batch 关票仍是外部动作 D21）。写入权 human 独占：agent 只可代笔 human **逐字认可**的那一版，落盘后**回显全文 + 绝对路径、此后只读**。**登记写权同样在 human**：批外票清单由 human 批宣告时拍板登记（或事后显式追加），agent 不得自行登记——自行登记的票没有授权依据（进 digest `⚠` 段）。档名与例外（`加:`/`减:` 每条带一行理由与日期）由 agent 读写文件时遵守，enforcer 侧无第二份清单——本行只锚声明元素与契约句（V37c 多载体钉住） |
+| **#135 门打标 + 票面类双层前置**（`GATE_AUTHORIZATION` / `ticketFacePrecheck()`） | —（**零新判定面**：打标是声明式表的静态属性，不是 tool/call 判定；双层前置是**会话决策的纯函数**，不读文件、不拦截——本插件 reminder-only 边界不变。⚠ 门对票面类动作照旧触发，预授权只改**确认时机**：先做后报进 digest，还是事前等 human） | 打标表 = `GATE_AUTHORIZATION`，每门恰好一标（pre-authorized 封闭于 `git push` 非 force / `gh issue create` / `gh pr create` 三门，条件随标；destructive 全 always-ask；`sandcastle`/`run-ticket` 成本不可撤回恒 always-ask），与本文档「Gate authorization」表由 V38 **双向**钉住。双层前置两条件（#51 Q9′）：①范围 = 目标票 ∈ 批成员 ∪ 已登记批外票清单（登记写权在 human）；②内容 = 正文过事前模式（`scripts/privacy-scan.mjs --text-file`，与仓扫同一份判据）exit 0；`close`/改标不写正文只判①；`bodyScanExit` **fail-closed**——非 0 即不满足（没跑 = 没证据），未核不得当已核。声明残留风险：内容干净 ≠ 无副作用（watchers 邮件不可撤回）、扫描器只抓已知形态（digest 兜底） |
+| **#135 越界三步止损**（`OVERREACH_STOPGAP` / `isOverreach()` / `checkpointLine()`） | —（**零新判定面**：越界判据是**三授权基座的并集成员判定**——动作不落在「routine 白名单」∪「批内预授权四列」∪「风格档 + 例外清单」并集内 = 越界；纯函数，无文件读取、无会话状态） | 越界 = **收回授权，不是回滚结果**（#51 Q2=A，契约字段 `revert: false`）。三步：①**STOP** 停开票停 push；②**DEGRADE** 本会话剩余按 `保守` 档跑（改档必须 human 动手）；③**CHECKPOINT** WIP 落盘（分支 + batch-state checkpoint 行记 sha，`checkpointLine()`）+ digest **首条** `⚠`（`digestFirst: true`，越界动作在 `⚠ 无授权依据的动作` 段置顶）。已做动作保留待 human 裁决，**不自动 revert**——revert 本身是一次写操作，判定依据还是同一个刚误判的识别力。三步逐条断言 = V40；载体 = docs/batch-state.md「越界三步止损」+ batch 组件 digest 条 |
 | `write` / `edit` / `str_replace_editor` / `pty_send` / `pty_open` / `run_code` / 其它工作区工具面 | — | **显式不覆盖**：带正文、分片写入或**程序正文**的参数永不命中，不用模糊匹配弥补（PTC 下经 SDK 的嵌套调用是真实 `tool/call`，仍按该调用的动作字段照常判定） |
 
 Which flag values are executed is **declared** (`EXEC_FLAGS`: shell `-c`,

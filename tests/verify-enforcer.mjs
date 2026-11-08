@@ -2172,6 +2172,202 @@ if (digestMissing.length === 0)
   ok('V37d. wrap digest format pinned in the body + named by CONTEXT D53', `${DIGEST_CARRIERS.length} 条`)
 else bad('V37d. digest format drift', `missing: ${digestMissing.join(' / ')}`)
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── V38 (#135 / #51 Q1): the GATE-AUTHORIZATION labelling. Every gate in
+// `DEFAULT_GATES` carries exactly one label (`pre-authorized` = 先做后报进
+// digest / `always-ask` = 事前等 human), declared in ONE table
+// (`GATE_AUTHORIZATION`) and mirrored by the doc's「Gate authorization」table.
+// What V38 pins (the V17 discipline, two layers):
+//   (a) code-side bidirectional: every declared gate has a label (no silent
+//       fall-through), every label key IS a declared gate (no invented rows);
+//   (b) doc-side bidirectional: the doc table lists exactly the same gates
+//       with exactly the same labels — delete a label row / flip a label on
+//       either side reddens (measured, .scratch/verify135/);
+//   (c) the pre-authorized set is CLOSED at the three #51 Q1 in-gate entries;
+//   (d) every destructive gate is always-ask (irreversible by definition).
+// DECLARED NOT COVERED (D16b, same as V37b): a FREE-TEXT authorization word
+// added to a carrier is not negatively enumerable — the closed enumeration is
+// pinned where it is decidable, on the constant (V38a/c).
+import { GATE_AUTHORIZATION, ticketFacePrecheck, OVERREACH_STOPGAP, isOverreach, checkpointLine } from '../workflow-enforcer.mjs'
+import { fixtureEnv, gitIn } from './isolated-git.mjs'
+import { writeFileSync, mkdirSync } from 'node:fs'
+
+const declaredGatesAll = [...DEFAULT_GATES.external, ...DEFAULT_GATES.destructive]
+const unlabelled = declaredGatesAll.filter(g => GATE_AUTHORIZATION[g] === undefined)
+const inventedLabels = Object.keys(GATE_AUTHORIZATION).filter(g => !declaredGatesAll.includes(g))
+const badLabels = Object.entries(GATE_AUTHORIZATION).filter(([, v]) => v !== 'pre-authorized' && v !== 'always-ask')
+if (unlabelled.length === 0 && inventedLabels.length === 0 && badLabels.length === 0)
+  ok('V38a. GATE_AUTHORIZATION ↔ DEFAULT_GATES bidirectional (every gate labelled, no invented key, labels are the closed two)', `${declaredGatesAll.length} gates`)
+else bad('V38a. gate-authorization declaration drift',
+  `unlabelled: ${unlabelled.join(', ') || '—'} | invented: ${inventedLabels.join(', ') || '—'} | bad values: ${badLabels.map(([k, v]) => `${k}=${v}`).join(', ') || '—'}`)
+
+const docAuthTable = docAll
+  .split('\n')
+  .filter(line => /^\|\s*`[^`]+`\s*\|\s*\*{0,2}(pre-authorized|always-ask)\*{0,2}\s*\|/.test(line))
+  .map(line => {
+    const m = /^\|\s*`([^`]+)`\s*\|\s*\*{0,2}(pre-authorized|always-ask)\*{0,2}\s*\|/.exec(line)
+    return { gate: m[1], label: m[2] }
+  })
+const docAuthMap = new Map(docAuthTable.map(r => [r.gate, r.label]))
+const authUndocumented = declaredGatesAll.filter(g => !docAuthMap.has(g))
+const authInventedInDoc = [...docAuthMap.keys()].filter(g => !declaredGatesAll.includes(g))
+const authMismatched = declaredGatesAll.filter(g => docAuthMap.has(g) && docAuthMap.get(g) !== GATE_AUTHORIZATION[g])
+if (docAuthTable.length > 0 && authUndocumented.length === 0 && authInventedInDoc.length === 0 && authMismatched.length === 0)
+  ok('V38b. doc「Gate authorization」table ↔ GATE_AUTHORIZATION bidirectional (gate set AND label per gate)', `${docAuthTable.length} rows`)
+else bad('V38b. gate-authorization doc drift',
+  `docRows=${docAuthTable.length} | undocumented: ${authUndocumented.join(', ') || '—'} | invented: ${authInventedInDoc.join(', ') || '—'} | label mismatch: ${authMismatched.map(g => `${g}: doc=${docAuthMap.get(g)} code=${GATE_AUTHORIZATION[g]}`).join(', ') || '—'}`)
+
+const preAuthGates = Object.entries(GATE_AUTHORIZATION).filter(([, v]) => v === 'pre-authorized').map(([k]) => k)
+const PRE_AUTH_CLOSED = ['git push', 'gh issue create', 'gh pr create']
+const forceAsk = GATE_AUTHORIZATION['git push --force'] === 'always-ask'
+const costAsk = GATE_AUTHORIZATION['sandcastle'] === 'always-ask' && GATE_AUTHORIZATION['run-ticket'] === 'always-ask'
+if (preAuthGates.length === PRE_AUTH_CLOSED.length && PRE_AUTH_CLOSED.every(g => preAuthGates.includes(g)) && forceAsk && costAsk)
+  ok('V38c. pre-authorized set CLOSED at the three #51 Q1 in-gate entries; force push + sandcastle/run-ticket stay always-ask', preAuthGates.join(', '))
+else bad('V38c. pre-authorized set is not the closed #51 Q1 set',
+  `pre-authorized=${preAuthGates.join(', ')} | forceAsk=${forceAsk} costAsk=${costAsk}`)
+
+const destructiveAsk = DEFAULT_GATES.destructive.filter(g => GATE_AUTHORIZATION[g] !== 'always-ask')
+if (destructiveAsk.length === 0)
+  ok('V38d. every destructive gate is always-ask (irreversible by definition)', `${DEFAULT_GATES.destructive.length} gates`)
+else bad('V38d. destructive gate pre-authorized (must never)', destructiveAsk.join(', '))
+
+// ── V39 (#135 / #51 Q9′): the TICKET-FACE DOUBLE PRECONDITION. A ticket-face
+// action (`gh issue create`/`comment`/`edit`) is confirmation-free ONLY when
+// BOTH hold — ① scope: the target is a batch member or a REGISTERED 批外票;
+// ② content: the body passed the pre-publish privacy scan (exit 0). Either
+// failing → NOT pre-authorized → the ⚠ gate face (asks: true). The three
+// ticket AC assertions are V39a/b/c; V39d pins the bodyless faces (close /
+// re-label judge ① only), V39e the fail-closed exit (no exit-0 evidence =
+// unmet — "scanned and clean" must be evidence, never an assumption), V39f
+// the carrier presence.
+const members = [101, 102]
+const registered = [201]
+const v39a = ticketFacePrecheck({ ticket: 999, batchMembers: members, registeredTickets: registered, writesBody: true, bodyScanExit: 0 })
+if (v39a.authorized === false && v39a.reason === 'scope' && v39a.asks === true)
+  ok('V39a. 双层前置①：范围外 → 不发预授权（asks=true → ⚠ 门面，停下来问）')
+else bad('V39a. 范围外误发预授权', JSON.stringify(v39a))
+
+const v39b = ticketFacePrecheck({ ticket: 101, batchMembers: members, registeredTickets: registered, writesBody: true, bodyScanExit: 1 })
+if (v39b.authorized === false && v39b.reason === 'content' && v39b.asks === true)
+  ok('V39b. 双层前置②：范围内 + 内容红（exit 1）→ 不发预授权')
+else bad('V39b. 内容红仍预授权', JSON.stringify(v39b))
+
+const v39c = ticketFacePrecheck({ ticket: 201, batchMembers: members, registeredTickets: registered, writesBody: true, bodyScanExit: 0 })
+if (v39c.authorized === true && v39c.asks === false)
+  ok('V39c. 范围内（已登记批外票）+ 内容绿（exit 0）→ 预授权成立（不触发 ⚠）')
+else bad('V39c. 双前置满足仍触发 ⚠', JSON.stringify(v39c))
+
+const v39dClose = ticketFacePrecheck({ ticket: 101, batchMembers: members, registeredTickets: registered, writesBody: false, bodyScanExit: 1 })
+const v39dForeign = ticketFacePrecheck({ ticket: 999, batchMembers: members, registeredTickets: registered, writesBody: false, bodyScanExit: 0 })
+if (v39dClose.authorized === true && v39dForeign.authorized === false && v39dForeign.reason === 'scope')
+  ok('V39d. close/改标不写正文 → 只判①（范围内内容红也放行；范围外内容绿仍拦）')
+else bad('V39d. bodyless 面判定不符', `close=${JSON.stringify(v39dClose)} foreign=${JSON.stringify(v39dForeign)}`)
+
+const v39e = ticketFacePrecheck({ ticket: 101, batchMembers: members, registeredTickets: registered, writesBody: true, bodyScanExit: undefined })
+if (v39e.authorized === false && v39e.reason === 'content')
+  ok('V39e. fail-closed：内容门没跑（无 exit 0 证据）= 不满足——"扫过且净"必须是证据')
+else bad('V39e. 未核放行（fail-open）', JSON.stringify(v39e))
+
+// (f) carrier presence: the contract is written down in all three carriers
+// (V35h discipline) — enforcer doc (the authorization + precondition +
+// stopgap sections), docs/batch-state.md, the batch component.
+const p135Carriers = {
+  enforcerDoc: docAll,
+  batchState: readFileSync(new URL('../docs/batch-state.md', import.meta.url), 'utf8'),
+  batchComponent: readFileSync(new URL('../workflow-component-batch.txt', import.meta.url), 'utf8'),
+  // #135 复审适配（意见 2，#181 先例）：minimal 档的 AUTONOMY DIGEST 压缩版也承载
+  // digest 契约——三个新行为语义（置顶/止损/不回滚）必须同步进压缩行，否则 minimal
+  // 档会话读不到（#128 同族：同一契约多处承载，只改一处 = 遗漏）。
+  minimalProfile: readFileSync(new URL('../workflow-profile-minimal.txt', import.meta.url), 'utf8'),
+}
+const P135_CARRIERS = [
+  ['enforcer doc: Gate authorization 表节', /### Gate authorization/.test(p135Carriers.enforcerDoc)],
+  ['enforcer doc: 双层前置节（两条件 + fail-closed）', /### 票面类双层前置/.test(p135Carriers.enforcerDoc) && /fail-closed/i.test(p135Carriers.enforcerDoc)],
+  ['enforcer doc: 越界三步止损节（不自动 revert）', /### 越界三步止损/.test(p135Carriers.enforcerDoc) && /不自动 revert/.test(p135Carriers.enforcerDoc)],
+  ['enforcer doc: 判定面两行（GATE_AUTHORIZATION / OVERREACH_STOPGAP）', /GATE_AUTHORIZATION/.test(p135Carriers.enforcerDoc) && /OVERREACH_STOPGAP/.test(p135Carriers.enforcerDoc)],
+  ['batch-state: 双层前置节 + 事前模式命令', /## 票面类双层前置/.test(p135Carriers.batchState) && /privacy-scan\.mjs --text-file/.test(p135Carriers.batchState)],
+  ['batch-state: 越界三步止损节 + checkpoint 形状', /## 越界三步止损/.test(p135Carriers.batchState) && /checkpoint:/.test(p135Carriers.batchState)],
+  ['batch-state: fail-closed 句', /fail-closed/i.test(p135Carriers.batchState)],
+  ['batch 组件: TICKET-FACE DOUBLE PRECONDITION（①范围②内容）', /TICKET-FACE DOUBLE/.test(p135Carriers.batchComponent) && /PRE-PUBLISH privacy scan/.test(p135Carriers.batchComponent)],
+  ['batch 组件: digest 越界置顶 + 三步止损', /OVERREACH ACTIONS GO FIRST/.test(p135Carriers.batchComponent) && /OVERREACH_STOPGAP/.test(p135Carriers.batchComponent)],
+  ['batch 组件: NO AUTO-REVERT', /NO AUTO-REVERT/.test(p135Carriers.batchComponent)],
+  ['batch 组件: ticketFacePrecheck 判定入口', /ticketFacePrecheck\(\)/.test(p135Carriers.batchComponent)],
+  ['minimal: digest 压缩版含越界置顶（复审意见 2）', /OVERREACH actions go FIRST/.test(p135Carriers.minimalProfile)],
+  ['minimal: digest 压缩版含三步止损（STOP/DEGRADE/CHECKPOINT）', /three-step stopgap/.test(p135Carriers.minimalProfile) && /DEGRADE the rest of this session to the/.test(p135Carriers.minimalProfile) && /CHECKPOINT WIP lands/.test(p135Carriers.minimalProfile)],
+  ['minimal: digest 压缩版含不自动 revert', /never auto-revert/.test(p135Carriers.minimalProfile) && /for the human to\s+adjudicate/.test(p135Carriers.minimalProfile)],
+]
+const p135Missing = P135_CARRIERS.filter(([, hit]) => !hit).map(([n]) => n)
+if (p135Missing.length === 0)
+  ok('V39f. #135 契约写进全部四载体（enforcer doc / batch-state / batch 组件 / minimal 压缩版）', `${P135_CARRIERS.length} 条`)
+else bad('V39f. #135 carrier drift', `missing: ${p135Missing.join(' / ')}`)
+
+// ── V40 (#135 / #51 Q2=A): the OVERREACH STOPGAP. An action landing in NONE
+// of the three authorization bases is overreach; the protocol is three steps
+// (STOP no new tickets & no push / DEGRADE to the 保守 tier for the rest of
+// THIS session / CHECKPOINT WIP lands + digest FIRST ⚠), and the contract is
+// NO AUTO-REVERT — already-done actions stay for the human to adjudicate.
+// The three ticket AC assertions are V40a/b/c (one per step); V40d pins the
+// revert=false contract on the constant AND on the checkpoint line's shape;
+// V40e pins the union-membership judgement; V40f MEASURES it on a real
+// fixture repo: the checkpoint landing (writing the batch-state line only)
+// leaves HEAD untouched — no commit, no revert, no push.
+const steps = OVERREACH_STOPGAP.steps
+if (steps.length === 3 && /停止开新票/.test(steps[0]) && /停止 push/.test(steps[0]))
+  ok('V40a. 步骤① STOP：立即停止开新票、停止 push（门面动作重新问 human）')
+else bad('V40a. STOP 步缺失或变质', JSON.stringify(steps[0]))
+if (/保守/.test(steps[1]) && /本会话剩余/.test(steps[1]) && /human 动手/.test(steps[1]))
+  ok('V40b. 步骤② DEGRADE：本会话剩余按 保守 档跑（改档必须 human 动手，#49 Q4）')
+else bad('V40b. DEGRADE 步缺失或变质', JSON.stringify(steps[1]))
+if (/WIP 落盘/.test(steps[2]) && /checkpoint/.test(steps[2]) && /sha/.test(steps[2]) && /digest 首条/.test(steps[2]) && OVERREACH_STOPGAP.digestFirst === true)
+  ok('V40c. 步骤③ CHECKPOINT：WIP 落盘（分支+sha）+ digest 首条 ⚠（置顶，digestFirst=true）')
+else bad('V40c. CHECKPOINT 步缺失或变质 / digestFirst 非真', `step=${JSON.stringify(steps[2])} digestFirst=${OVERREACH_STOPGAP.digestFirst}`)
+
+const cline = checkpointLine('P135', 'wip/p135-stopgap', 'abc1234')
+if (OVERREACH_STOPGAP.revert === false && /不自动 revert/.test(cline) && /已做动作保留/.test(cline)
+  && !steps.some(s => /\brevert\b/i.test(s) && !/不自动 revert/.test(s.replace(/不自动 revert/g, ''))))
+  ok('V40d. 不自动 revert 是契约（OVERREACH_STOPGAP.revert===false；checkpoint 行与三步文本都只声明"保留待裁决"）')
+else bad('V40d. revert 契约漂移', `revert=${OVERREACH_STOPGAP.revert} line=${cline}`)
+
+const grants = [['routine: 跑测试', 'routine: 本地提交'], ['批内四列: 写域', '批内四列: 关票成员票'], ['风格例外: 登记批外票 #201']]
+if (isOverreach('未授权动作 X', grants) === true
+  && isOverreach('routine: 本地提交', grants) === false
+  && isOverreach('批内四列: 关票成员票', grants) === false
+  && isOverreach('风格例外: 登记批外票 #201', grants) === false)
+  ok('V40e. isOverreach = 三授权基座并集成员判定（并集内不越界，并集外即越界）')
+else bad('V40e. 并集判定不符', `grants=${JSON.stringify(grants)}`)
+
+// (f) measured on a REAL fixture repo: the CHECKPOINT landing (step 3) writes
+// the batch-state line ONLY — HEAD must stay untouched (no commit, no revert,
+// no push). git 隔离走 tests/isolated-git.mjs（#110）：`git -C` + 夹具自己的
+// 空全局配置，绝不打在调用方仓上。
+{
+  const overreachRoot = tmpRoot(await mkdtemp(join(tmpdir(), 'dsh-enforcer-overreach-')))
+  const cfgFile = join(overreachRoot, 'gitconfig-fixture')
+  writeFileSync(cfgFile, '')
+  const genv = fixtureEnv({ GIT_CONFIG_GLOBAL: cfgFile, GIT_CONFIG_SYSTEM: cfgFile })
+  const G = gitIn(overreachRoot, genv)
+  G('init', '-q', '-b', 'wip/p135-stopgap')
+  G('config', 'user.name', 'Fixture')
+  G('config', 'user.email', 'fixture@example.com')
+  mkdirSync(join(overreachRoot, '.scratch'), { recursive: true })
+  writeFileSync(join(overreachRoot, 'wip.md'), 'wip content\n')
+  G('add', '-A')
+  G('commit', '-q', '-m', 'wip: overreach checkpoint fixture')
+  const sha0 = G('rev-parse', 'HEAD').stdout.trim()
+  // 止损第三步 = 只写本地 checkpoint 行（WIP 落盘），不动 git 状态。
+  // checkpoint 行用**真 sha0**（V40d 的 cline 是形状演示用的假 sha——这里要断言
+  // "行里记的 sha 落盘后能找回"，必须写真值）。
+  writeFileSync(join(overreachRoot, '.scratch', 'batch-state.md'), `# Batch state — P135\n${checkpointLine('P135', 'wip/p135-stopgap', sha0)}\n`)
+  const shaAfter = G('rev-parse', 'HEAD').stdout.trim()
+  const commitCount = G('rev-list', '--count', 'HEAD').stdout.trim()
+  const noRemote = G('remote').stdout.trim() === ''
+  const landed = readFileSync(join(overreachRoot, '.scratch', 'batch-state.md'), 'utf8').includes(sha0)
+  if (sha0 !== '' && shaAfter === sha0 && commitCount === '1' && noRemote && landed)
+    ok('V40f. 夹具实跑：CHECKPOINT 落盘后 HEAD 不变（无新提交、无 revert、无 remote/push）', `sha=${sha0.slice(0, 8)} commits=${commitCount}`)
+  else bad('V40f. 止损落盘改变了 git 状态（越了"不自动 revert"契约）',
+    `sha0=${sha0.slice(0, 8)} after=${shaAfter.slice(0, 8)} commits=${commitCount} noRemote=${noRemote} landed=${landed}`)
+}
+
 // Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
@@ -2201,6 +2397,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V37) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V40) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

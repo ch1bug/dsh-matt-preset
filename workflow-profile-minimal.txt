@@ -107,7 +107,13 @@ BATCH MODE — only when the human declares a batch; never on by default.
   commit <sha> · 证据: <命令> → exit <code> · <输出路径>; in-batch actions
   stay as Progress-row pointers (not re-copied); a line missing evidence is
   marked 未验证 and escalated (D47); a separate ⚠ 无授权依据的动作 section
-  lists unauthorized moves.
+  lists unauthorized moves — OVERREACH actions go FIRST in that section
+  (#135): an action outside all three authorization bases is overreach =
+  authorization withdrawn, NOT a rollback — run the three-step stopgap
+  (STOP no new tickets & no push / DEGRADE the rest of this session to the
+  保守 tier / CHECKPOINT WIP lands: branch + checkpoint line naming the sha),
+  and never auto-revert — already-done actions stay for the human to
+  adjudicate.
 - ISSUE DISCIPLINE: every discovery lands in the tracker, is processed, then
   the issue is updated with the fix and its evidence. Bucket A (blocks
   verification) pauses the batch for the human; B and C continue.

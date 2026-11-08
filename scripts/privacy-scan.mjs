@@ -28,6 +28,16 @@
  * 用法：
  *   node scripts/privacy-scan.mjs [--verbose] [--gh] [--denylist <file>] [--no-history] [--root <dir>]
  * exit 0 = 净；1 = 有命中；缺 git / 缺 gh → **响亮跳过**（不把缺环境装成通过）。
+ *
+ * **事前模式（#135 / #51 Q9′）**：在正文**发布前**扫，而不是等 `--gh` 扫已发布的轨迹面
+ * （三次隐私事故的教训正是"事后发现太晚"）：
+ *   node scripts/privacy-scan.mjs --text-file <path>     # 扫一个文件（如拟发布的 issue 正文草稿）
+ *   ... --stdin                                          # 扫标准输入（管道喂入）
+ * 复用与仓扫**同一份判据**（`scanText` / `identityTokens` / `denylistTokens`——守卫不得手抄
+ * 被测语义），输出同样整行打码。**缺输入 / 空输入响亮失败 exit 2**（D47：不得静默 exit 0
+ * ——事前模式的调用方拿 exit 0 当"内容门通过"，静默 0 等于把门焊死在开位）：
+ * `--text-file` 指向不存在的文件、读出空正文、`--stdin` 无内容、两个输入源同时给出
+ * （歧义输入）都 exit 2 并写明原因。exit 码：0 = 净；1 = 有命中；2 = 输入/用法侧响亮失败。
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -307,8 +317,75 @@ export function trackerItems() {
   ]
 }
 
+/** 事前模式（#135）：读出要扫的文本，或返回 null 走仓扫原路径。
+ *  缺输入 / 空输入**响亮失败**（D47），错误经 main 的 catch 打成 exit 2。 */
+function textModeInput(argv) {
+  const wantsFile = argv.includes('--text-file')
+  const wantsStdin = argv.includes('--stdin')
+  if (!wantsFile && !wantsStdin) return null
+  if (wantsFile && wantsStdin) {
+    throw new Error('输入/用法错误：--text-file 与 --stdin 互斥（两个输入源同给是歧义输入，不静默任选其一）')
+  }
+  if (wantsFile) {
+    const arg = (name) => { const i = argv.indexOf(name); return i === -1 ? undefined : argv[i + 1] }
+    const path = arg('--text-file')
+    if (path === undefined || String(path).startsWith('--')) {
+      throw new Error('输入/用法错误：--text-file 需要一个路径参数（缺输入 → 响亮失败，不静默回落到仓扫）')
+    }
+    if (!existsSync(path)) {
+      throw new Error(`输入/用法错误：--text-file 指向的文件不存在：${path}（缺输入 → 响亮失败，D47）`)
+    }
+    const text = readFileSync(path, 'utf8')
+    if (text.trim() === '') {
+      throw new Error(`输入/用法错误：${path} 输入为空（空正文没有可核的内容，事前模式不得静默 exit 0，D47）`)
+    }
+    return text
+  }
+  // --stdin：读全部标准输入；管道空 / 无内容 → 响亮失败。
+  const text = readFileSync(0, 'utf8')
+  if (text.trim() === '') {
+    throw new Error('输入/用法错误：--stdin 输入为空（空正文没有可核的内容，事前模式不得静默 exit 0，D47）')
+  }
+  return text
+}
+
+/** 事前模式的扫描与报告：同一份判据（scanText + 身份 + denylist），输出整行打码。 */
+function runTextScan(text, argv) {
+  const arg = (name) => { const i = argv.indexOf(name); return i === -1 ? undefined : argv[i + 1] }
+  const file = arg('--denylist') ?? arg('--terms') ?? denylistPath()
+  const { tokens, source } = denylistTokens(file)
+  const all = [...tokens, ...identityTokens()]
+  if (source === null) {
+    console.log(`  !! SKIP (loud) - denylist 缺失（${file}）：只跑了身份与结构性规则，运行期推不出的那类 token 未核对`)
+    console.log('     格式：一行一个 token、# 注释、大小写不敏感；该文件在 <DSH_HOME> 下，**永不进仓**')
+  }
+  const hits = scanText(text, { tokens: all })
+  if (hits.length === 0) {
+    console.log(`  ✓ privacy-scan --text: clean (identity=3 + denylist=${source === null ? '缺席' : tokens.length})`)
+    return 0
+  }
+  console.log(`  ✗ privacy-scan --text: ${hits.length} finding(s)`)
+  for (const f of hits) console.log(`      [${f.kind}] line ${f.line}  ${f.text}`)
+  console.log('      → 这是**发布前**的事前模式：正文不得带个人 / 本机环境串出仓；改占位符（`~` / `$HOME` / `%USERPROFILE%` / `<repo>` / `<user>`）。')
+  console.log('      注意口径：内容干净 ≠ 无副作用（watchers 的邮件通知发出即收不回），扫描器只抓已知形态——业务性敏感信息仍需 digest 兜底（#51 Q9′）。')
+  return 1
+}
+
 function main(argv) {
   const arg = (name) => { const i = argv.indexOf(name); return i === -1 ? undefined : argv[i + 1] }
+  // 事前模式分流（#135）：`--text-file` / `--stdin` 在 argv 上即走文本面，不碰 git。
+  // 输入/用法侧的失败在 textModeInput 里抛出，由下面的 catch 统一打成 exit 2 响亮失败。
+  const wantsTextMode = argv.includes('--text-file') || argv.includes('--stdin')
+  if (wantsTextMode) {
+    try {
+      const text = textModeInput(argv)
+      if (argv.includes('--verbose')) console.log('privacy-scan: text mode（事前扫描，复用仓扫同一份判据）')
+      return runTextScan(text, argv)
+    } catch (error) {
+      console.log(`  ✗ privacy-scan --text: ${String(error?.message ?? error).split('\n')[0]}`)
+      return 2
+    }
+  }
   const root = arg('--root') ?? process.cwd()
   const file = arg('--denylist') ?? arg('--terms') ?? denylistPath()
   const { tokens, source } = denylistTokens(file)

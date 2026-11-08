@@ -462,6 +462,144 @@ export const STYLE_PREFERENCE = {
   file: '<DSH_HOME>/batch-style-preference.md',
 }
 
+/** Gate-authorization labelling (#135 / #51 Q1 — 可撤回性双清单): every gate in
+ * `DEFAULT_GATES` carries exactly one label, in ONE declarative table here
+ * (mirrored by the doc table in `docs/workflow-enforcer.md`「Gate authorization」;
+ * the two are pinned bidirectionally by V38 — delete a label on either side and
+ * the suite reddens, the V17/V23c discipline):
+ *
+ *   - `pre-authorized` — 先做后报（report afterwards, land in the digest）: the
+ *     action is reversible within one operation and leaves no externally
+ *     visible side effect, per #51 Q1's 撤回性判据. The ⚠ line STILL fires (this
+ *     plugin is reminder-only and does not intercept); the label changes the
+ *     CONFIRMATION TIMING, never the gate's existence.
+ *   - `always-ask` — 事前等 human: irreversible, externally visible, or
+ *     cost-not-recoverable. Every destructive gate is here by definition, plus
+ *     the externals #51 names (publish, release/repo create, the
+ *     plugin_manager mutation family — #96's two later additions ride the same
+ *     mutation family judgement — and `sandcastle` / `run-ticket`, whose cost
+ *     is not recoverable).
+ *
+ * The pre-authorized set is CLOSED at exactly three gates — the #51 Q1 table's
+ * in-gate entries (`gh issue close`/`comment`/`edit` are NOT gates in
+ * `DEFAULT_GATES`; their pre-authorization face is the ticket-face double
+ * precondition below, and 批末 merge to the integration line is not a gate at
+ * all — both are written down in the doc's authorization paragraph, not
+ * invented into this table). Conditions are part of the label: `git push` is
+ * pre-authorized ONLY non-force onto an own branch (`git push --force` is a
+ * destructive gate and stays always-ask), and the two ticket/pr faces only
+ * inside their declared preconditions. Editing a label — either direction —
+ * reddens V38 (measured). */
+export const GATE_AUTHORIZATION = {
+  'git push': 'pre-authorized',                       // 非 force、自家分支；force 形态走 destructive 门（always-ask）
+  'gh issue create': 'pre-authorized',                // 须过双层前置（TICKET_FACE_PREAUTH：范围 + 内容）
+  'gh pr create': 'pre-authorized',                   // 正文同样过内容门（事前模式 exit 0）
+  'gh release create': 'always-ask',
+  'gh repo create': 'always-ask',
+  'npm publish': 'always-ask',
+  'cargo publish': 'always-ask',
+  'sandcastle': 'always-ask',                         // 成本不可撤回，且触发外部执行（#51 Q1）
+  'run-ticket': 'always-ask',                         // 同上
+  'plugin_manager install_bundle': 'always-ask',      // 改宿主运行时（#51 Q1）
+  'plugin_manager set_plugin': 'always-ask',
+  'plugin_manager set_bundle': 'always-ask',
+  'plugin_manager remove_bundle': 'always-ask',       // #96 扩面，同族 mutation（改宿主运行时）
+  'plugin_manager set_version_exemption': 'always-ask',
+  'git reset --hard': 'always-ask',
+  'git clean -f': 'always-ask',
+  'rm -rf': 'always-ask',
+  'docker compose down -v': 'always-ask',
+  'docker volume rm': 'always-ask',
+  'docker system prune': 'always-ask',
+  'drop database': 'always-ask',
+  'truncate table': 'always-ask',
+  'delete from': 'always-ask',
+  'git push --force': 'always-ask',
+}
+
+/** Ticket-face double precondition (#135 / #51 Q9′): the ticket-family actions
+ * (`gh issue create` / `comment` / `edit`) may run WITHOUT a per-action
+ * confirmation ONLY when BOTH conditions hold — 票面类不能整类预授权 (posting to
+ * a public repo IS creating externally visible content, so the label rides on
+ * preconditions, not on the class):
+ *
+ *   ① SCOPE — the target ticket is a batch member OR sits on the registered
+ *      批外票清单 (`.scratch/batch-state.md`; registration is the HUMAN's call,
+ *      #49/D53 — a self-registered ticket has no authorization basis);
+ *   ② CONTENT — the body has already passed the pre-publish privacy scan
+ *      (`scripts/privacy-scan.mjs --text-file …` exit 0, the SAME judgement as
+ *      the repo scan).
+ *
+ * Either failing → NOT pre-authorized → the ⚠ gate face (ask, wait). `gh issue
+ * close` / re-labelling write no body → only ① is judged (a red content scan is
+ * irrelevant to a bodyless action). `bodyScanExit` is FAIL-CLOSED: anything
+ * other than an actual `0` (not run, undefined, a loud-skip exit) fails the
+ * precondition — "scanned and clean" must be EVIDENCE, never an assumption.
+ * Declared residual risk (#51 Q9′, recorded in the doc): 内容干净 ≠ 无副作用
+ * (watcher emails fire on posting and cannot be recalled), and the scanner only
+ * knows KNOWN shapes (identity / layout / denylist tokens) — business-sensitive
+ * content still needs the digest backstop. Pure function: no file reads, no
+ * enforcer state — the SESSION decides with it; this plugin stays
+ * reminder-only. */
+export function ticketFacePrecheck({
+  ticket,
+  batchMembers = [],
+  registeredTickets = [],
+  writesBody = true,
+  bodyScanExit,
+} = {}) {
+  const inScope = batchMembers.includes(ticket) || registeredTickets.includes(ticket)
+  if (!inScope) return { authorized: false, reason: 'scope', asks: true }
+  if (writesBody && bodyScanExit !== 0) return { authorized: false, reason: 'content', asks: true }
+  return { authorized: true, reason: null, asks: false }
+}
+
+/** Overreach stopgap (#135 / #51 Q2 = A): an action that lands in NONE of the
+ * three authorization bases (「routine 白名单」 ∪ 「批内预授权四列」 ∪ 「风格档 +
+ * 例外清单」) is OVERREACH — 越界 = 收回授权，不是回滚结果. The protocol is
+ * DECLARED here (mirrored by docs/batch-state.md「越界三步止损」and the batch
+ * component's digest paragraph; V40 pins the three steps, the digest-first ⚠
+ * and the no-auto-revert contract):
+ *
+ *   1. STOP — no new tickets, no push (every ⚠ gate action asks again);
+ *   2. DEGRADE — the rest of THIS session runs on the 保守 tier (local
+ *      reversible work only; changing the tier back is the HUMAN's move, #49
+ *      Q4);
+ *   3. CHECKPOINT — WIP lands (branch + a batch-state checkpoint line naming
+ *      the sha, `checkpointLine`) and the overreach action goes into the
+ *      digest's `⚠ 无授权依据的动作` section FIRST (置顶).
+ *
+ * `revert: false` is a CONTRACT, not a comment: an auto-revert would itself be
+ * a write whose only justification is the same judgement that just misfired
+ * (#51 Q2=A) — already-done actions stay, the human adjudicates. */
+export const OVERREACH_STOPGAP = {
+  bases: ['routine 白名单', '批内预授权四列', '风格档 + 例外清单'],
+  steps: [
+    'STOP — 立即停止开新票、停止 push；门面动作一律重新问 human',
+    'DEGRADE — 本会话剩余按 保守 档跑（只做本地可逆活；改档必须 human 动手，#49 Q4）',
+    'CHECKPOINT — WIP 落盘：分支 + batch-state checkpoint 行记 sha；digest 首条 ⚠（越界动作置顶）',
+  ],
+  digestFirst: true,
+  revert: false,
+}
+
+/** Whether an action is overreach: it is authorized iff it sits in at least one
+ * of the three grant bases (each a list of authorized action names / tickets —
+ * routine whitelist, the batch declaration's four pre-authorization columns,
+ * the style tier's registered exceptions). Union membership, judged
+ * mechanically; nothing here reads files or session state. */
+export function isOverreach(action, grants = []) {
+  return !grants.some(set => (set ?? []).includes(action))
+}
+
+/** The WIP checkpoint line an overreaching session writes into
+ * `.scratch/batch-state.md` (step 3 of `OVERREACH_STOPGAP`): branch + sha, so
+ * the human can find the exact state the session stopped at. Shape test pinned
+ * by V40. */
+export function checkpointLine(batch, branch, sha) {
+  return `- checkpoint: ${batch} WIP @ ${branch} ${sha}（越界止损落盘；已做动作保留待 human 裁决，不自动 revert）`
+}
+
 /** The field NAMES of `.scratch/batch-state.md` that this plugin's reminders
  * DEPEND on — the SUPERSET-free list, deliberately not a template.
  *

@@ -295,10 +295,82 @@ try {
     if (installHits.length === 0) ok('F18. 边界：URL / 相对路径 / 仅盘符根 / 正则字面量 → 无 installRoot 命中')
     else bad('F18. 假阳性', JSON.stringify(installHits))
   }
+
+  // ── F19 事前模式（#135 / #51 Q9′）：`--text-file` / `--stdin` 在正文发布**前**扫，
+  // 与仓扫同一份判据。红场景 = 发布一篇带身份/布局/denylist 的正文（三次隐私事故的
+  // 教训正是"事后发现太晚"）；空输入 / 缺输入 / 歧义输入**响亮失败 exit 2**（D47：
+  // 不得静默 exit 0——事前模式的调用方拿 exit 0 当"内容门通过"，静默 0 = 门焊死在开位）。
+  // 夹具是临时文件（不是 git 仓，文本模式不需要 git），用完即删（同 #77 口径）。
+  {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-privacy-text-'))
+    fixtures.push(dir)
+    const writeText = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p }
+    const denylistFile = writeText('denylist.txt', '# 事前模式夹具\nsecretname\n')
+    const runCli = (args, input) => {
+      try {
+        const out = execFileSync(process.execPath, [join(REPO, 'scripts', 'privacy-scan.mjs'), ...args],
+          { encoding: 'utf8', ...(input === undefined ? {} : { input }) })
+        return { code: 0, out }
+      } catch (error) { return { code: error.status ?? 1, out: String(error.stdout ?? '') + String(error.stderr ?? '') } }
+    }
+    const cleanPath = writeText('clean.md', '拟发布正文：安装路径写 `$HOME/dsh-matt-src`（占位符），无身份。\n')
+    // 多行夹具：各面独立成行（一行多 token 会整行打码——kind 标签虽逐面输出，行内
+    // 布局形态会被身份面的 homedir 前缀遮住判定归属；每行钉一个面，断言才分得清
+    // "哪个面漏了"）。布局行用形态字面（X:\dsh-*），身份行用运行时 homedir（换台
+    // 机器照样有效，F14 同口径）。
+    const dirtyPath = writeText('dirty.md', [
+      `本机检出 ${homedir()}`,
+      '布局形态 X:\\dsh-old 与 /c/dsh-old', // pii-allow: 守卫自身的红场景夹具（#135 F19b 布局形态字面）
+      '旧布局 D:\\Work\\x',
+      '呼号 SecretName',
+    ].join('\n') + '\n')
+    const emptyPath = writeText('empty.md', '')
+    // (a) 正例：干净正文 → exit 0
+    const cleanRun = runCli(['--text-file', cleanPath, '--denylist', denylistFile])
+    if (cleanRun.code === 0 && cleanRun.out.includes('privacy-scan --text: clean')) ok('F19a. 事前模式正例：干净正文 → exit 0（同一份判据 + denylist 挂上）')
+    else bad('F19a. 干净正文未绿', `code=${cleanRun.code} ${cleanRun.out.slice(-200)}`)
+    // (b) 负例：身份（运行时 homedir）+ 布局形态 + 旧布局 + denylist 词 → exit 1，各面命中
+    const dirtyRun = runCli(['--text-file', dirtyPath, '--denylist', denylistFile])
+    const hitKinds = [KINDS.homeDir, KINDS.layoutWin, KINDS.layoutWork, KINDS.denylist]
+    if (dirtyRun.code === 1 && hitKinds.every(k => dirtyRun.out.includes(k))) ok('F19b. 事前模式负例：身份+布局+旧布局+denylist → exit 1（四面各命中）', hitKinds.join('/'))
+    else bad('F19b. 脏正文未红或漏面', `code=${dirtyRun.code} out=${dirtyRun.out.slice(-400)}`)
+    // (c) 命中输出整行打码（不回显身份）——守卫的输出本身也是发布面
+    if (dirtyRun.code === 1 && !dirtyRun.out.includes(userInfo().username))
+      ok('F19c. 事前模式命中输出整行打码（不回显运行时身份）')
+    else bad('F19c. 事前模式输出泄露身份', dirtyRun.out.slice(-300))
+    // (d) 空文件 → exit≠0 且报「输入为空」（D47，AC2 点名）
+    const emptyRun = runCli(['--text-file', emptyPath])
+    if (emptyRun.code !== 0 && emptyRun.out.includes('输入为空')) ok('F19d. 空文件 → exit≠0 且报「输入为空」（响亮，不静默 0）', `exit=${emptyRun.code}`)
+    else bad('F19d. 空文件未响亮', `code=${emptyRun.code} ${emptyRun.out.slice(-200)}`)
+    // (e) `--text-file` 缺路径参数 → exit≠0 响亮（不静默回落到仓扫）
+    const noValRun = runCli(['--text-file'])
+    if (noValRun.code !== 0 && noValRun.out.includes('--text-file')) ok('F19e. `--text-file` 缺路径参数 → exit≠0 响亮（不静默回落仓扫）', `exit=${noValRun.code}`)
+    else bad('F19e. 缺值未响亮', `code=${noValRun.code} ${noValRun.out.slice(-200)}`)
+    // (f) `--text-file` 文件不存在 → exit≠0 响亮
+    const missingRun = runCli(['--text-file', join(dir, 'no-such-file.md')])
+    if (missingRun.code !== 0 && missingRun.out.includes('不存在')) ok('F19f. `--text-file` 文件不存在 → exit≠0 响亮（D47）', `exit=${missingRun.code}`)
+    else bad('F19f. 文件缺失未响亮', `code=${missingRun.code} ${missingRun.out.slice(-200)}`)
+    // (g) `--stdin` 干净 → 0
+    const stdinClean = runCli(['--stdin', '--denylist', denylistFile], '正文干净：占位符 $HOME/dsh-matt-src。\n')
+    if (stdinClean.code === 0) ok('F19g. `--stdin` 干净正文 → exit 0')
+    else bad('F19g. stdin 干净未绿', `code=${stdinClean.code} ${stdinClean.out.slice(-200)}`)
+    // (h) `--stdin` 含 denylist 词 → 1
+    const stdinDirty = runCli(['--stdin', '--denylist', denylistFile], '提到 secretname 的草稿\n')
+    if (stdinDirty.code === 1 && stdinDirty.out.includes(KINDS.denylist)) ok('F19h. `--stdin` 含 denylist 词 → exit 1')
+    else bad('F19h. stdin 脏未红', `code=${stdinDirty.code} ${stdinDirty.out.slice(-200)}`)
+    // (i) `--stdin` 空输入 → exit≠0 且报「输入为空」
+    const stdinEmpty = runCli(['--stdin'], '')
+    if (stdinEmpty.code !== 0 && stdinEmpty.out.includes('输入为空')) ok('F19i. `--stdin` 空输入 → exit≠0 且报「输入为空」（D47）', `exit=${stdinEmpty.code}`)
+    else bad('F19i. stdin 空输入未响亮', `code=${stdinEmpty.code} ${stdinEmpty.out.slice(-200)}`)
+    // (j) 两个输入源同给 → 歧义输入 → exit≠0 响亮
+    const bothRun = runCli(['--text-file', cleanPath, '--stdin'], 'x\n')
+    if (bothRun.code !== 0 && bothRun.out.includes('互斥')) ok('F19j. `--text-file` 与 `--stdin` 同给 → exit≠0 响亮（歧义输入不静默任选）', `exit=${bothRun.code}`)
+    else bad('F19j. 歧义输入未响亮', `code=${bothRun.code} ${bothRun.out.slice(-200)}`)
+  }
 } finally {
   disposeAll()
 }
 
-console.log('\n=== PRIVACY-SCAN VERIFY (F1–F18b) ===')
+console.log('\n=== PRIVACY-SCAN VERIFY (F1–F19j) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

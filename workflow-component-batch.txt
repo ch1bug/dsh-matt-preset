@@ -57,7 +57,23 @@ per-issue push rhythm.
     the criterion requires it" + the ticket's own evidence artifacts. A write
     outside it is a real decision → stop.
   - CREATE TICKETS: in-batch you may CREATE tickets for discoveries outside the
-    ticket's scope（只建不关 — never close them in-batch). Read the labels back
+    ticket's scope（只建不关 — never close them in-batch). TICKET-FACE DOUBLE
+    PRECONDITION (#51 Q9′ / #135 — a ticket-face action `gh issue create /
+    comment / edit` runs confirmation-free ONLY when BOTH hold; either failing
+    → NOT pre-authorized → the ⚠ gate face, stop and ask): ① SCOPE — the
+    target ticket is a batch member OR sits on the registered 批外票清单
+    (registration is the HUMAN's call; a self-registered ticket has no
+    authorization basis); ② CONTENT — the body has already passed the
+    PRE-PUBLISH privacy scan (`node scripts/privacy-scan.mjs --text-file
+    <draft>` exit 0 — same judgement as the repo scan; missing/empty input
+    fails LOUD exit 2, D47). `gh issue close` / re-labelling write no body →
+    only ①. FAIL-CLOSED: no exit-0 evidence = condition unmet — "scanned and
+    clean" must be evidence, never an assumption. Residual limits recorded
+    (#51 Q9′): content clean ≠ no side effect (watcher emails cannot be
+    recalled); the scanner only knows KNOWN shapes — the digest backstops the
+    rest. Judgement entry: `ticketFacePrecheck()` in `workflow-enforcer.mjs`
+    (pure function; positives/negatives pinned by V39).
+    Read the labels back
     after creating: `gh issue view <n> --json labels --jq '[.labels[].name]'` —
     exactly one category (bug / enhancement) + exactly one state (one of the
     five roles). A ticket with no state is invisible on every state-filtered
@@ -337,7 +353,22 @@ per-issue push rhythm.
   line covers the batch. A digest line missing its evidence is marked
   `未验证` and ESCALATED to an exception (D47), and a separate
   `⚠ 无授权依据的动作` section lists every autonomous action that had no
-  authorization basis. Overreach/quality readings (#49 Q7 — no evaluation
+  authorization basis — OVERREACH ACTIONS GO FIRST in that section (置顶,
+  #135): an action that lands in NONE of the three authorization bases
+  (「routine 白名单」∪「批内预授权四列」∪「风格档 + 例外清单」— mechanical
+  judgement `isOverreach()` in `workflow-enforcer.mjs`) is overreach, and
+  overreach = 收回授权, NOT a rollback: run the THREE-STEP STOPGAP
+  (`OVERREACH_STOPGAP`) — ① STOP: no new tickets, no push (every ⚠ gate
+  action asks again); ② DEGRADE: the rest of THIS session runs on the
+  `保守` tier (local reversible work only; changing the tier back is the
+  HUMAN's move, #49 Q4); ③ CHECKPOINT: WIP lands — branch + a batch-state
+  checkpoint line naming the sha (`checkpointLine()`) — and the overreach
+  action goes into the digest's `⚠ 无授权依据的动作` section FIRST.
+  NO AUTO-REVERT (`OVERREACH_STOPGAP.revert === false`): already-done
+  actions stay for the human to adjudicate — a revert would itself be a
+  write whose only justification is the same judgement that just misfired
+  (#51 Q2=A). Step-by-step assertions: V40.
+  Overreach/quality readings (#49 Q7 — no evaluation
   rig): at each batch close-out, record one line — (count of
   `⚠ 无授权依据的动作`) ÷ (total autonomous actions in the batch);
   completion quality reads the existing O5 fresh-subagent spot check
@@ -352,9 +383,11 @@ per-issue push rhythm.
   slot, not a second copy of the format), and the B-side
   verification-hit reading stays with the scoring face (rubric), not
   the digest. Downstream seams, named so the readings
-  do not collide: #135 (L3 implementation) 承接 the #49 line format above —
-  its 越界三步止损 rides the digest's `⚠ 无授权依据的动作` section and
-  its ticket-face preconditions read the same 批外票清单; #163's batch-end
+  do not collide: #135 (L3, LANDED) 承接 the #49 line format above —
+  its 越界三步止损 rides the digest's `⚠ 无授权依据的动作` section (overreach
+  actions FIRST, the three-step stopgap above) and
+  its ticket-face preconditions read the same 批外票清单 (double precondition
+  at CREATE TICKETS above); #163's batch-end
   audit slot (失真率 readings) is a DIFFERENT reading from this overreach
   line — neither replaces the other.
 - PUSH/COMMIT-TRIGGERED RETRO (mandatory, not a suggestion) — the batch's
