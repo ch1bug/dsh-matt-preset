@@ -23,8 +23,8 @@ Related: ADR-0002（批末 push 门）、ADR-0006（teams pipeline 分工线）�
 ## Decision
 
 1. **泳道批的产品执行载体 = DSH 原生编排**：Team Lead（matt preset 会话）`spawn_teammate` 起 lane implementer、agent-team 任务板承载票与契约字段、`create_worktree` 做 lane 隔离、forge CR 收口。
-2. **ZCode workflow（CreateWorkflow）是本仓开发期的 dogfooding/验证载体，不是交付物**；lane-audit 脚本（#136 交付）等确定性脚本是仓内资产、两个载体共用。
-3. **契约映射**：#136 四字段（touch-set / 接口契约 / 影响面 / proving）映射到任务板条目 `writeScopes` 等原生字段；机械审计 = lane-audit 脚本（#136 交付，落 `scripts/`，落地时回填本文路径引用；排批维度）；`frontier.mjs` 的 ready 语义（开工资格）保持三维不变——touch-set 相交是「不并行」不是「不 ready」。
+2. **ZCode workflow（CreateWorkflow）是本仓开发期的 dogfooding/验证载体，不是交付物**；lane-audit 脚本（`scripts/lane-audit.mjs`，#136 交付）等确定性脚本是仓内资产、两个载体共用。
+3. **契约映射**：#136 四字段（touch-set / 接口契约 / 影响面 / proving）映射到任务板条目 `writeScopes` 等原生字段；机械审计 = lane-audit 脚本（`scripts/lane-audit.mjs`，#136 交付；排批维度）；`frontier.mjs` 的 ready 语义（开工资格）保持三维不变——touch-set 相交是「不并行」不是「不 ready」。
 4. **收口形态 = 整批一 PR**：lane 分支汇成一个 CR；`git push`（非 force）与 `gh pr create` 在 D21 pre-authorized 面内，**merge 恒为 human 门**；首跑 CR 开出不 merge（merge 时点 human 另拍）。ADR-0002 的「批末 push 门」升级表述为「批末 PR 就绪门」——内容不改。
 5. **正文落 preset 组件** `workflow-component-lane.txt`（#58 batch 组件同款机制：`config.components` 控挂载、冻结基线逐字节一致、载体登记面守卫全套沿用）。能力前置不在默认装配 → **组件内环境检测 + loud 降级**（工具面缺席 → 显式提示装 forge-bundle，降级走既有串行 batch；D47，不静默）。
 6. **experimental 面获取 = 上游检出源码装**（版本与 runtime 锚对齐；npm alpha.2 版本错位不采）。**首跑并行度 2**、票挑 touch-set 不相交的小-中票；装齐动作是首跑前置条件，装不齐顺延不降级造假。

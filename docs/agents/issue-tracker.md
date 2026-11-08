@@ -236,7 +236,7 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
 ```
 
 `P0` 票的读法（#142）：人读输出的 **frontier 段**带 `[P0]` 前缀（gated 段只印票号+理由，不带），`--json` 的条目带 `p0: true/false` 字段——
-它只是**正交例外轴的可见标记**（插队输入判据见 #136），不改变 frontier 的成员判定，
+它只是**正交例外轴的可见标记**（插队输入判据见 #136；规则本体落本文「泳道批票面」节），不改变 frontier 的成员判定，
 也不改变排序（仍按票号升序）。
 
 它只走 **GitHub 原生依赖边**（`.../issues/<n>/dependencies/blocked_by`）。读图陷阱（逐条并列，新增追加在后）：
@@ -258,6 +258,87 @@ node scripts/frontier.mjs --json       # 排批输入：frontier + gated(含理�
 纯逻辑（label 命中 / open 阻塞 / assignee / 大小写 state）由 `tests/verify-frontier.mjs`
 离线断言；CLI 那半截需要 PATH 上有已登录的 `gh`，任何 gh 失败都响亮退出——绝不把
 "接口挂了"伪装成"没有阻塞"。
+
+## 泳道批票面（lane batch，#136）
+
+**适用面**：泳道批票（进 lane 并行）的**资格判定**；**普通批不强制**（拍板 Q3）。
+四字段填不满 → `needs-triage`，不进 lane。权威叙述 = `docs/adr/0018-lanes-orchestrate-natively-in-dsh.md`。
+
+与 frontier 的关系（ADR-0018 决策 3）：frontier 的 ready 三维（open + label + 无 open 阻塞 +
+无 assignee）是**开工资格**；本节四字段是**进 lane 资格**，touch-set 相交是「**不并行**」
+（排批维度）——不是 ready 的第四维，`scripts/frontier.mjs` 零改动。
+
+### 四字段（泳道票进 lane 的资格字段）
+
+| 字段 | 定义 | 格式（机械核判据） |
+| --- | --- | --- |
+| **touch-set** | 预期改动文件/目录；Lead 审计 lane 间**两两不相交** | 路径/目录前缀列表，逗号/顿号/分号/换行/空白分隔，反引号或裸路径都认；解析与相交判据与 `sandcastle/templates/audit-ticket.mts` 的 `parseTouchSet`/`pathsOverlap` 同源（精确相等，或一方是另一方的前缀——**路径段**前缀，`docs/` 与 `docs/agents/issue-tracker.md` 相交、`docs-a` 与 `docs` 不咬）。机械审计 = `scripts/lane-audit.mjs` |
+| **接口契约** | 本票暴露/变更的导出、API、消息格式 | 一句话声明（「无变更」也是声明）；并行票只允许经此耦合；**接口变更 = 阻塞边**（GitHub 原生依赖边，自动串行化消费方——加边用本文「Blocking」节的命令） |
+| **影响面** | 消费方 + 守护测试 | 列消费方与守护测试；声明该票**自带**的跨模块集成用例（集成测试所有权显式，不默认归属 lane 外任何人） |
+| **proving** | 单票最小验证命令；**跑不了不进 lane** | 恰 1 条可直接跑的命令（tier ① 最小相关 / ② 单模块层，D39 测试分级——[详档](../observations.md#d39)）；与 `docs/batch-state.md` 的「证明命令」同口径 |
+
+### 样板票面（四字段节的原样形态，`scripts/lane-audit.mjs` 按此解析）
+
+```markdown
+## 泳道票面
+
+- **touch-set**: `scripts/lane-audit.mjs`, `tests/verify-lane-audit.mjs`
+- **接口契约**: 新增独立 CLI 脚本，不改既有导出
+- **影响面**: 消费方 = Lead 排批流程；守护测试 = tests/verify-lane-audit.mjs；无跨模块集成用例
+- **proving**: `node tests/verify-lane-audit.mjs`
+```
+
+字段名容错：大小写不敏感、`-` 可省（`touchSet`）、`**加粗**` 与反引号装饰、中文冒号、
+英文别名（接口契约/interface、影响面/impact、proving/证明命令）都接受——判据在
+`scripts/lane-audit.mjs` 的 `parseLaneFields`，由 `tests/verify-lane-audit.mjs` 钉住。
+
+**解析域**（引用 ≠ 声明）：四字段**只在「泳道票面」标题节内解析**（ATX 标题，级别与
+`泳道批票面` 变体名容错；节体到下一个 ATX 标题截断）；解析前**先剥代码围栏**——正文引用
+本文样板的票不算声明票面，票面散文/定义行里出现四字段字样（如 #136 票面自身）同样不算。
+正文没有该节 = 四字段全缺。空白即 touch-set 的分隔符（含空格的路径不支持——声明的语义）。
+
+### 排批审计（lane-audit）
+
+```sh
+node scripts/lane-audit.mjs --issues 136,137        # Lead 点名本批候选（缺四字段 → exit 1 响亮回炉）
+node scripts/lane-audit.mjs --frontier-json f.json  # 注入等价数据（frontier --json 原样输出，离线/预演）
+node scripts/lane-audit.mjs --json                  # 机器可读：两两相交矩阵 + pairs + 串行分组
+```
+
+它消费 frontier `--json`（默认子进程跑 `scripts/frontier.mjs --json` + 逐票取正文解析四字段）
++ 票面 touch-set，输出 lane 间**两两相交矩阵**与**串行分组建议**（union-find 分组——**传递**的，
+组内两两未必直接相交，判相交看 pairs 明细）。**建议 ≠ 判定**：扫描成功恒 exit 0（有相交也是
+0——输出是排批建议不是硬门）；exit 1 = 取数失败或**点名票**缺字段/不在 frontier；
+exit 2 = 用法错误。判据提纯自 `sandcastle/templates/audit-ticket.mts` 的 `--touch-overlap`
+（AFK 夜批载体，无测试）；`sandcastle/README.md` 有回指。纯函数由 `tests/verify-lane-audit.mjs`
+离线断言（含**非空洞扰动**：摘相交判定 → 相交正例必红）。
+
+### Lead 排批审计 + 插队三规则
+
+1. **跨 lane 关联由 Lead 排票前核实并留痕**：结论 + 依据写进票面（命中哪条关联判据、
+   相交/验证面证据读数），**口头调度禁止**。
+2. **touch-set 相交 → 串行化或合并成一票**：分派判据 = VERA ADR-084「touch-set 不相交 +
+   各自验收线」（#136 评论已采纳）；`lane-audit` 的相交矩阵是 **git 路径前缀粗判**，
+   最终排批 Lead 拟案 + **human 终审**。
+3. **插队只发生在票边界**：在跑票跑完、或 WIP-checkpoint 后让出；**中途裸抢禁止**
+   （反面教材 = 2026-10-11 IRIS `0fee327b`：总结门等待期裸插 → 重复派单）。插队的代价
+   **显式计价并回报**。
+
+**插队的输入判据 = `P0`**：判据本体（单档例外轴，挂 `P0` = 阻断可用性/不挂 = 常规；谁设、
+如何裁定）在 **#142**，不在此复制第二份——frontier 输出的 `p0` 标记只是它的可见读数。
+优先级**不驱动**机械排序：插队**只在票边界由人判**（#142 结论），`frontier.mjs` 排序不变。
+
+**嵌套深度帽 = 2**（#136 评论已采纳）：Lead → lane → subagent；lane 会话不得再开 lane。
+
+**代价计价的回报格式**（插队回报一行样板，三要素 = 票边界依据 + 计价项 + 谁拍板）：
+
+```markdown
+插队回报: #<b> 插到 #<a> 前（票边界：#<a> 已 merge / WIP-checkpoint 让出）——代价 = lane 重排
+<lane-n> 延后；合并序 <#c,#d> 互换；验证重跑 <命令>；拍板 = <human/Lead+留痕>
+```
+
+三要素缺任一 = 不算有效回报（与 `docs/batch-state.md` Progress 行三要素同纪律：缺要素的
+行是 BLOCKED，不是 done）。
 
 ## Wayfinding operations
 

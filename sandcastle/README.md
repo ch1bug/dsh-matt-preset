@@ -112,6 +112,9 @@ npx tsx .sandcastle/audit-ticket.mts --issue 449          # exit 0=launch 2=demo
 #     重叠票 → 写 .sandcastle/audits/touch-overlap.json（serial:true 分组建议，
 #     night-run 波次分组消费）；exit 0=扫描成功（含建议输出） 1=信息不足（缺记录/
 #     缺 touchSet/JSON 损坏 → 回炉重审）
+#   ↑ 白天车道（泳道批）的提纯版 = scripts/lane-audit.mjs（#136）：同判据提纯、
+#     有测试（tests/verify-lane-audit.mjs）、消费 frontier --json + 票面四字段；
+#     相交 = 不并行（排批维度），票面格式见 docs/agents/issue-tracker.md「泳道批票面」节
 
 # ② 发射（--yolo 校验审计记录；缺判词拒发）
 npx tsx .sandcastle/run-ticket.mts --issue 449 --yolo --image localhost/<repo>:dsh

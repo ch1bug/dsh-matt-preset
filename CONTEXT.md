@@ -32,7 +32,7 @@
 - **workflow bundle（本语境正名）** — 指本包内那组工作流组件行 + 承载它们的 preset 声明；**不是**独立包、**也不是**独立 preset（D46 / ADR-0014）。
 - **PRODUCT.md / DESIGN.md** — impeccable 工作流的产品契约与视觉方向两个文件（product truth vs visual direction），与本文 + `docs/adr/` 的拆分同构，**并存不冲突**：目标仓带它们时，UI 审查门（`docs/code-review-brief.md` §9）把它们当输入读，本仓不因此改自己的单一语境载体（#32）。
 - **泳道批（lane batch）** — batch 模式的并行扩展：多 lane 并行推进 touch-set 不相交的票。产品执行载体 = DSH 原生编排（Team Lead + `spawn_teammate` + agent-team 任务板 + `create_worktree` + forge CR 收口，ADR-0018）；ZCode workflow 是本仓开发自用载体、非交付物。
-- **lane（泳道）** — 泳道批里一条并行工作线：一个 teammate 会话 + 一个 worktree + 任务板条目；lane 间隔离判据 = touch-set 两两不相交（机械审计 = #136 交付的 lane-audit 脚本，排批维度——相交是「不并行」不是「不 ready」，`frontier.mjs` 的开工资格语义不变）。
+- **lane（泳道）** — 泳道批里一条并行工作线：一个 teammate 会话 + 一个 worktree + 任务板条目；lane 间隔离判据 = touch-set 两两不相交（机械审计 = `scripts/lane-audit.mjs`，#136 交付，排批维度——相交是「不并行」不是「不 ready」，`frontier.mjs` 的开工资格语义不变）。
 - **teammate** — DSH agent-team 的持久队员会话（`spawn_teammate` 由 Team Lead 创建，fresh/fork context）；泳道批里即 lane implementer。
 - **CR（变更请求）** — forge 词汇：代码托管平台 PR/MR 的 provider 无关抽象（open/closed/merged + checks + mergeability，`forge-github` 为 GitHub 驱动）；泳道批收口 = 整批一 PR，merge 恒 human 门（D21），ADR-0002 批末 push 门升级表述为批末 PR 就绪门。
 ## 已核实的环境事实
