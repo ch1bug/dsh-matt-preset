@@ -197,6 +197,20 @@ per-issue push rhythm.
   FAIL. Blocked-by edges are scheduling order, never a verified connection.
   Criteria + counter-examples: docs/agents/issue-tracker.md (需求守恒与接线
   移交); review consumes it at docs/code-review-brief.md §2.
+- RETIREMENT EVIDENCE BAR (#149 — every ticket that retires, deletes or
+  disables a module or capability): "no callers", "no data", "not yet used"
+  are LEADS, never verdicts. Classify the break FIRST — producer missing /
+  consumer missing / goal cancelled / superseded by a same-duty
+  implementation — against the approved goal and the original capability
+  chain. Retiring a module that still carries an approved duty needs a
+  POSITIVE basis (the human-authorized cancellation record OR same-duty
+  coverage evidence) plus impact scope and uncovered duties listed; a
+  product-capability cancellation is a gate-3 L2, and high-risk actions
+  (drop tables, delete data) are never dressed up as cleanup. Normal cleanup
+  keeps flowing: provably duty-free redundancy, real unreachable branches
+  and internal duplication need no extra confirmation round. Criteria +
+  counter-examples: docs/agents/issue-tracker.md (退役判据); review consumes
+  it at docs/code-review-brief.md §2.
 - RFA is not "fully specified on paper": if implementing it needs the human to
   pick a direction, supply a credential or environment, judge a real-UI run, or
   be present while it is verified, it is RFH however well the body is written.

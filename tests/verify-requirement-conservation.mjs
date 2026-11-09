@@ -90,7 +90,7 @@ const briefEntryMissing = (text) => {
 
 /** D4：样例集判据（锚点在场 + 匿名面无裸票号）。 */
 const examplesMissing = (text) => {
-  const anchors = ['匿名合成声明',
+  const anchors = ['匿名合成声明', 'docs/agents/issue-tracker.md',
     'P1 双向承接', 'P2 明确获准取消',
     'F1 旧语义回流', 'F2 消费票漏建', 'F3 单方移交', 'F4 披露代替交付',
     'F5 两端各自通过但连接未验证']
