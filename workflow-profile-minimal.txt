@@ -42,6 +42,11 @@ BATCH MODE — only when the human declares a batch; never on by default.
   rule, push checkpoint) — else RFH. A real decision found mid-work (exclusive
   ACs, a destructive step, an out-of-scope write) downgrades to RFH and stops;
   everything else is routine: decide, and record "decided X because Y".
+- REQUIREMENT CONSERVATION: every approved requirement maps to one lawful
+  destination (delivered here / an EXISTING ticket's ACs / a human-authorized
+  goal change); unmet goals stay unfinished, and a handoff is bidirectional
+  (the receiver's ACs take the wire), never one-sided. Details:
+  docs/agents/issue-tracker.md.
 - CONFLICT ZERO before labelling RFA: ACs consistent; the symptom re-measured
   on HEAD; the docs the ticket cites read (`git grep`) and judged still-true or
   superseded; duplicates / dependency direction / batch overlap checked. No

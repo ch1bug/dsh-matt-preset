@@ -191,6 +191,19 @@ per-issue push rhythm.
   output), (4) the closing rule (which ticket(s) it closes, and who may close),
   (5) the push checkpoint. A ticket that cannot pin one of the five is RFH, not
   RFA.
+- REQUIREMENT CONSERVATION & WIRE-OFF (#148 — every ticket that splits,
+  defers or hands off an approved requirement): each approved requirement
+  maps to exactly ONE lawful destination — delivered in THIS ticket / taken
+  by an EXISTING ticket whose ACs carry it / a goal change the human
+  explicitly authorized (a gate-3 L2, never the implementer's call). An
+  unmet original goal stays UNFINISHED — disclosure is not delivery, and
+  closing sub-tickets never proves the whole capability works. A handoff is
+  BIDIRECTIONAL or it does not exist: the sending ticket names the receiving
+  ticket AND the receiving ticket's ACs take the same wire — "a later ticket
+  handles it", a missing receiver, or a receiver that never took the AC all
+  FAIL. Blocked-by edges are scheduling order, never a verified connection.
+  Criteria + counter-examples: docs/agents/issue-tracker.md (需求守恒与接线
+  移交); review consumes it at docs/code-review-brief.md §2.
 - RFA is not "fully specified on paper": if implementing it needs the human to
   pick a direction, supply a credential or environment, judge a real-UI run, or
   be present while it is verified, it is RFH however well the body is written.
