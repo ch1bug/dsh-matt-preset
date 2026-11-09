@@ -23,8 +23,19 @@
  * E1: the workflow-enforcer scope guard keeps working after the split — the
  *     persona intro (kept in the preset) still carries the marker, and the
  *     enforcer still injects WORKFLOW GATES on the new-style mount.
+ * L2/L3 (#106): the body carries the ORCHESTRATION guidance. #106's measured
+ *     gap: the delegation TOOL face was complete (subagent/subagent_fork/
+ *     workflow-ptc all registered) while the body had ZERO team guidance
+ *     (team hits 0; subagent only as a constraint) — MAIN FLOW read as a
+ *     single-session recipe. L2 pins the layered guidance on the RENDERED
+ *     prompt (in-ticket subagents / cross-ticket lane batch / the DSH-native
+ *     team machinery, pointed at the runbook and ADR-0018); L3 pins its
+ *     pointer targets on disk (docs/lane-batch.md + workflow-component-lane
+ *     .txt present, every path the section references alive). Tokens bind to
+ *     the section's own wording: deleting the section or its pointers turns
+ *     them red — perturbation evidence is taken per ticket.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
@@ -146,6 +157,50 @@ else bad('G1. marker scope guard', markerless.slice(0, 200))
 const enforced = await render('matt-new-enforced', '/tmp/wc-enf-cwd')
 if (enforced.includes('WORKFLOW GATES')) ok('E1. workflow-enforcer still injects gates on the new-style mount')
 else bad('E1. enforcer scope after the split', enforced.slice(0, 300))
+
+// ── L2 (#106): the orchestration/delegation guidance rides the body ─────────
+// Asserted on the RENDERED prompt (what the model actually reads), tokens
+// bound to the section's own wording — removing the section turns this red.
+const ORCHESTRATION_TOKENS = [
+  'ORCHESTRATION — how work spans agents', // the section heading
+  'WITHIN A TICKET → SUBAGENTS',           // tier 1: in-ticket delegation
+  'ACROSS TICKETS → LANE BATCH',           // tier 2: cross-ticket = lane batch
+  'spawn_teammate',                        // the DSH-native team machinery, named
+  'docs/lane-batch.md',                    // the runbook pointer
+  'ADR-0018',                              // the product-target ADR pointer
+]
+const missingOrch = ORCHESTRATION_TOKENS.filter(t => !injectedPrompt.includes(t))
+if (missingOrch.length === 0)
+  ok('L2. the body carries the orchestration/delegation guidance (in-ticket subagents / cross-ticket lane batch / team routing)', `${ORCHESTRATION_TOKENS.length} tokens on the rendered prompt`)
+else
+  bad('L2. orchestration guidance missing from the injected text', `missing: ${missingOrch.join(' | ')}`)
+
+// ── L3 (#106): the guidance's pointer targets really exist ──────────────────
+// A pointer to a missing file is prose, not guidance (SG4 / verify-lane-comp
+// L5 discipline): every path the section references must exist on disk, the
+// section must reference at least one (a pointer-free section is unanchored
+// prose), and the two named carriers — the runbook and the lane component —
+// must be present, the component actually carrying the LANE BATCH text the
+// body routes to.
+{
+  const coreMod = await import(WORKFLOW_CORE)
+  const orchSection = coreMod.parseSections(
+    readFileSync(new URL('../workflow-body.txt', import.meta.url), 'utf8'),
+  ).sections.find(s => s.id === 'orchestration')
+  const refs = orchSection === undefined ? [] :
+    [...new Set([...orchSection.text.matchAll(/(docs\/[\w./-]+|workflow-component-[\w.-]+\.txt|scripts\/[\w./-]+)/g)]
+      .map(m => m[1].replace(/\.+$/, '')))] // bare refs: sentence punctuation is not part of the path
+  const dead = refs.filter(rel => !existsSync(new URL('../' + rel, import.meta.url)))
+  const runbook = existsSync(new URL('../docs/lane-batch.md', import.meta.url))
+  const laneCompPath = new URL('../workflow-component-lane.txt', import.meta.url)
+  const laneComp = existsSync(laneCompPath) && readFileSync(laneCompPath, 'utf8').includes('LANE BATCH')
+  if (orchSection !== undefined && refs.length > 0 && dead.length === 0 && runbook && laneComp)
+    ok('L3. the orchestration guidance points at real targets (referenced paths alive; runbook + lane component present)', refs.join(', ') + `; runbook=${runbook} laneComponent=${laneComp}`)
+  else if (orchSection === undefined || refs.length === 0)
+    bad('L3. orchestration pointer face', orchSection === undefined ? 'orchestration section absent from the skeleton' : 'the section carries no checkable pointer (unanchored prose)')
+  else
+    bad('L3. orchestration pointer targets', `dead: ${dead.join(', ') || 'none'}; runbook=${runbook} laneComponent=${laneComp}`)
+}
 
 console.log('\n=== WORKFLOW-CORE VERIFY RESULTS ===')
 console.log(results.join('\n'))

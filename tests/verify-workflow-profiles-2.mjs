@@ -415,6 +415,10 @@ const RULE_ANCHORS = ['MINIMAL FLOW', 'DONE — verification includes the remote
   'ENTRY CONTRACT', 'CONFLICT ZERO', 'PRE-AUTHORIZATION', 'CLOSE-OUT STEP',
   // #182：批末收口卡（L1 阶段边界落点 + D21 顺序语义 + 修正案批末状态面）在 minimal 里压缩不删。
   'BATCH WRAP-UP CARD',
+  // #106：编排/委派分层引导（单票内 subagent / 跨票并行 = 泳道批 / Team 形态走 lane 批
+  // 宣告）随骨架穿 minimal verbatim（同 lane 组件 C10 的 intentional no-compress 口径）——
+  // 压缩面不得把它裁掉：minimal 档会话同样要被引导到「并行 ≠ 单窗多会话」。
+  'ORCHESTRATION',
   'TEXT PUSHES EXCLUDE ACTIONS', 'CONTEXT HYGIENE', 'METHODOLOGY', 'ON-RAMPS', 'HEALTH',
   'STANDALONE', 'UTILITIES', 'PRECONDITION', 'INITIALIZATION']
 const lostAnchors = RULE_ANCHORS.filter(anchor => !minText.includes(anchor))

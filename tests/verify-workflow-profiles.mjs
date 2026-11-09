@@ -347,7 +347,7 @@ else bad('C3. unknown component name', `profileBody threw=${c3BodyThrew} resolve
 // tables are written here on purpose, independent of the delta files
 // (deriving them from the deltas would make the check tautological).
 const expectedOrder = (inserted) => [
-  'main-flow', 'workflow-enforcement', 'enforcement-done', 'enforcement-tiering', 'enforcement-recovery',
+  'main-flow', 'orchestration', 'workflow-enforcement', 'enforcement-done', 'enforcement-tiering', 'enforcement-recovery',
   ...inserted, 'batch-mode', 'batch-wrap-up', 'lane-batch', 'lane-orchestration',
   'text-pushes-exclude-actions', 'context-hygiene', 'methodology',
   'human-communication', 'on-ramps', 'health', 'standalone', 'utilities', 'precondition', 'initialization',

@@ -15,7 +15,10 @@ MAIN FLOW — idea → ship:
 3. Build. Multi-session effort → /to-spec, then /to-tickets (tracer
    bullets declaring their blocking edges, worked blockers-first), then
    one ticket per fresh session via /implement. Single-session →
-   /implement right here. /implement drives /tdd internally (red→green)
+   /implement right here. How the work spans agents is ORCHESTRATION
+   (below): subagents inside this ticket, the lane batch across tickets —
+   parallel tickets are never improvised as extra sessions or ad-hoc
+   teams. /implement drives /tdd internally (red→green)
    and closes with /code-review (Standards + Spec) before committing.
    When the work goes up as a PR, /pr (model-invoked: the agent
    reaches for it whenever it writes a PR body) shapes that body —
@@ -27,6 +30,38 @@ MAIN FLOW — idea → ship:
    pointers, automated checks, the coding standards /code-review
    enforces, steering files, tooling), so the next build starts from a
    better environment.
+@@ orchestration
+ORCHESTRATION — how work spans agents. The default is ONE main session;
+delegation is a deliberate shape chosen per scope, never decoration:
+- WITHIN A TICKET → SUBAGENTS. When the ticket splits into independent
+  sub-surfaces (exploration, per-module edits, a verification sweep),
+  delegate the parallelizable ones to subagents and keep the writable face
+  in THIS session: one writer per file set, the main session integrates.
+  A subagent's answer becomes a fact only once it has reported (frontier);
+  its green is input to the gates, never a replacement — verification and
+  /code-review still run where the work lands.
+- ACROSS TICKETS → LANE BATCH (泳道批). Tickets that could run in parallel
+  are not more sessions in one window and not ad-hoc teams: ticket-grain
+  parallelism is the lane batch, and its Team shape (a Team Lead with
+  teammates on a shared task board — the DSH-native spawn_teammate +
+  create_worktree orchestration, one PR per batch; ADR-0018 is the product
+  target) exists ONLY on the human's lane-batch declaration. The trigger,
+  the capability precheck with its LOUD degradation to the serial batch
+  when the experimental face is absent (D47 — the subagent tier above
+  never depends on it), the lane guardrails and the close-out semantics
+  are the LANE BATCH component injected with this body; the runbook is
+  docs/lane-batch.md. This map points and never restates them — a second
+  copy of the runbook is a drift seed.
+- WRITE MUTUAL EXCLUSION holds at every tier: one writer per write-domain;
+  tickets whose touch-sets overlap serialize (the lane audit judges the
+  overlap), and a delegated surface never writes into another writer's
+  files.
+- ACCEPTANCE STAYS CENTRAL: whoever integrates owns the close-out — the
+  gates, /code-review (Standards + Spec) and the evidence lines run at the
+  integrating session exactly as in single-session work. Delegation
+  changes WHO runs a step, never WHETHER a gate runs: no parallel shape
+  bypasses the seven gates, and external actions still grade through
+  gate 6 at the session that would act.
 @@ workflow-enforcement
 WORKFLOW ENFORCEMENT — seven hard gates; the workflow-enforcer plugin
 injects their details and high-risk-action reminders per request.
