@@ -64,6 +64,28 @@
  * same samples (they share `actionSurface` + `matchesSurface`), so a second,
  * drifting matcher reddens it.
  *
+ * ── #57 package-specifier mount (SP1–SP5) ──────────────────────────────────
+ * The mount-level shape above spells the row as an absolute file:// URL
+ * (`ENFORCER_PLUGIN`, overridable via `DSH_MATT_ENFORCER`). SP1–SP5 mount the
+ * SAME component through the package subpath specifier
+ * (`dsh-matt-preset/workflow-enforcer.mjs`), resolved by node itself against
+ * package.json `exports` (`resolvePackageSubpath` in preset-harness.mjs —
+ * self-reference; NOT the `resolveLocalNames` string-prefix rewrite, which
+ * cannot see a broken exports key or a file missing from the published
+ * payload — the #84 class). A broken exports key or a payload-missing file
+ * fails at module load: ERR_PACKAGE_PATH_NOT_EXPORTED / ERR_MODULE_NOT_FOUND.
+ *   SP1 (AC2): non-matt preset, ONE row, scope:'all' → WORKFLOW GATES flow.
+ *   SP2/SP3 (AC3): the ask-matt marker scope filter re-verified on that real
+ *     mount, both directions — marker session injects, marker-less gets none.
+ *   SP4 (AC1): the matt preset's mount face spells the specifier — source of
+ *     truth (agent.cordis.yml) AND the generated carrier (cordis.patch.yml).
+ *   SP5 (AC4): the specifier resolves to THIS checkout's file, and the file
+ *     is inside the payloadOf(`files`) whitelist — the #84-class guard.
+ * The exports/files perturbation proving SP5 non-vacuous lives in
+ * `.scratch/verify57/probe57.mjs` (perturb → red → restore); the committed
+ * tree is never the perturbed tree (same discipline as the DSH_MATT_ENFORCER
+ * copy recipe above).
+ *
  * PROGRAMMATIC alternative (what CI-less review used): a scratch runner can
  * copy `workflow-enforcer.mjs` + `tests/preset-harness.mjs` into a mirror tree
  * and repoint the latter's plugin path — equivalent, but it must copy the
@@ -74,18 +96,23 @@
  * `node scripts/link-runtime-deps.mjs`), like the matt-preset verify suite.
  */
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { assembleContextFor } from '@deepseek-ai/dsh-agent'
-import { AgentPreset, bootHarness, smokePlugins, emitSessionEvent } from './preset-harness.mjs'
+import { AgentPreset, bootHarness, smokePlugins, emitSessionEvent, resolvePackageSubpath } from './preset-harness.mjs'
+import { payloadOf } from '../lib/payload.mjs'
 
 const results = []
 const ok = (name, detail = '') => results.push('  ✓ ' + name + (detail ? ' — ' + detail : ''))
 const bad = (name, detail = '') => results.push('  ✗ ' + name + (detail ? ' — ' + detail : ''))
+
+// #57: the package root (payloadOf reads <REPO>/package.json's files whitelist).
+const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 // 0.2.2-rc.1：tools.execute 改批次形状（入参 calls 数组，返回 {results:[{callId,result}]}，
 // #176 重锚）——本套件 V10 的消费面是旧单结果视图，用适配器收第一个 outcome。
@@ -117,9 +144,34 @@ process.on('exit', (code) => {
   for (const root of tmpRoots) console.log(`tmp kept: ${root}`)
 })
 
+// #57: the workflow-enforcer subpath specifier, resolved by node against this
+// package's own `exports` (see the header's #57 section). A broken exports key
+// or a payload-missing file fails HERE, at module load — loud red before any
+// assertion runs. Deliberately NOT routed through `DSH_MATT_ENFORCER`: that
+// knob exists for the matcher perturbation recipe on the smoke presets; the
+// specifier mount must resolve what production resolves.
+const SPECIFIER = 'dsh-matt-preset/workflow-enforcer.mjs'
+const SPEC_ENFORCER = resolvePackageSubpath(SPECIFIER)
+
 // V1: smoke preset with only the persona + workflow-enforcer rows.
+// #57 SP presets: the same enforcer mounted through the package specifier
+// (resolved above) — `enforcerspec` is the non-matt opt-in shape
+// (scope: 'all', verify-workflow-core AC2), the other two carry the default
+// marker scope for the AC3 both-directions check.
 const ctx = await bootHarness([
   { id: 'enforcersmoke', plugins: smokePlugins('probe persona running the ask-matt workflow') },
+  { id: 'enforcerspec', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: 'You are a plain agent without the workflow.' } },
+    { id: 'workflow-enforcer', name: SPEC_ENFORCER, config: { scope: 'all' } },
+  ] },
+  { id: 'enforcerspec-marker', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: 'probe persona running the ask-matt workflow' } },
+    { id: 'workflow-enforcer', name: SPEC_ENFORCER },
+  ] },
+  { id: 'enforcerspec-plain', plugins: [
+    { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: 'You are a plain agent without the workflow.' } },
+    { id: 'workflow-enforcer', name: SPEC_ENFORCER },
+  ] },
 ])
 
 try {
@@ -2368,6 +2420,109 @@ else bad('V40e. 并集判定不符', `grants=${JSON.stringify(grants)}`)
     `sha0=${sha0.slice(0, 8)} after=${shaAfter.slice(0, 8)} commits=${commitCount} noRemote=${noRemote} landed=${landed}`)
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── #57: package-specifier mount (SP1–SP5). The presets above mount the
+// enforcer via `ENFORCER_PLUGIN` (an absolute file:// URL); these exercise the
+// package subpath specifier form — resolved by node against package.json
+// `exports` at module load (SPEC_ENFORCER), which `resolveLocalNames`' string
+// rewrite cannot do. Mounted presets were registered at bootHarness above.
+
+// SP4 (AC1): the matt preset's mount face spells the specifier — both the
+// source of truth (agent.cordis.yml) and the generated bundle carrier
+// (cordis.patch.yml, what `dsh plugin add` actually mounts). Comment lines
+// don't count (the row docs quote the specifier in prose).
+{
+  const rowSpelled = (text) => text.split(/\r?\n/)
+    .some((l) => l.trimStart().startsWith('name:') && l.includes(`name: ${SPECIFIER}`))
+  const yml = readFileSync(new URL('../agent.cordis.yml', import.meta.url), 'utf8')
+  const patch = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+  if (rowSpelled(yml) && rowSpelled(patch))
+    ok('SP4. matt preset mounts the enforcer via the package specifier (agent.cordis.yml + cordis.patch.yml)')
+  else
+    bad('SP4. matt preset enforcer row', `agent.cordis.yml: ${rowSpelled(yml)} | cordis.patch.yml: ${rowSpelled(patch)}`)
+}
+
+// SP1 (AC2): a non-matt preset mounts the enforcer through the specifier with
+// ONE row and `scope: 'all'` — the marker-less persona gets WORKFLOW GATES
+// (verify-workflow-core AC2 shape, now for the enforcer and via the real
+// subpath resolution).
+const specHandle = await ctx.agents.create({
+  sessionId: SessionId('enforcer-spec'),
+  meta: { cwd: '/tmp/dsh-enforcer-cwd' },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcerspec'),
+})
+const specText = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(specHandle.agent, signal)))
+if (specText.includes('WORKFLOW GATES'))
+  ok('SP1. non-matt preset mounts the enforcer through the package specifier (scope: \'all\') and it takes effect')
+else
+  bad('SP1. specifier mount did not inject', specText.slice(0, 300))
+
+// SP2/SP3 (AC3): the ask-matt marker scope filter re-verified on that real
+// mount, both directions.
+const specMarkerHandle = await ctx.agents.create({
+  sessionId: SessionId('enforcer-spec-marker'),
+  meta: { cwd: '/tmp/dsh-enforcer-cwd' },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcerspec-marker'),
+})
+const specMarkerText = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(specMarkerHandle.agent, signal)))
+if (specMarkerText.includes('WORKFLOW GATES'))
+  ok('SP2. specifier mount + ask-matt marker persona → WORKFLOW GATES (workflow session injected)')
+else
+  bad('SP2. marker session got no gates on the specifier mount', specMarkerText.slice(0, 300))
+
+const specPlainHandle = await ctx.agents.create({
+  sessionId: SessionId('enforcer-spec-plain'),
+  meta: { cwd: '/tmp/dsh-enforcer-cwd' },
+  agentOptions: { provider: 'mock', model: 'mock' },
+  setup: async (agentCtx) => void await ctx.agentPresets.mount(agentCtx, 'enforcerspec-plain'),
+})
+const specPlainText = renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(specPlainHandle.agent, signal)))
+if (!specPlainText.includes('WORKFLOW GATES'))
+  ok('SP3. specifier mount + marker-less persona → zero injection (scope filter holds)')
+else
+  bad('SP3. scope filter leaked on the specifier mount', specPlainText.slice(0, 200))
+
+await specHandle.dispose()
+await specMarkerHandle.dispose()
+await specPlainHandle.dispose()
+
+// SP5 (AC4, the #84-class guard): the specifier resolves to THIS checkout's
+// file (not some other dsh-matt-preset copy found on a node_modules walk), the
+// file is inside the payloadOf(`files`) whitelist, and the exports' locale/
+// icon subpaths (plugin-meta/) resolve too. Dropping `workflow-enforcer.mjs`
+// from `files`, removing the `"./*": "./*"` exports key or deleting the file
+// turns SP5 red (or fails the module at load) — perturb→red→restore evidence
+// in .scratch/verify57/probe57.mjs; the committed tree is never perturbed.
+{
+  const repoFile = realpathSync(fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url)))
+  const resolvedFile = realpathSync(fileURLToPath(SPEC_ENFORCER))
+  const sameFile = resolvedFile === repoFile
+  let payloadEntries = []
+  let payloadError = ''
+  try { payloadEntries = (await payloadOf(REPO)).entries }
+  catch (error) { payloadError = String(error?.message ?? error) }
+  // payloadOf returns explicit DIR entries unexpanded (`lang-packs`, `lib`) —
+  // coverage is prefix-based, same direction as verify-packaged-payload's coveredBy.
+  const covered = (entries, file) => entries.includes(file) || entries.some((e) => file.startsWith(e + '/'))
+  const inPayload = covered(payloadEntries, 'workflow-enforcer.mjs')
+  const localeDir = fileURLToPath(new URL('../plugin-meta/workflow-enforcer/locale', import.meta.url))
+  const localeFiles = readdirSync(localeDir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name)
+  const subpaths = ['workflow-enforcer.mjs/icon', ...localeFiles.map((f) => `workflow-enforcer.mjs/locale/${f}`)]
+  const failedSub = []
+  for (const sub of subpaths) {
+    try { resolvePackageSubpath(`dsh-matt-preset/${sub}`) }
+    catch (error) { failedSub.push(`${sub}: ${error?.code ?? String(error?.message ?? error)}`) }
+  }
+  if (sameFile && payloadError === '' && inPayload && failedSub.length === 0)
+    ok('SP5. specifier → this checkout\'s file; file inside the payload whitelist; locale/icon exports resolve (#84 guard)',
+      `${subpaths.length + 1} subpaths · payload ${payloadEntries.length} entries`)
+  else
+    bad('SP5. #84-class guard', `realpath: ${sameFile ? 'match' : 'MISMATCH'} | in payload: ${inPayload}` +
+      `${payloadError !== '' ? ` | payloadOf: ${payloadError}` : ''} | failed subpaths: ${failedSub.join(', ') || '—'}`)
+}
+
 // Fixture teardown — every borrowed cwd is removed, not just disposed (#77 is
 // the same class of defect; `dispose()` frees the session, NOT the temp dir).
 await handleBE3.dispose()
@@ -2397,6 +2552,6 @@ if (results.some(r => r.startsWith('  ✗'))) {
 }
 
 await handle.dispose()
-console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V40) ===')
+console.log('\n=== WORKFLOW-ENFORCER VERIFY (V1–V40 + SP1–SP5) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

@@ -17,6 +17,7 @@
  */
 import { realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parse } from 'yaml'
 import { Context } from '@deepseek-ai/cordis'
@@ -83,6 +84,36 @@ export const ENFORCER_PLUGIN = (() => {
   if (typeof override === 'string' && override !== '') return pathToFileURL(resolve(override)).href
   return pathToFileURL(fileURLToPath(new URL('../workflow-enforcer.mjs', import.meta.url))).href
 })()
+
+/**
+ * #57: resolve a `dsh-matt-preset/<file>` subpath specifier through the REAL
+ * node resolution against this package's own `package.json` `exports` field
+ * (self-reference — this harness file lives inside the package, so the nearest
+ * package scope IS `dsh-matt-preset`).
+ *
+ * This is the seam `resolveLocalNames()` cannot cover: it rewrites the
+ * specifier by STRING PREFIX onto the checkout, so a broken `exports` key or a
+ * file missing from the published payload (`files`) stays invisible to every
+ * preset-level test that goes through it (the #84 class of bug). Here node
+ * itself enforces the exports contract:
+ *
+ *   - exports key missing / not matching  → `ERR_PACKAGE_PATH_NOT_EXPORTED`
+ *   - exports key matches, file absent    → `ERR_MODULE_NOT_FOUND`
+ *   - resolution lands on another copy    → caller compares against the repo file
+ *
+ * Both failures throw out of this helper — loud red at module load of any test
+ * that names its rows with it. Deliberately NOT overridable via
+ * `DSH_MATT_ENFORCER`: that knob exists for the enforcer MATCHER perturbation
+ * recipe (verify-enforcer.mjs header), whose smoke presets go through
+ * `smokePlugins()`; the specifier mount must resolve what production resolves.
+ * Boundary: createRequire is the CJS resolver branch; equivalent today because
+ * every exports key is unconditional — conditional keys (import/node) would
+ * need an ESM resolve or a cross-branch reconciliation.
+ */
+export function resolvePackageSubpath(specifier) {
+  const require = createRequire(import.meta.url)
+  return pathToFileURL(require.resolve(specifier)).href
+}
 
 /**
  * Boot the shared cordis stack every mount-level verify test uses (loader +
