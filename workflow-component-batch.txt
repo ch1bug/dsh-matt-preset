@@ -41,6 +41,19 @@ per-issue push rhythm.
   and internal duplication need no extra confirmation round. Criteria +
   counter-examples: docs/agents/issue-tracker.md (退役判据); review consumes
   it at docs/code-review-brief.md §2.
+- COLLABORATION CONTRACT (#151 — every ticket in a project that has EXPLICITLY
+  enabled collaboration mode): ONE owner per ticket, many contributors — the
+  claim is read back after claiming, duplicate claims coordinate BEFORE
+  working, a handover states old owner → new owner on the ticket, and an
+  assignment is a responsibility record, never a lock. The PR names the
+  owner, the authorization basis, the verification of the current commit,
+  and the approval the project requires — the owner's own "done" never
+  substitutes for that approval (at least one NON-AUTHOR), and an unclear
+  merge rule pauses the MERGE, never unrelated local work. Authorization
+  grades by SUBJECT (requirement / cross-module interface / merge-and-release)
+  and is never derived from chat presence, write access, or review duty.
+  Criteria + counter-examples: docs/agents/issue-tracker.md (协作契约);
+  starter template: docs/collaboration-starter-template.md.
 - RFA is not "fully specified on paper": if implementing it needs the human to
   pick a direction, supply a credential or environment, judge a real-UI run, or
   be present while it is verified, it is RFH however well the body is written.

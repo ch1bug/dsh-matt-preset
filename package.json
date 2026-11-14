@@ -30,6 +30,7 @@
     "workflow-profile-ptc.txt",
     "workflow-profile-minimal.txt",
     "*.mjs",
+    "docs/collaboration-starter-template.md",
     "lib",
     "skills",
     "lang-packs",

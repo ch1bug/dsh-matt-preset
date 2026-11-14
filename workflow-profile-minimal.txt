@@ -16,6 +16,19 @@ MINIMAL PROFILE — the same workflow, compressed: the seven gates below are the
 shared text word for word, DONE / TEST SCOPE TIERING / RECOVERY DISCIPLINE keep
 their substance, and the rest is cut to essentials. The standard profile has
 the full text. Never read terseness as permission to skip a gate.
+@@ collaboration
+COLLABORATION (cross-workspace issue/PR work) applies ONLY when the project
+has EXPLICITLY enabled it — a readable adoption record; a contributor count
+never implies it, and without the record the single-session path keeps NO
+team-approval duty. An existing protocol is adopted at its own entry, never
+copied. Authorization grades by SUBJECT (requirement / interface / merge)
+and is never derived from chat presence, write access, or review duty;
+unclear authorization pauses only the related decision. ONE owner per ticket
+(handover explicit, claim read back, duplicates coordinate, assignment is
+never a lock); the PR waits for a NON-AUTHOR approval — the owner's "done"
+never substitutes; an unclear merge rule pauses the merge, never local work.
+Details: docs/agents/issue-tracker.md; template:
+docs/collaboration-starter-template.md.
 @@ enforcement-done
 DONE — verification includes the remote CI. Per-issue: after a push, confirm
 the pushed commit's CI is green; red CI is current-ticket work, never "trivial"
@@ -52,6 +65,10 @@ BATCH MODE — only when the human declares a batch; never on by default.
   duty-carrying module needs an authorized cancellation or same-duty coverage
   evidence, while provable dead branches stay normal cleanup. Details:
   docs/agents/issue-tracker.md.
+- COLLABORATION (enabled projects): ONE owner per ticket (claim read back,
+  duplicates coordinate, handover explicit, assignment is never a lock); the
+  PR waits for a NON-AUTHOR approval — the owner's "done" never substitutes.
+  Details: docs/agents/issue-tracker.md.
 - CONFLICT ZERO before labelling RFA: ACs consistent; the symptom re-measured
   on HEAD; the docs the ticket cites read (`git grep`) and judged still-true or
   superseded; duplicates / dependency direction / batch overlap checked. No

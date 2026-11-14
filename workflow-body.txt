@@ -62,6 +62,31 @@ delegation is a deliberate shape chosen per scope, never decoration:
   changes WHO runs a step, never WHETHER a gate runs: no parallel shape
   bypasses the seven gates, and external actions still grade through
   gate 6 at the session that would act.
+@@ collaboration
+COLLABORATION — cross-workspace work via issues and pull requests (claiming
+a ticket, implementing it, submitting a PR for the project to approve)
+applies ONLY when the project has EXPLICITLY enabled collaboration mode — a
+readable adoption record (the project's governance doc, or the adopted
+starter template). A contributor count never implies it, and a project
+without that record keeps the single-session path with NO team-approval
+duty. An existing protocol is adopted at its own authority entry — never a
+second copy; a missing item (approval rule, verification requirement) is
+presented as missing and pauses only the RELATED decision — never invented
+away, and unrelated local work continues; an unclear merge rule pauses the
+MERGE, never unrelated local work either. Authorization grades BY SUBJECT —
+requirement acceptance / cross-module interfaces / merge-and-release — and
+none of the three is derived from chat presence, repo write access, or
+review duty (no automatic derivation in any direction). ONE owner per
+ticket, many contributors: the ticket and its PR carry the same work, the
+claim is read back after claiming, duplicate claims coordinate first, a
+handover states old owner → new owner on the ticket, and an assignment is a
+responsibility record — never called a lock. The PR names the owner, the
+authorization basis, the verification of the current commit, and the
+approval the project requires (at least one NON-AUTHOR; the owner's own
+"done" never substitutes for approval). Criteria + counter-examples:
+docs/agents/issue-tracker.md (协作契约); starter template (adopted only by
+the project's explicit confirmation — no platform protection is configured
+automatically): docs/collaboration-starter-template.md.
 @@ workflow-enforcement
 WORKFLOW ENFORCEMENT — seven hard gates; the workflow-enforcer plugin
 injects their details and high-risk-action reminders per request.

@@ -419,6 +419,9 @@ const RULE_ANCHORS = ['MINIMAL FLOW', 'DONE — verification includes the remote
   // 宣告）随骨架穿 minimal verbatim（同 lane 组件 C10 的 intentional no-compress 口径）——
   // 压缩面不得把它裁掉：minimal 档会话同样要被引导到「并行 ≠ 单窗多会话」。
   'ORCHESTRATION',
+  // #151：协作契约（适用条件 + 授权/主责义务）在 minimal 是压缩覆盖节——压缩不等于删除，
+  // 适用判据与义务锚必须仍在 minimal 渲染里（verify-collaboration-contract D1 minimal 同判）。
+  'COLLABORATION',
   'TEXT PUSHES EXCLUDE ACTIONS', 'CONTEXT HYGIENE', 'METHODOLOGY', 'ON-RAMPS', 'HEALTH',
   'STANDALONE', 'UTILITIES', 'PRECONDITION', 'INITIALIZATION']
 const lostAnchors = RULE_ANCHORS.filter(anchor => !minText.includes(anchor))
