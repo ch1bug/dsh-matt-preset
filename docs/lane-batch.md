@@ -22,19 +22,25 @@
 - **装不齐 = 顺延，不降级造假**：安装 experimental 面是外部动作（D21），需要 human
   确认；human 未确认安装时，lane batch 顺延——**绝不允许**用普通 subagent 模拟并行
   lane 交差。
+- **出货形态注记（上游 rc.3 起）**：Team 面（`spawn_teammate`/任务板）已随上游
+  base bundle 出货（`@deepseek-ai/dsh-agent-team` 毕业出 experimental）——新 runtime 下
+  `spawn_teammate` 通常天然在场；`create_worktree` 仍随 forge-bundle（experimental 面），
+  是最常缺席的一件。判据不变：**工具面在场说了算**，出货形态只影响「通常缺哪个」。
 - 这套语义与组件正文 `lane-batch` 节 CAPABILITY PRECHECK 条判据一致；组件承载「何时
   检测、缺席什么行为」，本节承载「检测的操作对象」。
 
-## 2. experimental 面安装 runbook（源码 rc.1 装法）
+## 2. experimental 面安装 runbook（源码装法，锚随仓版本走）
 
 **不采 npm 安装路径**：npm 上 dsh 只到 alpha.2，rc.1 源码未发——npm 装出来是版本错位面，
 与 runtime 锚对不上。唯一采纳路径 = **上游检出源码**：
 
 1. 上游 dsh 检出到本地目录（下称 `<runtime>`；须包含 `node_modules/@deepseek-ai/`），
    检出版本线与本仓 runtime 锚一致（本仓锚 = `scripts/runtime-anchor.mjs` 从
-   `package.json` 派生；现锚 dsh-v0.2.2-rc.1 线）。
-2. 在 DSH 里装 **forge-bundle**（experimental 装配面；票面勘察：cordis.patch.yml 含
-   `worktree` + `tool-worktree` + forge 三件套 + panel）。安装动作走 DSH 的插件安装面
+   `package.json` 派生；现锚 dsh-v0.2.2-rc.3 线——team 面随 base 出货，无需安装）。
+2. 在 DSH 里装 **forge-bundle**（experimental 装配面；rc.3 勘察：cordis.patch.yml 含
+   `worktree` + `tool-worktree` + forge 三件套 + panel——panel group 较 rc.1 简化）。
+   **npm 上 forge-bundle 仍只到 alpha.2**（team 面已发 rc.2，forge 面未跟）——npm 装出来
+   是版本错位面，不采。安装动作走 DSH 的插件安装面
    （plugin add / Plugins 页）——**这是外部动作（D21），先报告等 human 确认再执行**。
 3. 装完**重开 DSH 会话**，按 §1 重新检测：`spawn_teammate` / `create_worktree` 出现在
    会话工具面 = 前置满足；仍未出现 → 顺延，不造假。

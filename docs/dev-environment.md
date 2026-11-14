@@ -483,13 +483,14 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 
 ## 2. 宿主锚点（ADR-0008）
 
-跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.2-rc.1-r1` ↔ 宿主 tag
-`dsh-v0.2.2-rc.1`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
+跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.2-rc.3-r1` ↔ 宿主 tag
+`dsh-v0.2.2-rc.3`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
 与锚不符 —— 必须显式 checkout tag。
 
 | 锚 | 宿主 tag | tag 指向的 commit | 落地 |
 | --- | --- | --- | --- |
-| **当前** | `dsh-v0.2.2-rc.1` | `66491b05` | #176（2026-11-06） |
+| **当前** | `dsh-v0.2.2-rc.3` | `38a6a5c9` | #196（2026-11-14） |
+| rc.3 重锚 | `dsh-v0.2.2-rc.1` → `dsh-v0.2.2-rc.3` | 66491b05 → 38a6a5c9 | 上游 Agent Teams 毕业进 base、peer 面 16 文件增量 |
 | 上一锚 | `dsh-v0.2.1-rc.2` | `687f282e` | 本文件历史（2026-10-17，rc.2 追加） |
 | 上二锚 | `dsh-v0.2.1-rc.1` | `1600d8a1` | #88（2026-10-17） |
 | 上三锚 | `dsh-v0.2.0-rc.2` | `639ed015` | #42/#22 线 |
@@ -534,7 +535,7 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 
 ```bash
 git clone https://github.com/deepseek-ai/deepseek-harness.git <src>
-cd <src> && git fetch --depth 1 origin tag dsh-v0.2.2-rc.1 && git checkout tags/dsh-v0.2.2-rc.1
+cd <src> && git fetch --depth 1 origin tag dsh-v0.2.2-rc.3 && git checkout tags/dsh-v0.2.2-rc.3
 pnpm install --ignore-scripts --package-import-method=copy     # 见 §4 工具链
 pnpm run clean                                                 # 见 §4 切 tag
 pnpm run build                                                 # 必须经 pnpm，见 §4
@@ -555,7 +556,7 @@ DSH_HOME=<home> node <src>/apps/cli/lib/bin.js --profile <profile> --no-open --p
 | 用途 | 命令 |
 | --- | --- |
 | 起实例（与仓外 `start-matt-dev.sh` 同口径） | `cd <src> && node --import tsx/esm apps/cli/src/bin.ts --profile <p> …`（**cwd 必须是 `<src>`**，否则 `--import tsx/esm` 解析不到 tsx） |
-| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.2-rc.1` |
+| 跑 CLI（构建产物，cwd 无关） | `node <src>/apps/cli/lib/bin.js --profile <p> …`；`--version` 应为 `0.2.2-rc.3` |
 
 **PATH 型工具**（`bin/install.mjs`、测试里的 dsh 探针）现在走**运行时探测**（`lib/runtime-probe.mjs`，
 #47/#86），不再硬依赖字面 `dsh`：
@@ -656,7 +657,7 @@ pnpm** 的探测来源，但**测试挂具的依赖锚不能用它**——`@deep
 
 ```powershell
 $env:PATH = "<shim 目录>;$env:PATH"                     # 或用 --dsh / DSH_MATT_DSH 代替
-dsh --version                                           # → 0.2.2-rc.1
+dsh --version                                           # → 0.2.2-rc.3
 $env:DSH_MATT_INSTALLER='1'; node tests/verify-installer.mjs
 $env:DSH_DESKTOP_ROOT='<app>'                          # 桌面应用根（含 resources 的那一层）→ 开 live 桌面端用例；设成 <app>\resources 也认
 $env:DSH_MATT_LIVE_CLI='<src>\apps\cli\lib\bin.js'; node tests/verify-clean-env-e2e.mjs   # #75 全链：临时 home → bin/install.mjs → 启动 → 建会话 → turn（16 环）

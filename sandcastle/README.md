@@ -85,7 +85,7 @@ headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_K
 
 `templates/Dockerfile` 用 **`ARG DSH_VERSION=<默认值>`** 接版本，安装行是
 `npm i -g @deepseek-ai/dsh@${DSH_VERSION}`。**单一事实源 = 本包 `package.json` 的 `version`**
-（去掉 `-r<N>` 后缀即宿主锚：`0.2.2-rc.1-r1` → `0.2.2-rc.1`；口径见
+（去掉 `-r<N>` 后缀即宿主锚：`0.2.2-rc.3-r1` → `0.2.2-rc.3`；口径见
 [docs/dev-environment.md](../docs/dev-environment.md) §2 与 ADR-0008）。派生规则的**唯一实现**是
 `scripts/runtime-anchor.mjs`（`build-image.sh`、`tests/verify-runtime-anchor.mjs`、
 `tests/verify-sandcastle-pins.mjs` 都消费它，不再各写一份正则）。

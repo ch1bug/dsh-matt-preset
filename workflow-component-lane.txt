@@ -12,9 +12,10 @@ is a drift seed.
   — the check is whether those two tool names are callable from THIS
   session's tool list, never a version-number or config-file guess. EITHER
   MISSING → say it out loud: name the missing tool(s), point at the
-  forge-bundle install runbook (`docs/lane-batch.md`; the experimental face
-  is installed FROM SOURCE at the rc.1 checkout — npm alpha.2 is version-
-  misaligned and NOT adopted), and DEGRADE to the existing serial batch mode
+  forge-bundle install runbook (`docs/lane-batch.md`; the worktree face is
+  installed FROM SOURCE at the anchor checkout — npm alpha.2 is version-
+  misaligned and NOT adopted; the team face ships with the runtime base
+  since rc.3, so spawn_teammate usually needs no install), and DEGRADE to the existing serial batch mode
   (D47: never silent, never assume presence). If the face cannot be
   installed, the lane batch is POSTPONED — installing the experimental face
   needs the human's confirmation (an external action, D21); a degraded run
