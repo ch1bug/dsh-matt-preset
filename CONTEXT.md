@@ -1,7 +1,7 @@
 # CONTEXT — Matt 工作流模式 · 定时任务设计
 
 单一语境：Matt 工作流模式（`~/.dsh/.agent-presets/matt/`）的配套工具设计。本文是术语表，不含实现细节；已定决策见 `docs/adr/`。
-决策索引每条一行（D1–D56）：叙事细节看被指的 ADR 与 [docs/observations.md](docs/observations.md)（无 ADR 决策的详档 + 观察记录档案；#70 迁出，归档不再更新）。
+决策索引每条一行（D1–D57）：叙事细节看被指的 ADR 与 [docs/observations.md](docs/observations.md)（无 ADR 决策的详档 + 观察记录档案；#70 迁出，归档不再更新）。
 
 ## 术语
 
@@ -45,7 +45,7 @@
 - `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。
 - **DSH 测试/升级通道分工（human 指令，2026-10-01）**：日常测试一律用**源代码检出 + 网页端**（`pnpm run dev:web` / 现有 web URL）；**桌面端（安装版）只用于稳定后的版本升级**——开发中的改动不得先行装上桌面端。任何"装新版本试试"的动作先问自己走的是哪条通道。
 
-## 决策索引（D1–D56）
+## 决策索引（D1–D57）
 
 > 每条一行：**Dn（日期，来源）** — 一句决策 → 指针。有 ADR 的决策以 ADR 为权威叙述；无 ADR 的决策细节与**全部决策行的原文快照**（含历次修订注记）在 [docs/observations.md](docs/observations.md) 决策详档节（#70 迁出，归档不再更新）。
 
@@ -105,6 +105,7 @@
 - **D54（2026-10-25，#163 落地）** — 自主化 L2：批内 auto-handoff 唤醒编排（lib/autonomy-orchestration.mjs 的 runWakeLoop：page 事件流 turn 序判、子代理在飞 hold 到落定、闲置宽限 + 1 次 nudge、onAwaitingHuman 转达/应答注入一次防风暴）+ 收尾人工确认位（交付全自动、push/关票停问 human，#160 拍板）+ 批末异步审计位（失真率读数进 wrap AUTONOMY DIGEST，与 D53 越界率不同读数互不替代）+ 协议固化（eval runner import 编排件零内嵌副本、HANDOFF_BOUNDARY 正典导出） → [详档](docs/observations.md#d54)
 - **D55（2026-11-01，#58 落地）** — batch-mode 规则块组件化（workflow components）：`@@ batch-mode` 节物理抽为 workflow-component-batch.txt + `COMPONENTS` 注册表（组件关 = 注入零 batch 节；组件开 = 与冻结基线逐字节等价、基线零重取；未知组件名响亮抛；profile 同 id 覆盖压过组件默认文本） → [ADR-0016](docs/adr/0016-workflow-components.md)
 - **D56（2026-11-06 拍板，#179 入册）** — 注意力经济学作为工作流优化目标轴：门 3 内部改三层分级（L0 自决 / L1 攒批 / L2 立即问，四类恒 L2：D21 外部动作、recovery STOP-and-ask、隐私面、范围扩张/AC 改写/triage 三选一）+ 批末收口卡与委派完成卡双形态（action-cards 缺席时降级为正文收口段、降级显式）；实施分两波 → [ADR-0017](docs/adr/0017-attention-economy.md)
+- **D57（2026-10-20 grill 拍板，2026-11-14 裁决维持，#53 落地）** — PM 组合层基座依赖反转：三层划分维持（forge project = 组合层永存 / DSH 任务板 = 可选执行层 / batch-state.md = 批协议层只管批生命周期不担 PM 职责）；优先级 = 票面 `P0` 标签（#142 单档例外轴，project 侧当红旗列，不另设字段）；L1（依赖关系图，吃原生 blocked-by 边 + frontier.mjs 现算）立即 / L0（看板+里程碑）延后（真出现跨仓 roadmap 需求再开板，前置 = `gh auth refresh -s project`）/ L2、L3 待议；三档降级梯度只钉口径不造载体（不建板、不新建 docs/tickets/、不升格 batch-state.md） → [ADR-0019](docs/adr/0019-pm-layer-on-forge-project.md)
 
 ## 观察记录与历史（迁出指针）
 

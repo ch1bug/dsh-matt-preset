@@ -95,6 +95,7 @@ const ALLOW = new Map([
   ['presets/matt.patch.yml', 'D50 记载该文件因 config.id 与第一档重名被撤（注册表 Duplicate agent preset 整包拒绝挂载）—— 文档提及是历史陈述，不是指针'],
   ['lang-packs/go.yml', 'docs/lang-enforcer.md §未来语言在教「新增一个 pack」（detect: go.mod）—— 待创建文件，不是指针'],
   ['lang-packs/python.yml', '同上（教新增 pack: detect pyproject.toml / requirements.txt）'],
+  ['docs/tickets/', '#53 grill 边界（2026-10-20 拍板，2026-11-14 裁决维持）：issue-tracker.md「forge project 层」节写明「不新建 docs/tickets/ 或同类载体」（三档映射是口径不是载体）—— 文档提及是**否定性边界**（明确说它不该被创建），不是指针；该边界句删除时本例外由 P4b 判红清理'],
 ])
 
 const EXCLUSIONS = [

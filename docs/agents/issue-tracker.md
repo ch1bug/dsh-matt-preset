@@ -723,3 +723,74 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me`, the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+
+## forge project 层（PM 组合层，#53）
+
+PM 组合层的分层与采纳口径按 **2026-10-20 grill 决策记录**落地（票面评论，owner 署名
+*the decisions below are the human's*；2026-11-14 本批实施中复审发现票面正文与该评论冲突、
+上报后 human 裁决**维持 grill 口径**）——决策记录 = `docs/adr/0019-pm-layer-on-forge-project.md`，
+CONTEXT.md **D57** 一行指针。三层分工维持：组合/项目层 = forge project 模块（永存）、
+执行层 = DSH 任务板 / teamRun（可选，检测到则挂载、不在则退化）、批协议层 = `batch-state.md`
+（仓内，**只管批生命周期，不承担任何 PM 职责**）。本节是操作口径判据单源；
+verify 守卫 = `tests/verify-project-pm-layer.mjs`。
+
+### L1 用法（依赖关系图，立即采纳——已有数据换呈现，零新机制零新权限）
+
+- **原生 `blocked-by` 依赖边**：加边（REST 命令）、读边、读图陷阱见上文「Wayfinding
+  operations」的 **Blocking** 条与「Ready frontier」节——此处只留指针不复述（同一份口径
+  只写一份）。
+- **现算可开工集合**：`node scripts/frontier.mjs`（`--json` 供排批输入）——它就是靠原生
+  依赖边现算的；L1 的「依赖关系图」吃同一份数据，GitHub issue 页也直接呈现，零新机制
+  零新权限（grill 先行事实 3）。
+- 采纳表其余行：**L0（看板 + 里程碑）延后**——真出现「跨仓一眼看 roadmap」的需求再开板，
+  前置 = `gh auth refresh -s project`（grill 先行事实 2：token 现无 project scope）；
+  **L2（甘特/时间线）**等 L1 稳定后才谈，且**不手工维护日期**（若需要新推导逻辑，先过
+  D29）；**L3（assignee 负载均衡）**待 #52 泳道试跑后议；**不采纳**：精确到天的人力排期、
+  燃尽预测（agent 工作流无可靠数据源）。
+
+### 优先级 = 票面 `P0` 标签（#142 单档例外轴；project 侧当红旗列呈现）
+
+- 优先级**不另设字段**（grill Q1=A）：单一事实源 = issue label——`P0` 是**例外标记**而非
+  排序维度（正交轴、不参与 state 判定、不驱动排序），词汇 / 判据 / 颜色单源在
+  `docs/agents/triage-labels.md`（#142），本节不复制第二份。
+- project 视图（若/当开板）把 `P0` 当**红旗列**呈现即可——不发明 `P1/P2` 一类多档。
+
+### 三档映射（口径，不造载体；真出现 git-only 仓时再落文件，届时按此映射照做）
+
+| 概念 | 全 forge | 仅 git 远端 | 完全本地 |
+| --- | --- | --- | --- |
+| **票** | forge issue | 票 = 仓内票文件（字段与 #52 契约化四字段同构，仅载体不同） | 同左 |
+| **状态列** | project 看板列 | 批内状态文件的状态表格（形态先例 = batch-state.md 成员表「状态」列——仅描述届时对应物的形态，**不是**给它派 PM 职责） | 同左 |
+| **里程碑·依赖** | milestone / 原生 blocked-by 边 | batch section + blocked_by 字段 | 同左 |
+| **指派与审计线索** | assignee / comment | 票文件 owner / 证据段（#38 先例） | 同左 |
+
+- 这是**可移植性口径**（grill Q3=C：只钉口径，不造任何载体）：**不新建** `docs/tickets/`
+  或同类载体（不为尚未出现的无-forge 场景造负担，D29）；**真出现 git-only 仓时再落文件**，
+  届时按本表照做。
+- 泳道隔离 / 合并门**不随档位降级**：分支 = lane、worktree 隔离、Lead 验证是 git-native
+  的（ADR-0018），三档**零损失**；可视化降级为报告内嵌 mermaid 依赖图 + `git log --graph`。
+- 极端降级（无 project 模块的 forge）：label 约定 `batch:A` `lane:2` `status:ready`——
+  label 是所有 forge 的最大公约数。
+
+### 边界（grill 边界，2026-10-20 拍定；2026-11-14 裁决维持）
+
+- **不建** Projects v2 板（L0 延后——「票在哪一列」当前 state label 已答（#141 正在治
+  这批标签），建板 + 长期维护的成本先不付）。
+- **不给** `batch-state.md` 增加任何 PM 职责（它只管批生命周期；且它**只在批内存在**——
+  K 批已归档时该文件不存在，而 project/组合层要的是**永存**，grill 先行事实 1）。
+- **不新建** `docs/tickets/` 或同类载体；**不改** #142 的 `P0` 结论与 `frontier.mjs`
+  行为。
+- L0 若在将来开板：建板/入板是外部写动作（D21 同族），授权面以**届时可回读的拍板记录**
+  （票面 grill 决策评论链 / 批宣告）为准——本节不预授任何 project 写操作。
+
+### 与邻节分工
+
+- **Ready frontier**（上文节）：管**开工资格**判定——`scripts/frontier.mjs` 现算，本节
+  只声明 L1 呈现面吃同一份原生依赖边数据，**不改** frontier 判定、脚本零改动。
+- **泳道批票面**（#136 节）：管**进 lane 资格**（四字段）——批次·lane 归属的组合层呈现
+  若/当开板时是同一事实的投影，不是第二份泳道契约。
+- **`docs/adr/0018`（执行层）**：DSH 任务板字段语义映射的权威在彼；本节只声明任务板是
+  可选执行层 backend、缺席退化，不重述映射表。
+- **`docs/adr/0019` + CONTEXT.md D57**：决策与理由的权威在 ADR；本节只留操作口径，
+  不复制采纳表与理由。
+
