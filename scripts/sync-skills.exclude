@@ -3,3 +3,10 @@
 # 初版为空（2026-10-01）：全量 diff 扫描显示本地差异全部来自系统性适配
 # （GLOSSARY→CONTEXT 家族替换），无手工 fork。pr 的 tssx 重排版判定为意外
 # 格式化，接受上游版本。将来手工 fork 技能时把名字加进来。
+
+# grilling（#174，2026-11-14 定盘）：本仓手工 fork——fork 源 skills-fork/grilling/SKILL.md
+# 以上游原文为基线，在 finding facts 段后加「决策前提实测」检查项（拍「复用外部面」类
+# 决策前，先 npm view + tarball 核对实际导出面）。清单语义：grilling 不再从上游同步、
+# 不被覆盖；fork 版与上游有内容差异，每次同步 FORK-DRIFT 警告保底可见（人工 rebase
+# 上游改动进 fork 源后重部署，不静默跟随上游）。
+grilling
