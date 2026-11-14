@@ -46,6 +46,46 @@
 
 ## 2. experimental 面安装 runbook（源码装法，锚随仓版本走）
 
+**前置段：app 大版本升级后 profile 插件面同步（#186）**——app 跨大版本升级（如
+rc.2 → rc.3）后，profile 插件面可能落后于新运行时，呈现为 §1 所指的**安装断层**
+（判定与降级语义见 §1 precheck——「能力前置检测」节的实装探针与 loud 降级；断层
+≠ 工具缺席）。两类症状：
+
+- **声明了但没装上**：profile `package.json` 的 `dsh.profile.bundles` 声明了
+  experimental 包，profile 目录下 `node_modules/@deepseek-ai/` 无实装、
+  `pnpm-lock.yaml` 亦无条目。IRIS 侧读数形态（2026-11-14，desktop profile，
+  **以 IRIS 侧实测为准**；本机桌面端 rc.1 未走升级路径、无 deny 现象）：bundles
+  声明 `@deepseek-ai/dsh-experimental-tool-worktree` /
+  `@deepseek-ai/dsh-experimental-forge-bundle` 而实装与 lock 双缺席。rc.3 起
+  Team 面已随 base 出货（§1 出货形态注记）——bundles 若遗留旧 agent-team 套件
+  包声明，其缺席**不构成**本断层判定。
+- **存量插件 startup deny**：升级前安装的插件（rc.2 存量）对新运行时 peer 不
+  匹配 → plugin-manager 启动时 deny（「profile startup denies it until you
+  grant an exemption」——启动即拒绝，直至授予豁免）。IRIS 侧读数形态（2026-11-14
+  16:52，操作日志 `<DSH_HOME>/profiles/<profile>/.plugin-manager/logs/operation-<id>`
+  的 deny 行）：dsh-lsp / dsh-lsp-stdio / dsh-mcp-client / dsh-tool-lsp /
+  computer-use-cua-driver-native 成片告警——**名单是当次读数示例，非恒定清单，
+  以 IRIS 侧实测为准**。
+
+检测三步（命令形态；路径为占位符——`<DSH_HOME>` / `<profile>` / `<pkg>` 替换实际
+值；判定语义与降级动作归 §1，此处不重复判据）：
+
+```
+ls <DSH_HOME>/profiles/<profile>/node_modules/@deepseek-ai/                   # ① 实装存在性探针
+grep -n <pkg> <DSH_HOME>/profiles/<profile>/pnpm-lock.yaml                    # ② lock 条目；0 命中 = 脱节坐实
+grep -n deny <DSH_HOME>/profiles/<profile>/.plugin-manager/logs/operation-*   # ③ startup deny 行
+```
+
+修复路径（升级动作 = 外部动作 D21，先报告等 human 确认再执行）：
+
+- **GUI 插件页升级（存量插件 deny 的官方路径）**：Plugins 页对版本 deny 的存量
+  插件执行升级，升到与新运行时匹配的版本；升级后**重开 DSH 会话**按 §1 重新检测。
+  experimental 面（forge-bundle）补装不走 GUI——npm 上版本错位不采（见下方源码
+  装法）。
+- **`dsh plugin allow-version` 豁免（风险明示）**：升级路径不可用、确需先跑时，
+  可对 peer 不匹配的存量插件授予版本豁免。**豁免 = 接受 peer 不匹配运行**——
+  不修复根因，只让 startup 通过；能升级就不豁免，升级条件具备后仍应升到匹配版本。
+
 **不采 npm 安装路径**：npm 上 dsh 只到 alpha.2，rc.1 源码未发——npm 装出来是版本错位面，
 与 runtime 锚对不上。唯一采纳路径 = **上游检出源码**：
 

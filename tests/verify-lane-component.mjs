@@ -124,15 +124,26 @@ const manualNeeds = [
   ['rc.3 起 spawn_teammate 已移除（迁移注记）', /spawn_teammate[\s\S]{0,200}已移除/],
   ['迁移映射（fresh / fork / by-id）', /`subagent`[\s\S]{0,120}subagent_fork[\s\S]{0,200}send_message\(\{ agent_id, message \}\)/],
   ['upgrade-guide 路径指针', /upgrade-guide/],
-  ['实装探针（安装断层 ≠ 工具缺席）', /安装断层/],
-  ['实装探针声明面', /dsh\.profile\.bundles/],
-  ['实装探针 lock 面', /pnpm-lock\.yaml/],
-  ['实装探针 deny 行', /deny 行|deny 行为|deny/],
   ['forge-bundle 指称', /forge-bundle/],
   ['串行 batch 降级 + D47', /串行 batch/],
   ['装不齐顺延不造假', /顺延/],
   ['安装 = D21 外部动作', /D21/],
 ]
+// 实装探针四锚判在 §1 precheck 节切片上（#186 邻接适配，2026-11-14 编排授权）——
+// #186 AC1 落地后安装节（§2）前置段合法引用「安装断层 / dsh.profile.bundles /
+// pnpm-lock.yaml / deny」词形（引用 §1 不复制判据），成为第二承载副本：全文级锚 +
+// T6「摘 §1 实装探针 bullet」扰动随之空洞（摘了 §1 bullet，§2 的引用词形仍命中
+// 全文锚 → 削弱方向打不到）。四锚改判在 §1 切片：摘除 §1 bullet 后切片内必缺席
+// → 可红。段级 = 更严（§2 的合法交叉引用不再充当承载），判据语义不放宽。切片切
+// 不出（标题字面漂移）= 四锚全缺席 = 红——缺席必响亮，不静默。
+const S1_SLICE = /## 1\.[\s\S]*?(?=\n## 2\.)/
+const manualS1Needs = [
+  ['实装探针（安装断层 ≠ 工具缺席）', /安装断层/],
+  ['实装探针声明面', /dsh\.profile\.bundles/],
+  ['实装探针 lock 面', /pnpm-lock\.yaml/],
+  ['实装探针 deny 行', /deny 行|deny 行为|deny/],
+]
+const sliceS1 = (text) => (text.match(S1_SLICE) || [''])[0]
 
 /** 判据句段级断言：组件 probe 句 / 手册「查什么」bullet 两件齐 + 旧 API 名禁入。
  *  段级而非全文级——全文锚只钉词形在场，钉不住「判据句削成单工具」这种削弱。 */
@@ -160,6 +171,7 @@ const judgeFaceMissing = (componentText, manualText) => {
 const l3Missing = (componentText, manualText) => [
   ...componentNeeds.filter(([, re]) => !re.test(componentText)).map(([label]) => `L3a 组件: ${label}`),
   ...manualNeeds.filter(([, re]) => !re.test(manualText)).map(([label]) => `L3b 手册: ${label}`),
+  ...manualS1Needs.filter(([, re]) => !re.test(sliceS1(manualText))).map(([label]) => `L3b 手册(§1 切片): ${label}`),
   ...judgeFaceMissing(componentText, manualText),
 ]
 
@@ -167,7 +179,7 @@ const l3Missing = (componentText, manualText) => [
   const missing = l3Missing(component, manual)
   if (missing.length === 0)
     ok('L3. 双承载能力检测与降级判据（判据句两件齐 + 实装探针 + rc.3 迁移注记，全部词形在场）',
-      `组件 ${componentNeeds.length} 项 + 手册 ${manualNeeds.length} 项 + 判据句段级 6 断言`)
+      `组件 ${componentNeeds.length} 项 + 手册 ${manualNeeds.length} 项 + §1 切片 ${manualS1Needs.length} 项 + 判据句段级 6 断言`)
   else bad('L3. 判据缺词形或判据句回潮/削弱', missing.join(' / '))
 }
 
@@ -263,10 +275,12 @@ const l3Missing = (componentText, manualText) => [
     expectRedManual('T5 manual judge paragraph regresses to spawn_teammate', hits(manual, needle),
       manual.replace(needle, '`spawn_teammate` 与 `create_worktree`'))
   }
-  // T6 手册摘实装探针段（安装断层判据整 bullet 摘除）
+  // T6 手册摘实装探针段（安装断层判据整 bullet 摘除）——preflight 与扰动判据均在
+  // §1 切片上（#186 邻接适配）：摘除后切片内四锚缺席 → 可红；全文锚不再被 §2
+  // 前置段的合法引用词形垫绿。
   {
     const needle = '- **实装探针（安装断层 ≠ 工具缺席'
-    expectRedManual('T6 manual install-gap paragraph removed', hits(manual, needle),
+    expectRedManual('T6 manual install-gap paragraph removed', hits(sliceS1(manual), needle),
       manual.replace(/- \*\*实装探针（安装断层[\s\S]*?(?=\n- )/, ''))
   }
 }
