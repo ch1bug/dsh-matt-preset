@@ -848,14 +848,28 @@ experimental-face install, cold-start cost) lives in `docs/lane-batch.md` —
 this text points at it and never restates it: a second copy of the runbook
 is a drift seed.
 - CAPABILITY PRECHECK（能力前置检测 — before ANYTHING else in a lane batch）:
-  probe the SESSION TOOL SURFACE for `spawn_teammate` and `create_worktree`
-  — the check is whether those two tool names are callable from THIS
-  session's tool list, never a version-number or config-file guess. EITHER
-  MISSING → say it out loud: name the missing tool(s), point at the
+  probe the SESSION TOOL SURFACE for `subagent` (or `subagent_fork`) and
+  `create_worktree` — the check is whether those tool names are callable
+  from THIS session's tool list, never a version-number or config-file
+  guess. spawn_teammate was REMOVED upstream in rc.3 (together with the
+  Team-scoped send_message / list_agents / interrupt_agent): the migration
+  map is `subagent` for fresh teammates, `subagent_fork` for inherited
+  history, and `send_message({ agent_id, message })` for same-tree messaging
+  by id — the migration lives in the upstream upgrade guide (Agent Teams
+  uses subagents and Session ids). The OLD check (probing for
+  spawn_teammate) can never pass on rc.3 and must not be used. ALSO probe
+  the INSTALL FACE — a DIFFERENT defect from a missing tool: a bundle
+  DECLARED in the profile's `dsh.profile.bundles` but absent from the
+  profile's node_modules (the lock file has no entry; plugin-manager logs
+  carry deny lines) is an INSTALL GAP — report it loudly as an install gap,
+  not as a vague "tool absent". EITHER FACE MISSING → say it out loud: name
+  what is missing and WHICH face it is missing on (tool surface vs install
+  gap), point at the
   forge-bundle install runbook (`docs/lane-batch.md`; the worktree face is
   installed FROM SOURCE at the anchor checkout — npm alpha.2 is version-
   misaligned and NOT adopted; the team face ships with the runtime base
-  since rc.3, so spawn_teammate usually needs no install), and DEGRADE to the existing serial batch mode
+  since rc.3, its API names being the subagent / subagent_fork family since
+  spawn_teammate was removed), and DEGRADE to the existing serial batch mode
   (D47: never silent, never assume presence). If the face cannot be
   installed, the lane batch is POSTPONED — installing the experimental face
   needs the human's confirmation (an external action, D21); a degraded run
@@ -869,9 +883,12 @@ is a drift seed.
   the default takes its real size; the first live run starts at parallelism
   2 (small- to mid-size tickets, disjoint touch-sets).
 - LANE ISOLATION（隔离原语 = create_worktree）: each lane implementer is a
-  teammate the Lead creates with `spawn_teammate` (FRESH context — no batch
-  history carries over); INSIDE its own session the teammate calls
-  `create_worktree` for an isolated worktree on its own branch. Checkout
+  teammate the Lead creates with `subagent` (FRESH context — no batch
+  history carries over; `subagent_fork` when a lane needs the inherited
+  history); INSIDE its own session the teammate calls
+  `create_worktree` for an isolated worktree on its own branch. Lead ↔
+  teammate messages go by agent id — `send_message({ agent_id, message })`,
+  members of one root tree reach each other by id. Checkout
   pool, automatic naming and deleted-worktree recovery are the DSH worktree
   service's job — the Lead does ZERO manual `git worktree` plumbing. Red
   line: lanes never share `target/` (or any build-output directory); the
@@ -892,7 +909,7 @@ LANE ORCHESTRATION（四件编排语义 — the four semantics that make a lane 
 more than N serial batches in parallel clothes; ADR-0018 §Decision 1/4）:
 - DYNAMIC KICK: when the frontier moves (a lane finishes and frees a slot,
   or a blocked ticket turns ready), the Lead spawns the NEXT teammate right
-  away with `spawn_teammate` — no per-ticket wake-up messages, no waiting
+  away with `subagent` — no per-ticket wake-up messages, no waiting
   for a human to hand out the next ticket.
 - MERGER DEDICATED: merging a finished lane is a DEDICATED worker's job (a
   merger teammate owning the integration branch), NOT the implementer's and

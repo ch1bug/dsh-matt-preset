@@ -13,8 +13,15 @@
  *       lane-orchestration 链在 lane-batch 后——lane 不依赖 batch 节在场）。
  *   L2  注册面：workflow-core.mjs 的 COMPONENTS.lane 指向该文件、sectionIds 与
  *       节标记一致（import 模块本身，不手抄注册表）。
- *   L3  能力检测与降级判据双承载（组件 + 手册）：spawn_teammate / create_worktree
- *       工具面检测、forge-bundle 指称、串行 batch 降级 + D47、装不齐顺延不造假。
+ *   L3  能力检测与降级判据双承载（组件 + 手册）：#189 改判后判据 =
+ *       `subagent`（或 `subagent_fork`）+ `create_worktree` 两件齐（spawn_teammate
+ *       已于上游 rc.3 移除——判据句回潮旧 API 名即红）；实装探针（#186 候选 2：
+ *       bundles 声明 vs node_modules 实装 = 安装断层，双承载）；forge-bundle 指称、
+ *       串行 batch 降级 + D47、装不齐顺延不造假。判据句（组件 probe 句 / 手册
+ *       「查什么」bullet）做**段级**断言——削成单工具也红。
+ *   T   非空洞（内存扰动，零树写入）：判据句削成单工具、旧 API 名回潮（组件 +
+ *       手册两侧）、摘 rc.3 移除注记、摘 upgrade-guide 指针、摘实装探针段——
+ *       每个扰动都必须让 l3Missing 转 RED。
  *   L4  手册承载 AC1/AC3 操作要素：lane-audit 收敛、默认 3 上限 4、link-runtime-deps、
  *       lane-disk-guard、20 GB 默认 + lane-gates.yml 覆写、batch-reconcile、
  *       整批一 PR + merge 恒 human 门、npm alpha.2 不采、fresh context、notes 仓外、
@@ -86,30 +93,82 @@ try {
 }
 
 // ── L3: 能力检测与降级判据双承载（组件 + 手册）─────────────────────────────────
-{
-  // 组件（英文正文）与手册（中文 runbook）各断各的词形——判据一致由**两处都在场**钉住。
-  const componentNeeds = [
-    ['spawn_teammate', /spawn_teammate/],
-    ['create_worktree', /create_worktree/],
-    ['工具面判据（非版本号猜测）', /SESSION TOOL SURFACE|tool names are callable|never a version/],
-    ['forge-bundle 指称', /forge-bundle/],
-    ['串行 batch 降级 + D47', /serial batch mode[\s\S]{0,200}D47|D47[\s\S]{0,200}serial batch/],
-    ['装不齐顺延不造假', /POSTPONED|fakes parallel lanes/],
-  ]
-  const manualNeeds = [
-    ['spawn_teammate', /spawn_teammate/],
-    ['create_worktree', /create_worktree/],
-    ['工具面判据（非版本号猜测）', /工具面/],
-    ['forge-bundle 指称', /forge-bundle/],
-    ['串行 batch 降级 + D47', /串行 batch/],
-    ['装不齐顺延不造假', /顺延/],
-    ['安装 = D21 外部动作', /D21/],
-  ]
-  for (const [file, text, needs, tag] of [['组件', component, componentNeeds, 'L3a'], ['手册', manual, manualNeeds, 'L3b']]) {
-    const missing = needs.filter(([, re]) => !re.test(text)).map(([label]) => label)
-    if (missing.length === 0) ok(`${tag}. ${file}承载能力检测与降级判据（全部词形在场）`, `${needs.length} 项`)
-    else bad(`${tag}. ${file}判据缺词形`, missing.join(' / '))
+// #189 改判：判据 = `subagent`（或 `subagent_fork`）+ `create_worktree` 两件齐；
+// spawn_teammate 已于上游 rc.3 移除（连同 Team-scoped send_message/list_agents/
+// interrupt_agent）——组件/手册的判据句（probe 句 / 「查什么」bullet）里回潮旧
+// API 名即红。实装探针（#186 候选 2）：bundles 声明在 profile 而包未实装 =
+// 「安装断层」，区别于笼统「工具缺席」——双承载锚在此钉住。
+
+const componentNeeds = [
+  ['判据工具 subagent（fresh 面）', /`subagent`|`subagent_fork`/],
+  ['判据工具 create_worktree', /`create_worktree`/],
+  ['工具面判据（非版本号猜测）', /SESSION TOOL SURFACE|tool names are callable|never a version/],
+  ['rc.3 起 spawn_teammate 已移除（迁移注记）', /spawn_teammate[\s\S]{0,120}REMOVED|REMOVED[\s\S]{0,60}spawn_teammate/],
+  ['旧判据在 rc.3 下永不满足（禁用句）', /must not be used/],
+  ['迁移映射 fresh', /`subagent` for fresh teammates/],
+  ['迁移映射 inherited', /`subagent_fork` for inherited/],
+  ['迁移映射 by-id 消息', /send_message\(\{ agent_id, message \}\)/],
+  ['upgrade-guide 指针', /upstream upgrade guide/],
+  ['实装探针（install gap ≠ tool absent）', /INSTALL GAP/],
+  ['实装探针声明面', /dsh\.profile\.bundles/],
+  ['实装探针 lock/日志面', /lock file[\s\S]{0,200}deny lines|deny lines[\s\S]{0,200}lock file/],
+  ['forge-bundle 指称', /forge-bundle/],
+  ['串行 batch 降级 + D47', /serial batch mode[\s\S]{0,200}D47|D47[\s\S]{0,200}serial batch/],
+  ['装不齐顺延不造假', /POSTPONED|fakes parallel lanes/],
+]
+const manualNeeds = [
+  ['判据工具 subagent（fresh 面）', /`subagent`|`subagent_fork`/],
+  ['判据工具 create_worktree', /`create_worktree`/],
+  ['两件齐判据', /两件齐/],
+  ['工具面判据（非版本号猜测）', /工具面/],
+  ['rc.3 起 spawn_teammate 已移除（迁移注记）', /spawn_teammate[\s\S]{0,200}已移除/],
+  ['迁移映射（fresh / fork / by-id）', /`subagent`[\s\S]{0,120}subagent_fork[\s\S]{0,200}send_message\(\{ agent_id, message \}\)/],
+  ['upgrade-guide 路径指针', /upgrade-guide/],
+  ['实装探针（安装断层 ≠ 工具缺席）', /安装断层/],
+  ['实装探针声明面', /dsh\.profile\.bundles/],
+  ['实装探针 lock 面', /pnpm-lock\.yaml/],
+  ['实装探针 deny 行', /deny 行|deny 行为|deny/],
+  ['forge-bundle 指称', /forge-bundle/],
+  ['串行 batch 降级 + D47', /串行 batch/],
+  ['装不齐顺延不造假', /顺延/],
+  ['安装 = D21 外部动作', /D21/],
+]
+
+/** 判据句段级断言：组件 probe 句 / 手册「查什么」bullet 两件齐 + 旧 API 名禁入。
+ *  段级而非全文级——全文锚只钉词形在场，钉不住「判据句削成单工具」这种削弱。 */
+const judgeFaceMissing = (componentText, manualText) => {
+  const missing = []
+  const probe = componentText.match(/probe the SESSION TOOL SURFACE for[^.]*\./)
+  if (!probe) missing.push('L3a 组件: 判据句（probe the SESSION TOOL SURFACE for …）缺席')
+  else {
+    const s = probe[0]
+    if (/spawn_teammate/.test(s)) missing.push('L3a 组件: 旧 API 名 spawn_teammate 回潮进判据句')
+    if (!/`subagent`|`subagent_fork`/.test(s)) missing.push('L3a 组件: 判据句缺 subagent（削成单工具或漂移）')
+    if (!/`create_worktree`/.test(s)) missing.push('L3a 组件: 判据句缺 create_worktree（削成单工具）')
   }
+  const q = manualText.match(/- \*\*查什么\*\*：[\s\S]*?(?=\n- )/)
+  if (!q) missing.push('L3b 手册: 判据段（**查什么** bullet）缺席')
+  else {
+    const s = q[0]
+    if (/spawn_teammate/.test(s)) missing.push('L3b 手册: 旧 API 名 spawn_teammate 回潮进判据段')
+    if (!/`subagent`|`subagent_fork`/.test(s)) missing.push('L3b 手册: 判据段缺 subagent')
+    if (!/`create_worktree`/.test(s)) missing.push('L3b 手册: 判据段缺 create_worktree（削成单工具）')
+  }
+  return missing
+}
+
+const l3Missing = (componentText, manualText) => [
+  ...componentNeeds.filter(([, re]) => !re.test(componentText)).map(([label]) => `L3a 组件: ${label}`),
+  ...manualNeeds.filter(([, re]) => !re.test(manualText)).map(([label]) => `L3b 手册: ${label}`),
+  ...judgeFaceMissing(componentText, manualText),
+]
+
+{
+  const missing = l3Missing(component, manual)
+  if (missing.length === 0)
+    ok('L3. 双承载能力检测与降级判据（判据句两件齐 + 实装探针 + rc.3 迁移注记，全部词形在场）',
+      `组件 ${componentNeeds.length} 项 + 手册 ${manualNeeds.length} 项 + 判据句段级 6 断言`)
+  else bad('L3. 判据缺词形或判据句回潮/削弱', missing.join(' / '))
 }
 
 // ── L4: 手册操作要素（AC1/AC3 的承载点）──────────────────────────────────────
@@ -158,4 +217,58 @@ try {
     bad('L5. 组件正文死引用', dead.join(' / '))
 }
 
-report('LANE COMPONENT VERIFY (#137 — 组件 × 手册判据一致性)')
+// ── T: 非空洞（内存扰动，零树写入；扰动前自检 needle > 0）─────────────────────
+// 削弱方向必须可红（#189 AC4）：判据句削成单工具、旧 API 名回潮（组件 + 手册两侧）、
+// 摘 rc.3 移除注记、摘 upgrade-guide 指针、摘实装探针段——每个扰动都让 l3Missing 红。
+{
+  const hits = (text, needle) => text.split(needle).length - 1
+  const expectRed = (label, preflight, mutated) => {
+    if (preflight === 0) bad(`T ${label}: preflight needle 0 hits（扰动没打到目标，断言是空洞的）`)
+    else if (l3Missing(mutated, manual).length > 0) ok(`T ${label}: 扰动转红（非空洞）`)
+    else bad(`T ${label}: 扰动未转红`, '守卫对这个削弱方向是空洞的')
+  }
+  const expectRedManual = (label, preflight, mutated) => {
+    if (preflight === 0) bad(`T ${label}: preflight needle 0 hits（扰动没打到目标，断言是空洞的）`)
+    else if (l3Missing(component, mutated).length > 0) ok(`T ${label}: 扰动转红（非空洞）`)
+    else bad(`T ${label}: 扰动未转红`, '守卫对这个削弱方向是空洞的')
+  }
+
+  // T1 组件判据句削成单工具（probe 句摘 create_worktree）
+  {
+    const needle = 'and\n  `create_worktree` — the check'
+    expectRed('T1 component judge sentence thinned to one tool', hits(component, needle),
+      component.replace(needle, ' — the check'))
+  }
+  // T2 组件判据句旧 API 名回潮（subagent → spawn_teammate）
+  {
+    const needle = 'probe the SESSION TOOL SURFACE for `subagent`'
+    expectRed('T2 component judge sentence regresses to spawn_teammate', hits(component, needle),
+      component.replace(needle, 'probe the SESSION TOOL SURFACE for `spawn_teammate`'))
+  }
+  // T3 组件摘 rc.3 移除注记（REMOVED 句改写）
+  {
+    const needle = 'spawn_teammate was REMOVED upstream in rc.3'
+    expectRed('T3 component rc.3 removal note rewritten away', hits(component, needle),
+      component.replace(needle, 'the old API was dropped upstream in rc.3'))
+  }
+  // T4 组件摘 upgrade-guide 指针
+  {
+    const needle = 'upstream upgrade guide'
+    expectRed('T4 component upgrade-guide pointer removed', hits(component, needle),
+      component.replace(needle, 'upstream upgrade handbook'))
+  }
+  // T5 手册判据段旧 API 名回潮（subagent → spawn_teammate）
+  {
+    const needle = '`subagent`（或 `subagent_fork`）与 `create_worktree`'
+    expectRedManual('T5 manual judge paragraph regresses to spawn_teammate', hits(manual, needle),
+      manual.replace(needle, '`spawn_teammate` 与 `create_worktree`'))
+  }
+  // T6 手册摘实装探针段（安装断层判据整 bullet 摘除）
+  {
+    const needle = '- **实装探针（安装断层 ≠ 工具缺席'
+    expectRedManual('T6 manual install-gap paragraph removed', hits(manual, needle),
+      manual.replace(/- \*\*实装探针（安装断层[\s\S]*?(?=\n- )/, ''))
+  }
+}
+
+report('LANE COMPONENT VERIFY (#137/#189 — 组件 × 手册判据一致性)')

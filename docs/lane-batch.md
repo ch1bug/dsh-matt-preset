@@ -7,25 +7,40 @@
 手册不复述七门与批纪律（那是 workflow-core / batch 组件的本位）。
 
 **读者**：Team Lead = 挂 matt preset 的 DSH 会话。lane implementer / merger = Lead 用
-`spawn_teammate` 起的 teammate（fresh context）。
+`subagent` 起的 teammate（fresh context）。
 
 ## 1. 能力前置检测与 loud 降级（D47）
 
 开任何泳道批之前，Lead 先做**能力前置检测**：
 
-- **查什么**：本会话的**工具面**——`spawn_teammate` 与 `create_worktree` 两个工具名
-  是否可调（在工具目录里可见、可调用）。**判据是工具面在场，不是版本号或配置文件猜测**：
-  experimental 面装没装，只有会话工具面说了算。
-- **任一缺席** → 显式说出来（缺席哪个工具）、指向本手册 §2 的 forge-bundle 安装 runbook、
+- **查什么**：本会话的**工具面**——`subagent`（或 `subagent_fork`）与 `create_worktree`
+  **两件齐** → 泳道批就绪（可调 = 在工具目录里可见、可调用）。**判据是工具面在场，
+  不是版本号或配置文件猜测**：experimental 面装没装，只有会话工具面说了算。
+- **rc.3 迁移注记（判据改判依据）**：上游 rc.3 起 `spawn_teammate` 已移除（连同
+  Team-scoped `send_message`/`list_agents`/`interrupt_agent`），替代映射 = `subagent`
+  （fresh）/ `subagent_fork`（继承对话史）/ `send_message({ agent_id, message })`（同树
+  按 id 互达）——见上游检出
+  `<upstream-checkout>/docs/upgrade-guide/v0.2.1-rc.2/agent-team-subagents/guide.md`
+  （「Agent Teams uses subagents and Session ids」；中文版 guide.zh.md 同目录）。旧判据
+  （探 `spawn_teammate`）在 rc.3 下永远不满足——**不得再按它检测**（#189 勘正）。
+- **实装探针（安装断层 ≠ 工具缺席，#186 候选 2）**：profile **声明**了 bundle 而包未
+  实装 = **loud 报「安装断层」**，区别于笼统「工具缺席」。三步检测：① 声明面
+  `<DSH_HOME>/profiles/<profile>/package.json` 的 `dsh.profile.bundles` vs
+  `node_modules/@deepseek-ai/<pkg>` 存在性探针；② profile 的 `pnpm-lock.yaml` grep
+  包名（无条目 = 声明与安装脱节）；③ plugin-manager 操作日志的 deny 行（版本 peer
+  不匹配 → startup deny）。
+- **任一缺席**（工具面缺件或安装断层）→ 显式说出来（缺席哪个工具、缺在哪个面——工具面
+  还是安装断层）、指向本手册 §2 的 forge-bundle 安装 runbook、
   然后**降级走既有串行 batch 模式**（D47：不静默、不假设在位）。降级后泳道组件的其余
   判据不再适用，串行 batch 的全部门与节奏照旧。
 - **装不齐 = 顺延，不降级造假**：安装 experimental 面是外部动作（D21），需要 human
   确认；human 未确认安装时，lane batch 顺延——**绝不允许**用普通 subagent 模拟并行
   lane 交差。
-- **出货形态注记（上游 rc.3 起）**：Team 面（`spawn_teammate`/任务板）已随上游
-  base bundle 出货（`@deepseek-ai/dsh-agent-team` 毕业出 experimental）——新 runtime 下
-  `spawn_teammate` 通常天然在场；`create_worktree` 仍随 forge-bundle（experimental 面），
-  是最常缺席的一件。判据不变：**工具面在场说了算**，出货形态只影响「通常缺哪个」。
+- **出货形态注记（上游 rc.3 起）**：Team 面能力随上游 base 出货
+  （`@deepseek-ai/dsh-agent-team` 毕业出 experimental），API 名 rc.3 起为
+  `subagent`/`subagent_fork` 族——`spawn_teammate` 已移除（upgrade-guide 路径见上方
+  迁移注记）；`create_worktree` 仍随 forge-bundle（experimental 面），是最常缺席的一件。
+  判据不变：**工具面在场说了算**，出货形态只影响「通常缺哪个」。
 - 这套语义与组件正文 `lane-batch` 节 CAPABILITY PRECHECK 条判据一致；组件承载「何时
   检测、缺席什么行为」，本节承载「检测的操作对象」。
 
@@ -42,8 +57,8 @@
    **npm 上 forge-bundle 仍只到 alpha.2**（team 面已发 rc.2，forge 面未跟）——npm 装出来
    是版本错位面，不采。安装动作走 DSH 的插件安装面
    （plugin add / Plugins 页）——**这是外部动作（D21），先报告等 human 确认再执行**。
-3. 装完**重开 DSH 会话**，按 §1 重新检测：`spawn_teammate` / `create_worktree` 出现在
-   会话工具面 = 前置满足；仍未出现 → 顺延，不造假。
+3. 装完**重开 DSH 会话**，按 §1 重新检测：`subagent`（或 `subagent_fork`）/
+   `create_worktree` 出现在会话工具面 = 前置满足；仍未出现 → 顺延，不造假。
 4. 装齐是**首跑（AC5）的前置条件**；首跑本身由主会话在 DSH 侧收口（工作流外），并行度
    2 保守起步，只作编排试跑、不作竖切证据。
 
@@ -68,14 +83,16 @@
 4. **排批**：§3 lane-audit 收敛 lane 数；Lead 在 agent-team **任务板**建票条目——
    #136 四字段映射原生字段：touch-set → `writeScopes`、阻塞边 → `blockedBy`、就绪 →
    `ready`、认领 → `ownerName`、推进 → `status`。
-5. **起 lane**：每 lane implementer = Lead `spawn_teammate`（**fresh context**，不带
-   批历史）；teammate 在**自己会话内**调 `create_worktree` 起隔离工作树（branch +
-   worktree 并切入）。checkout pool、自动命名、被删恢复全部由 DSH `worktree` 服务承载
-   ——Lead **零手工** `git worktree`。红线：lane 之间**不共享构建产物目录**（Rust
+5. **起 lane**：每 lane implementer = Lead `subagent`（**fresh context**，不带批历史；
+   需带批历史延续的会话用 `subagent_fork`）；teammate 在**自己会话内**调
+   `create_worktree` 起隔离工作树（branch + worktree 并切入）。Lead ↔ teammate 消息走
+   `send_message({ agent_id, message })`——保存起会话返回的 agent id，同树按 id 互达
+   （rc.3 迁移面见 §1）。checkout pool、自动命名、被删恢复全部由 DSH `worktree` 服务
+   承载——Lead **零手工** `git worktree`。红线：lane 之间**不共享构建产物目录**（Rust
    的 target 一类工作树本地产物都算）；唯一允许的跨 lane 共享 = 后端 / 内容寻址缓存。
 6. **依赖补齐**：每条新 worktree 先跑 `scripts/link-runtime-deps.mjs`（§5）。
 7. **动态 kick**：frontier 前移（一条 lane 完工释放槽位、或阻塞票转 ready）→ Lead 立即
-   `spawn_teammate` 拉下一条 lane——不逐票叫醒、不等 human 派票。
+   `subagent` 拉下一条 lane——不逐票叫醒、不等 human 派票。
 8. **merger 专职**：lane 成果由专职 merger teammate 并线（owns 集成分支）；implementer
    不自并，Lead 只做终审。
 9. **lane 收尾**：每条 lane 收口时跑磁盘软守卫（§6）；超阈值 → 该 lane 停手 + GC。
