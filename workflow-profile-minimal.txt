@@ -29,6 +29,17 @@ never a lock); the PR waits for a NON-AUTHOR approval — the owner's "done"
 never substitutes; an unclear merge rule pauses the merge, never local work.
 Details: docs/agents/issue-tracker.md; template:
 docs/collaboration-starter-template.md.
+@@ checkpoint-sync
+CHECKPOINT SYNC (enabled projects): in-flight decisions arrive by checkpoint
+reads at phase boundaries — never live delivery (no background polling, no
+per-turn network duty; a failed read is reported as failed, never claimed as
+synced). A decision counts only from a confirmed record on the linked
+issue/PR — a private chat is not a new authority. Read at start/resume,
+request-review and pre-merge; each read ends in one receipt with its basis:
+ADOPTED / VERIFIED NOT AFFECTED / CONFLICT (checkpoint the work first, pause
+only the affected part, follow the subject authorization). "Already read it"
+is not a receipt; a post-review decision re-opens applicability. Details:
+docs/agents/issue-tracker.md.
 @@ enforcement-done
 DONE — verification includes the remote CI. Per-issue: after a push, confirm
 the pushed commit's CI is green; red CI is current-ticket work, never "trivial"
@@ -69,6 +80,11 @@ BATCH MODE — only when the human declares a batch; never on by default.
   duplicates coordinate, handover explicit, assignment is never a lock); the
   PR waits for a NON-AUTHOR approval — the owner's "done" never substitutes.
   Details: docs/agents/issue-tracker.md.
+- CHECKPOINT SYNC (enabled projects): decisions arrive by checkpoint reads
+  (start/resume, request-review, pre-merge), each read ends in one receipt
+  (ADOPTED / VERIFIED NOT AFFECTED / CONFLICT with basis); a failed read is
+  reported as failed and "already read" is not a receipt. Details:
+  docs/agents/issue-tracker.md.
 - CONFLICT ZERO before labelling RFA: ACs consistent; the symptom re-measured
   on HEAD; the docs the ticket cites read (`git grep`) and judged still-true or
   superseded; duplicates / dependency direction / batch overlap checked. No

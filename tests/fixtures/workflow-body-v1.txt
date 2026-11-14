@@ -87,6 +87,32 @@ docs/agents/issue-tracker.md (协作契约); starter template (adopted only by
 the project's explicit confirmation — no platform protection is configured
 automatically): docs/collaboration-starter-template.md.
 
+CHECKPOINT SYNC — in-flight decisions reach an independent workspace through
+CHECKPOINT READS at phase boundaries, never live delivery: a process
+guarantee, not a cross-machine realtime claim (no background polling service,
+no per-turn network duty; a notification only speeds up discovery). A
+cross-member decision is what a CONFIRMED record ties down — written on the
+linked issue/PR by someone the project's contract authorizes, naming basis,
+scope and affected tasks; a private chat or a local projection is not a new
+team authority, and posting that record still grades through the
+external-action gate. READ AT THREE CHECKPOINTS — start/resume (with the
+claim read-back), request-review (latest decisions re-read before the ask),
+pre-merge (the current commit's evidence checked against the latest
+decisions). Each read ends in a receipt that is exactly ONE of three, with
+its basis: ADOPTED (the work changes accordingly; an AC adjustment takes
+authorization), VERIFIED NOT AFFECTED (one auditable line of why there is no
+intersection), CONFLICT (checkpoint the work FIRST — preserve with a WIP
+commit, pause only the AFFECTED part, follow the subject authorization;
+never silently rewrite the ACs, never stop unrelated tickets). "Already read
+it" is not a receipt; a failed read is reported as failed, never claimed as
+synced. Before merge, re-check the CURRENT commit's evidence, the LATEST
+decisions (re-queried, not from memory), the receipts and the approval — a
+decision made after review re-opens applicability; old receipts never cover
+new decisions. These duties apply only where the project actually adopted
+the collaboration protocol (above). Criteria + receipts + pre-merge
+checklist: docs/agents/issue-tracker.md (检查点同步); anonymous walkthrough:
+docs/checkpoint-sync-examples.md.
+
 WORKFLOW ENFORCEMENT — seven hard gates; the workflow-enforcer plugin
 injects their details and high-risk-action reminders per request.
 Violating them (silent skipping, deciding for the human, coding without
@@ -249,6 +275,23 @@ per-issue push rhythm.
   and is never derived from chat presence, write access, or review duty.
   Criteria + counter-examples: docs/agents/issue-tracker.md (协作契约);
   starter template: docs/collaboration-starter-template.md.
+- CHECKPOINT SYNC (#152 — every ticket in a project that has adopted the
+  collaboration protocol): in-flight decisions arrive by CHECKPOINT READS at
+  phase boundaries — never live delivery, no background polling, no per-turn
+  network duty; a failed read is reported as failed, never claimed as synced.
+  A cross-member decision counts only from a confirmed record on the linked
+  issue/PR (basis, scope, affected tasks) — a private chat or local
+  projection is not a new authority, and posting grades through the
+  external-action gate. Read at start/resume, request-review and pre-merge;
+  every read ends in ONE receipt with its basis: ADOPTED / VERIFIED NOT
+  AFFECTED / CONFLICT (checkpoint the work FIRST, pause only the AFFECTED
+  part, follow the subject authorization — never silently rewrite the ACs).
+  "Already read it" is not a receipt; a notification only speeds up
+  discovery. Pre-merge re-checks the CURRENT commit's evidence and the
+  LATEST decisions — a post-review decision re-opens applicability; old
+  receipts never cover it, and this check is process, never a platform lock.
+  Criteria + checklist: docs/agents/issue-tracker.md (检查点同步);
+  anonymous walkthrough: docs/checkpoint-sync-examples.md.
 - RFA is not "fully specified on paper": if implementing it needs the human to
   pick a direction, supply a credential or environment, judge a real-UI run, or
   be present while it is verified, it is RFH however well the body is written.

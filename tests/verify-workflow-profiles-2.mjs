@@ -422,6 +422,9 @@ const RULE_ANCHORS = ['MINIMAL FLOW', 'DONE — verification includes the remote
   // #151：协作契约（适用条件 + 授权/主责义务）在 minimal 是压缩覆盖节——压缩不等于删除，
   // 适用判据与义务锚必须仍在 minimal 渲染里（verify-collaboration-contract D1 minimal 同判）。
   'COLLABORATION',
+  // #152：检查点同步（三检查点 + 回执三分类）在 minimal 是压缩覆盖节，同 #151 口径
+  // （verify-checkpoint-sync D1 minimal 同判）。
+  'CHECKPOINT SYNC',
   'TEXT PUSHES EXCLUDE ACTIONS', 'CONTEXT HYGIENE', 'METHODOLOGY', 'ON-RAMPS', 'HEALTH',
   'STANDALONE', 'UTILITIES', 'PRECONDITION', 'INITIALIZATION']
 const lostAnchors = RULE_ANCHORS.filter(anchor => !minText.includes(anchor))
