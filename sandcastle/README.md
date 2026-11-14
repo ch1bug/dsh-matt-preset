@@ -45,7 +45,7 @@ headless 并断言收尾契约。**前后各取一次快照做定向比对**：m
 必须**全部仍在**、自己的容器必须已消失——「没碰别人的容器」因此是可判读数，不是脚本自述。
 边界如实说：它证明「我们没删/没停别人的东西」，**不证明「别人没动」**；窗口内他人**新建**的容器
 不计入，但若有人正在启停容器，仍可能误报（宁可报、不静默）。宿主 `$DSH_HOME` **只读**挂入，
-只拷 `.credentials.yaml`（有 `settings.yaml` 一并带上）。
+只拷 `settings.yaml`（#145 后凭据不走文件：launch 期 `-e` 注入，容器内不落凭据文件）。
 
 **绿的证明力（别把它读成"模型会写 COMPLETE"）**：默认任务随机出两个三位数因数，要求模型把
 **乘积**写进输出、并给出 `<promise>COMPLETE</promise>`；断言同时要求「乘积在场」+「标记在场」——
@@ -67,10 +67,12 @@ prompt 回显只能拿到因数，拿不到乘积，所以这条绿证明的是*
 为「用 Dockerfile 的 ARG 默认值直接 `podman build`」，所以冒烟仍可用——只是版本核对要你显式给
 `--expect-version <宿主锚>`（否则只打印实读版本、不判等）。
 
-**凭据这一格的实测（2026-10-20）**：容器里**只拷 `.credentials.yaml` 不够** —— 新引导的
-headless profile 仍报 `MISSING_CREDENTIAL: llm-deepseek`；把 `DEEPSEEK_API_KEY` 从启动环境
-透传进去就过（本脚本**自动**透传，前提是它在你启动脚本的那个 shell 里存在）。两条路都保留：
-文件拷贝是 run-ticket 的现行形态，env 是本机实测可靠的一条。
+**凭据这一格（#145 路线 1′）**：env 注入是**唯一通道**——实测（2026-10-20，#34/#147）容器里
+新引导的 headless profile 对「只拷 `.credentials.yaml`」报 `MISSING_CREDENTIAL: llm-deepseek`，
+对 `podman run -e DEEPSEEK_API_KEY` 可用。本脚本**自动**透传启动环境里的 `DEEPSEEK_API_KEY`
+（前提是它在你启动脚本的那个 shell 里存在；只打印长度不打印值），并允许 `--env` 追加。
+run-ticket 同步改走 PodmanOptions.env launch 期注入，**不再读取/拷贝 `.credentials.yaml`**；
+容器内 `~/.dsh` 出现凭据文件即响亮失败（脚本与 run-ticket 的 onSandboxReady 同判据）。
 
 退出码：`0` 通过 / `2` 环境前置不满足（podman、machine 未起、镜像缺失、凭据缺失）/
 `3` 镜像构建失败 / `4` 运行失败、未观测到 COMPLETE、乘积不在场、或**快照定向判据不成立** /
@@ -206,7 +208,8 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
   PATH bash 会让 setup.sh、消费者自建的 shim 编译、e2e 搭台等宿主 bash 步骤以含糊
   方式挂，发车前统一响亮核对
 - `copyToWorktree` 在宿主侧 spawn `cp`（ENOENT）——不要用；票据文件先 commit 进分支
-- DSH 凭据要求 mode 600——模板钩子里已带 `chmod 600`
+- DSH 凭据不落容器内文件（#145：launch 期 env 注入）——容器内无 mode 600 问题；宿主侧
+  `.credentials.yaml` 的 mode 由 DSH 安装面负责
 - podman machine 内存是并行度上限（2GiB 只够 1–2 并行；放量先 `podman machine set` 扩容）
 - `PrintCommand` = `{ command, stdin }`，command 是完整 shell 串；DSH headless 不读 stdin
 - 官方 node 镜像已占 uid 1000（node 用户）——Dockerfile 里先删后建 agent 用户
@@ -219,6 +222,8 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
 - **DSH 适配层（#146 已修复）**：模板自包含，不再依赖已不可获取的外部 provider 包；
   `run-ticket.mts` / `night-run.mts` 的纯函数可在未安装 sandcastle 时导入。
   `sandcastle-e2e` 的非沙箱段覆盖导入与适配命令；它仍不证明真实容器 worker 链。
-  run-ticket 的凭据文件 / env 通道验证另见 [#147](https://github.com/ch1bug/dsh-matt-preset/issues/147)，本次未处理。
+  凭据注入的实现面在 [#145](https://github.com/ch1bug/dsh-matt-preset/issues/145)
+  （launch 期 env，容器内无凭据文件断言）；真凭据真 turn 的沙箱 worker 验证见
+  [#147](https://github.com/ch1bug/dsh-matt-preset/issues/147) 与 #93。
 
 完整调研：工作区 `research/sandcastle-matt-workflow-integration.md`。

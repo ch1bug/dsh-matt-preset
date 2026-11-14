@@ -261,16 +261,39 @@ for (const n of [101, 102, 103]) {
       && rt.modelRouteDecision({ modelLane: { lane: "A" } }, undefined, undefined).route === "default",
   );
   const dsh = await import(pathToFileURL(join(TPL, "dsh.ts")).href);
-  const ready = "mkdir -p ~/.dsh && cp /host-dsh/.credentials.yaml /host-dsh/settings.yaml ~/.dsh/ && chmod 600 ~/.dsh/.credentials.yaml";
-  check("dshHomeReadyCommand：无模型与原内联命令逐字节等价（含 chmod 600）",
+  const noCredAssert =
+    "if [ -e ~/.dsh/.credentials.yaml ]; then echo 'credential-file-present: ~/.dsh/.credentials.yaml —— #145 后凭据只走 launch 期 env 注入，容器内不得落凭据文件' >&2; exit 1; fi";
+  const ready = "mkdir -p ~/.dsh && cp /host-dsh/settings.yaml ~/.dsh/ && " + noCredAssert;
+  check("dshHomeReadyCommand：settings 拷贝保留 + 无凭据文件断言（#145：不拷 .credentials.yaml）",
     dsh.dshHomeReadyCommand() === ready + " && echo dsh-home-ready");
   check("dshHomeReadyCommand：模型路由追加 patch 后才报告 ready",
     dsh.dshHomeReadyCommand("prov/model-name") === ready + " && " + rt.patchAgentDefaultModelCmd("prov/model-name") + " && echo dsh-home-ready");
-  check("dshSandboxOptions：保留镜像、uid/gid 与只读宿主挂载",
+  check("dshHomeReadyCommand：不再拷贝凭据文件 / 不再 chmod 600（#145 AC①负面断言，非空洞）",
+    !dsh.dshHomeReadyCommand().includes("cp /host-dsh/.credentials.yaml")
+      && !dsh.dshHomeReadyCommand().includes("chmod 600"));
+  check("dshSandboxOptions：保留镜像、uid/gid 与只读宿主挂载；默认 env 为空对象",
     JSON.stringify(dsh.dshSandboxOptions("localhost/demo:dsh")) === JSON.stringify({
       imageName: "localhost/demo:dsh", containerUid: 1000, containerGid: 1000,
       mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
+      env: {},
     }));
+  check("dshSandboxOptions：credentialEnv 原样进 PodmanOptions.env（launch 期 -e 注入面，#145）",
+    JSON.stringify(dsh.dshSandboxOptions("localhost/demo:dsh", { DEEPSEEK_API_KEY: "x" })) === JSON.stringify({
+      imageName: "localhost/demo:dsh", containerUid: 1000, containerGid: 1000,
+      mounts: [{ hostPath: "~/.dsh", sandboxPath: "/host-dsh", readonly: true }],
+      env: { DEEPSEEK_API_KEY: "x" },
+    }));
+  check("collectCredentialEnv：在场键收集、空串算缺、自定义名单全缺时 missing 全量",
+    (() => {
+      const got = dsh.collectCredentialEnv({ DEEPSEEK_API_KEY: "k" });
+      const empty = dsh.collectCredentialEnv({ DEEPSEEK_API_KEY: "" });
+      const none = dsh.collectCredentialEnv({}, ["A_KEY"]);
+      return got.env.DEEPSEEK_API_KEY === "k" && got.missing.length === 0
+        && empty.env.DEEPSEEK_API_KEY === undefined && empty.missing.join() === "DEEPSEEK_API_KEY"
+        && none.env.A_KEY === undefined && none.missing.join() === "A_KEY";
+    })());
+  check("CREDENTIAL_ENV_KEYS：名单只收实测背书键（#34/#147：DEEPSEEK_API_KEY）",
+    dsh.CREDENTIAL_ENV_KEYS.join() === "DEEPSEEK_API_KEY");
   const provider = dsh.dshHeadless();
   check("dshHeadless：保持非流式 provider 契约与 POSIX prompt 转义",
     provider.name === "dsh-headless" && Object.keys(provider.env).length === 0

@@ -4,6 +4,10 @@
  *   审计钥匙校验 → createSandbox(branch) → worker 运行 → 验证门（编排者亲自 exec）
  *   → 本地合并（绿）/ park（红）→ 检查点落盘（.sandcastle/state/）→ 可选 PR
  *
+ * 凭据（#145 路线 1′）：launch 期 `podman run -e KEY=…` 注入（collectCredentialEnv
+ * 从启动环境收集）；不读取/拷贝 `.credentials.yaml`，容器内不落凭据文件（含 .env），
+ * onSandboxReady 断言 `~/.dsh` 无凭据文件，存在即响亮失败。
+ *
  * 用法：
  *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh \
  *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr] \
@@ -226,16 +230,33 @@ const closer = [
 
 const { createSandbox } = await import("@ai-hero/sandcastle");
 const { podman } = await import("@ai-hero/sandcastle/sandboxes/podman");
-const { dshHeadless, dshSandboxOptions, dshHomeReadyCommand } = await import("./dsh.ts");
+const { dshHeadless, dshSandboxOptions, dshHomeReadyCommand, collectCredentialEnv, CREDENTIAL_ENV_KEYS } =
+  await import("./dsh.ts");
+
+// —— 凭据注入（#145 路线 1′）：launch 期 env 注入，凭据不落任何容器内文件 ——
+// 名单全缺 = 容器 worker 必然 MISSING_CREDENTIAL，早失败省一轮（不落 .credentials.yaml 副本兜底）。
+const credential = collectCredentialEnv(process.env);
+if (Object.keys(credential.env).length === 0) {
+  throw new Error(
+    `凭据缺失：${credential.missing.join(", ")} —— launch 期 env 注入无源可取` +
+      `（#145：run-ticket 不再读取/拷贝 .credentials.yaml，凭据只从启动环境 -e 注入容器）；` +
+      `先在启动环境导出 ${CREDENTIAL_ENV_KEYS.join("/")} 再跑`,
+  );
+}
+if (credential.missing.length > 0) {
+  console.error(`WARNING: 凭据名单部分缺席（${credential.missing.join(", ")}）—— 只注入在场的键，容器 worker 若走该 provider 会 MISSING_CREDENTIAL`);
+}
 const sandbox = await createSandbox({
   branch,
-  sandbox: podman(dshSandboxOptions(image)),
+  sandbox: podman(dshSandboxOptions(image, credential.env)),
   hooks: {
     sandbox: {
       onSandboxReady: [
         {
-          // 基础：宿主凭据/settings 拷入容器 DSH_HOME；lane 路由命中时追加
-          // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）
+          // settings.yaml 拷入容器 DSH_HOME（#145 AC：settings 拷贝保留）+ 断言
+          // ~/.dsh 下无凭据文件（存在即响亮失败）；lane 路由命中时追加
+          // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）。
+          // 凭据不走这里：launch 期已由 PodmanOptions.env -e 注入（见上）。
           command: dshHomeReadyCommand(modelRoute.model),
           timeoutMs: 15_000,
         },

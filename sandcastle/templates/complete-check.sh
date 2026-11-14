@@ -37,10 +37,12 @@
 #     --env KEY[=VALUE]   透传一个环境变量进容器（可重复；只写 KEY 时从启动环境取值）
 #     -h | --help
 #
-# 凭据（实测 2026-10-20，#34）：**光拷 `.credentials.yaml` 不够** —— 容器里新引导的 headless
-#   profile 仍报 `MISSING_CREDENTIAL`；把 `DEEPSEEK_API_KEY` 从启动环境透传进去就过。
-#   因此本脚本**自动**透传启动环境里的 `DEEPSEEK_API_KEY`（有就透传），并允许 `--env` 追加。
-#   两条路都留着：文件拷贝是 run-ticket 的现行形态，env 是本机实测可用的一条。
+# 凭据（#145 路线 1′）：**env 注入是唯一通道** —— 实测（2026-10-20，#34/#147）容器里
+#   新引导的 headless profile 对「只拷 `.credentials.yaml`」报 `MISSING_CREDENTIAL`，
+#   对 `podman run -e DEEPSEEK_API_KEY` 可用。本脚本**自动**透传启动环境里的
+#   `DEEPSEEK_API_KEY`（有就透传，只打印长度不打印值），并允许 `--env` 追加。
+#   容器内**不落**凭据文件：`~/.dsh` 下出现 `.credentials.yaml` 即响亮失败（与
+#   run-ticket 的 onSandboxReady 断言同判据）——文件拷贝通道已随 #145 删除。
 #
 # --network 为什么默认 host：Windows 宿主 + TUN 代理（fake-IP）环境实测（2026-10-20）——
 #   容器**自有 netns** 里 DNS 拿到的 fake-IP 路由不通（TCP 全超时），而 VM netns（host 模式）
@@ -102,16 +104,10 @@ done
 
 [ -f "$DOCKERFILE" ] || die "Dockerfile 不存在：$DOCKERFILE" 64
 [ -d "$DSH_HOME_HOST" ] || die "宿主 DSH_HOME 不是目录：$DSH_HOME_HOST" 2
-if [ -f "$DSH_HOME_HOST/.credentials.yaml" ]; then
-  say "✓ 凭据文件：$DSH_HOME_HOST/.credentials.yaml（只读挂入，容器内拷进 ~/.dsh）"
-else
-  [ -n "${DEEPSEEK_API_KEY:-}" ] || die "既无 $DSH_HOME_HOST/.credentials.yaml，启动环境也没有 DEEPSEEK_API_KEY —— 容器内 headless 无凭据" 2
-fi
-# 环境变量通道（实测比文件拷贝可靠，见头注）：启动环境有 DEEPSEEK_API_KEY 就透传
-if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-  ENV_ARGS+=(-e DEEPSEEK_API_KEY)
-  say "✓ 凭据：透传启动环境的 DEEPSEEK_API_KEY（长度 ${#DEEPSEEK_API_KEY}）"
-fi
+# 凭据前置（#145：env 是唯一通道，宿主 .credentials.yaml 不再被拷入容器）
+[ -n "${DEEPSEEK_API_KEY:-}" ] || die "启动环境没有 DEEPSEEK_API_KEY —— #145 后凭据只走 launch 期 env 注入（宿主 .credentials.yaml 不再拷入容器），容器内 headless 无凭据" 2
+ENV_ARGS+=(-e DEEPSEEK_API_KEY)
+say "✓ 凭据：透传启动环境的 DEEPSEEK_API_KEY（长度 ${#DEEPSEEK_API_KEY}；容器内不落凭据文件）"
 
 command -v podman >/dev/null 2>&1 || die "podman 不在 PATH 上" 2
 
@@ -172,10 +168,16 @@ fi
 read -r -d '' INNER <<'EOS'
 set -u
 mkdir -p "$HOME/.dsh"
-for f in .credentials.yaml settings.yaml; do
-  if [ -f "/host-dsh/$f" ]; then cp "/host-dsh/$f" "$HOME/.dsh/$f"; fi
-done
-chmod 600 "$HOME/.dsh/.credentials.yaml" 2>/dev/null || true
+if [ -f "/host-dsh/settings.yaml" ]; then cp "/host-dsh/settings.yaml" "$HOME/.dsh/settings.yaml"; fi
+if [ -e "$HOME/.dsh/.credentials.yaml" ]; then
+  echo "✗ credential-file-present: 容器内 ~/.dsh/.credentials.yaml 不应存在（#145：凭据只走 launch 期 env 注入，不落凭据文件）" >&2
+  exit 1
+fi
+if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+  echo "env-injected: DEEPSEEK_API_KEY present (len=${#DEEPSEEK_API_KEY})"
+else
+  echo "! env-injected: DEEPSEEK_API_KEY 缺席 —— 真 turn 会 MISSING_CREDENTIAL"
+fi
 echo "dsh-version: $(dsh --version 2>&1 | head -n 1)"
 dsh --profile headless "$1"
 EOS
