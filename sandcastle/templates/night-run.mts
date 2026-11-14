@@ -243,6 +243,7 @@ export const RETRO_STATUS_CLASSES: { status: string; label: string }[] = [
   { status: "parked-conflict", label: "降级/冲突" },
   { status: "parked-timeout", label: "降级/超时" },
   { status: "parked-empty", label: "降级/空改" },
+  { status: "parked-pollution", label: "降级/worktree 污染" },
   { status: "needs-simplify", label: "降级/待简化" },
   { status: "quota-stop", label: "熔断/配额" },
 ];
@@ -252,6 +253,10 @@ export const RETRO_NOTE_HINTS: { hint: string; label: string }[] = [
   { hint: "返工", label: "返工" },
   { hint: "rework", label: "返工" },
 ];
+
+// #138：parked-pollution（Q8 判据红 = 沙箱污染 worktree）属降级素材，进上表；
+// lane-gate（exit 8 = lane 门拒绝：运行时缺席/资源超限/磁盘不足）**不进**——
+// 环境前置拒绝不是降级（票未进沙箱、未烧工时），编排者修环境/减并行后重发。
 
 /** 逐票结果（night-run 主循环的产物；`note` 为 run-ticket 输出尾部）。 */
 export interface RunResult {
@@ -346,6 +351,8 @@ export function statusForExit(code: number | null): string {
     [EXIT_STATUS.TIMEOUT]: "parked-timeout",
     [EXIT_STATUS.EMPTY]: "parked-empty",
     [EXIT_STATUS.NEEDS_SIMPLIFY]: "needs-simplify",
+    [EXIT_STATUS.LANE_GATE]: "lane-gate", // #138：环境前置拒绝——非 parked，重发前先修环境/减并行
+    [EXIT_STATUS.POLLUTION]: "parked-pollution", // #138：Q8 判据红（worktree 污染）
   };
   return map[code ?? 1] ?? `failed(${code})`;
 }
@@ -354,10 +361,13 @@ export function statusForExit(code: number | null): string {
  * 幂等跳过判定：上次状态已是终态或待人工处理态 → 返回跳过说明；否则
  * undefined（重发射）。needs-simplify 与 parked 同等对待（待简化/返工后
  * 由人工或编排者清检查点重跑，夜间队列不盲目重发射）。
+ * parked-pollution（#138）同族跳过：worktree 污染不返工（补 .gitignore/改输出路径）
+ * 重跑只会再次污染——恢复动作 = 返工后清检查点，与其他 parked 一致。
  */
 export function skipReason(prevStatus: string): string | undefined {
   if (prevStatus === "merged" || prevStatus === "pr") return "checkpoint 已收口，跳过";
   if (prevStatus === "parked-verify" || prevStatus === "parked-conflict") return "上次已 park（未返工），跳过";
+  if (prevStatus === "parked-pollution") return "上次已 park（worktree 污染未返工），跳过";
   if (prevStatus === "needs-simplify") return "上次已 needs-simplify（待简化），跳过";
   return undefined;
 }

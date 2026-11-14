@@ -8,20 +8,61 @@
  * 从启动环境收集）；不读取/拷贝 `.credentials.yaml`，容器内不落凭据文件（含 .env），
  * onSandboxReady 断言 `~/.dsh` 无凭据文件，存在即响亮失败。
  *
+ * lane 模式（#138，opt-in：`--lane <name>`，缺省时行为与之前完全一致）：
+ *   - 运行时探测（--runtime > DSH_CONTAINER_RUNTIME > PATH podman>docker>nerdctl）、
+ *     VM 内存/宿主磁盘现场探测、资源公式（floor(VM RAM ÷ 1.5 GiB)）与超限响亮失败、
+ *     named lane 卷（.scratch/sessions/<lane>.json 归属）——机制全部在 ./lane-sandbox.mts；
+ *   - lane 卷挂在容器内 worktree 的 node_modules 路径（git 忽略区，Q8 第 2 层）——
+ *     默认承载依赖产物（node_modules）跨票保留，冷启动只付一次（Q2=C）；更多构建
+ *     输出目录需扩挂载段（containerTargetSegment），且必须落 git 忽略路径；
+ *   - 收口门（Q8 验收判据）：沙箱跑完容器内 `git status --porcelain` 必须为空，
+ *     非空 → checkpoint parked-pollution（exit 9）；
+ *   - `--clean-lane <name>`：清 lane 卷 + 删归属文件（清的目标 = 归属记录登记的卷名）。
+ *
  * 用法：
  *   npx tsx .sandcastle/run-ticket.mts --issue 449 --image localhost/<repo>:dsh \
  *     --verify "cargo test -p iris-api --lib" --max-minutes 60 [--yolo] [--pr] \
  *     [--model provider/model]   # #16 显式路由；缺省按审计 modelLane ×
  *     .sandcastle/model-lanes.json（{"A":"p/top","B":"p/mid","C":"p/mini"}）路由
+ *   # lane 模式（#138）：追加 --lane <name> [--runtime podman|docker|nerdctl] \
+ *     [--disk-min-ratio 0.1]；清卷：--clean-lane <name>
  *
  * 退出码（EXIT_STATUS 单一事实源——night-run statusForExit 消费本导出，勿另立映射）：
  *   0=merged/pr  3=验证未过(parked)  4=合并冲突(parked)  5=超时(parked)
- *   6=worker 无产出(parked)  7=大 diff 待简化(needs-simplify)  1=其他失败
+ *   6=worker 无产出(parked)  7=大 diff 待简化(needs-simplify)
+ *   8=lane 门拒绝（#138：运行时缺席/资源超限/磁盘不足——环境前置，非 parked，不改状态）
+ *   9=Q8 判据红（沙箱污染 worktree → parked-pollution）  1=其他失败
  * 检查点：.sandcastle/state/<id>.json —— night-run 据此幂等续跑，崩溃不丢进度。
  */
-import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawnSync, spawn, execFile, execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdirSync, statfsSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
 import { arg, flag, isMain } from "./lib.ts";
+import {
+  DEFAULT_MIN_DISK_FREE_RATIO,
+  SESSIONS_REL_DIR,
+  containerRuntimeInstallHint,
+  diskSpaceProblem,
+  ensureLaneVolume,
+  laneCapacity,
+  laneCapacityProblem,
+  laneVolumeName,
+  makeLaneCliProvider,
+  normalizeLaneName,
+  ownershipPath,
+  pollutionMessage,
+  probeContainerRuntime,
+  probeVmMemoryBytes,
+  readOwnership,
+  runningLaneSet,
+  verifyRuntimeAlive,
+  volumeRemoveArgs,
+  worktreePollutionReport,
+  writeOwnership,
+  type ContainerRuntimeName,
+  type LaneOwnership,
+} from "./lane-sandbox.mts";
 // patch 命令来自仓内纯函数模块；re-export 保持既有导入面不变。
 // 沙箱依赖（@ai-hero/sandcastle、./dsh.ts）在 main() 内动态导入：
 // 本模块的纯函数（judgeSimplify）可在未安装 sandcastle 依赖的环境里被冒烟测试导入。
@@ -39,6 +80,11 @@ export const EXIT_STATUS = {
   TIMEOUT: 5,
   EMPTY: 6,
   NEEDS_SIMPLIFY: 7,
+  /** #138 lane 门拒绝：运行时缺席 / 资源公式超限 / 磁盘比例不足——环境前置不满足，
+   *  票不进入 parked 生命周期（无 checkpoint），编排者修环境或减并行后重发。 */
+  LANE_GATE: 8,
+  /** #138 Q8 验收判据红：沙箱跑完 git status --porcelain 非空（worktree 污染）。 */
+  POLLUTION: 9,
 } as const;
 
 // ============================================================
@@ -146,6 +192,59 @@ function runOk(cmd: string[], what: string, cwd?: string): string {
 
 // CLI 主体整体包在 main()：冒烟测试 import 纯函数时不读参数、不建沙箱。
 async function main(): Promise<void> {
+const sessionsIo = {
+  existsSync,
+  readdirSync,
+  readFileSync: (p: string) => readFileSync(p, "utf8"),
+};
+
+// —— --clean-lane（#138）：清 lane 卷 + 删归属文件。独立模式，不需要 --image/凭据。
+// 删除目标 = 归属记录**登记的**卷名（记录是真相源；无记录才按规则名兜底）——
+// 不按猜测名删，防误删别的卷（home 安全纪律同精神：删除目标必须是读出来的路径）。
+const cleanLaneArg = arg("clean-lane");
+if (cleanLaneArg) {
+  const lane = normalizeLaneName(cleanLaneArg);
+  const rec = readOwnership(SESSIONS_REL_DIR, lane, sessionsIo);
+  const volume = rec?.volume ?? laneVolumeName(lane);
+  const probe = probeContainerRuntime({ explicit: arg("runtime"), env: process.env });
+  if (!probe.found) {
+    console.error(probe.explicitProblem ?? containerRuntimeInstallHint());
+    if (!probe.explicitProblem) console.error(probe.detail.join("\n"));
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // alive 门（复审 F2）：machine/daemon 停着时 inspect 非 0 ≠「卷已缺席」——
+  // 不先核验运行时就把「inspect 失败」读成成功，会假成功删归属、卷成孤儿（S3 静默降级）。
+  const alive = verifyRuntimeAlive({ runtime: probe.runtime, path: probe.path });
+  if (!alive.ok) {
+    console.error(`✗ ${alive.problem}\n  ${alive.hint}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // 卷不存在 = 已清（幂等语义与建卷对齐：inspect 先行，缺席不报错）。
+  // alive 已过，「no such volume」之外的失败（权限/存储损坏）响亮退出，不静默当缺席。
+  const existsProbe = spawnSync(probe.path, ["volume", "inspect", volume], { encoding: "utf8", timeout: 30_000 });
+  if (existsProbe.status !== 0) {
+    const stderrText = (existsProbe.stderr || existsProbe.stdout || "").toLowerCase();
+    if (/no such volume|no such volume:/.test(stderrText) || stderrText.includes("no such volume")) {
+      const recPath0 = ownershipPath(SESSIONS_REL_DIR, lane);
+      if (existsSync(recPath0)) rmSync(recPath0);
+      console.log(`clean-lane: 卷 ${volume} 已不存在（幂等跳过 rm）、归属文件 ${recPath0} ${existsSync(recPath0) ? "已删" : "本就缺席"}（lane=${lane}）`);
+      return;
+    }
+    console.error(`✗ lane 卷 ${volume} 状态核验失败 (exit ${existsProbe.status})——` +
+      `不是「no such volume」（运行时 alive 已确认），按真实失败处理：${(existsProbe.stderr || existsProbe.stdout || "").trim().slice(0, 300)}`);
+    process.exit(EXIT_STATUS.OTHER);
+  }
+  const rm = spawnSync(probe.path, volumeRemoveArgs(volume), { encoding: "utf8", timeout: 30_000 });
+  if (rm.status !== 0) {
+    console.error(`lane 卷 ${volume} 清理失败 (exit ${rm.status}): ${(rm.stderr || rm.stdout || "").trim().slice(0, 300)}`);
+    process.exit(EXIT_STATUS.OTHER);
+  }
+  const recPath = ownershipPath(SESSIONS_REL_DIR, lane);
+  if (existsSync(recPath)) rmSync(recPath);
+  console.log(`clean-lane: 卷 ${volume} 已删、归属文件 ${recPath} 已删（lane=${lane}）`);
+  return;
+}
+
 const issue = arg("issue");
 const image = arg("image");
 if (!image) throw new Error("提供 --image localhost/<repo>:dsh（先 podman build）");
@@ -246,24 +345,151 @@ if (Object.keys(credential.env).length === 0) {
 if (credential.missing.length > 0) {
   console.error(`WARNING: 凭据名单部分缺席（${credential.missing.join(", ")}）—— 只注入在场的键，容器 worker 若走该 provider 会 MISSING_CREDENTIAL`);
 }
-const sandbox = await createSandbox({
-  branch,
-  sandbox: podman(dshSandboxOptions(image, credential.env)),
-  hooks: {
-    sandbox: {
-      onSandboxReady: [
-        {
-          // settings.yaml 拷入容器 DSH_HOME（#145 AC：settings 拷贝保留）+ 断言
-          // ~/.dsh 下无凭据文件（存在即响亮失败）；lane 路由命中时追加
-          // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）。
-          // 凭据不走这里：launch 期已由 PodmanOptions.env -e 注入（见上）。
-          command: dshHomeReadyCommand(modelRoute.model),
-          timeoutMs: 15_000,
-        },
-      ],
-    },
+
+// —— lane 门（#138：--lane 才进；探测/公式/卷/归属的机制全在 lane-sandbox.mts）——
+// 任一门失败 = exit 8（LANE_GATE）：环境前置不满足，票不进 parked 生命周期，无 checkpoint。
+const laneNameArg = arg("lane");
+let laneGate: { lane: string; volume: string; runtime: ContainerRuntimeName; cliPath: string; vmRamBytes: number; capacity: number } | null = null;
+if (laneNameArg) {
+  const lane = normalizeLaneName(laneNameArg);
+  // ① 运行时探测（Q9=A）：explicit 未命中与「环境缺席」文案分开（操作者给错 ≠ missing）。
+  const probe = probeContainerRuntime({ explicit: arg("runtime"), env: process.env });
+  if (!probe.found) {
+    console.error(probe.explicitProblem ?? containerRuntimeInstallHint());
+    if (!probe.explicitProblem) console.error(probe.detail.join("\n"));
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // ② alive 真跑（存在性命中 ≠ 可用）：失败给按运行时分支的启动提示（不自动执行）。
+  const alive = verifyRuntimeAlive({ runtime: probe.runtime, path: probe.path });
+  if (!alive.ok) {
+    console.error(`✗ ${alive.problem}\n  ${alive.hint}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // ③ 首次进沙箱现场探测 VM 内存（Q7=C；读数失败响亮，不猜默认值）。
+  const vm = probeVmMemoryBytes({ runtime: probe.runtime, path: probe.path });
+  if (!vm.ok) {
+    console.error(`✗ ${vm.problem}\n  ${vm.hint}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // ④ 归属占坑先行（grill 原文：.scratch/sessions/ 每 lane 一个；`.scratch/` 在 .gitignore，
+  //    Q8 第 2 层）：state=running + pid 在**容量判定之前**落盘，把并发起点的 TOCTOU 窗口
+  //    从「跨 alive/VM/卷探测的数十秒」压到毫秒级（复审 F7）。边界如实：**归属记录不是
+  //    原子锁**——毫秒级窗口内的同时发射仍可能双双过门（2 GiB 机跑出 2 容器），Q5=C 公式
+  //    在并发起点下是建议性而非硬界；night-run 串行发射不触发，多终端手发需自行错开。
+  //    进程退出统一改 idle（崩溃残留由 runningLaneSet 的 pid 自愈兜底）。
+  const ownership: LaneOwnership = writeOwnership(SESSIONS_REL_DIR, lane, {
+    lane,
+    volume: laneVolumeName(lane),
+    runtime: probe.runtime,
+    state: "running",
+    pid: process.pid,
+    ticket: issue ?? undefined,
+    vmRamBytes: vm.bytes,
+    capacity: laneCapacity(vm.bytes),
+    createdAt: new Date().toISOString(),
+  }, sessionsIo);
+  process.on("exit", () => {
+    try {
+      writeFileSync(ownershipPath(SESSIONS_REL_DIR, lane), JSON.stringify({ ...ownership, state: "idle", updatedAt: new Date().toISOString() }, null, 2), "utf8");
+    } catch {
+      // exit hook 里尽力而为；崩溃残留由 runningLaneSet 的 pid 自愈兜底
+    }
+  });
+  // ⑤ 资源公式（Q5=C）：在跑 lane（排除本进程；崩溃残留按 pid 自愈）+ 1 > floor(RAM÷1.5GiB)
+  //    → 响亮失败 + 按运行时分支扩容指令，**不静默降级**。exit 路径由上方 exit hook 转回 idle。
+  const running = runningLaneSet(SESSIONS_REL_DIR, sessionsIo);
+  const requested = running.size + 1;
+  const capacityHit = laneCapacityProblem({ requestedLanes: requested, vmRamBytes: vm.bytes, runtime: probe.runtime });
+  if (capacityHit !== undefined) {
+    console.error(`✗ ${capacityHit.problem}\n  ${capacityHit.hint}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // ⑥ 磁盘（Q7=C：宿主空闲**比例**，不写死 GiB；--disk-min-ratio 可配）。
+  const minRatio = Number(arg("disk-min-ratio") ?? DEFAULT_MIN_DISK_FREE_RATIO);
+  const st = statfsSync(".");
+  const diskProblem = diskSpaceProblem(st.bavail * st.bsize, st.blocks * st.bsize, minRatio);
+  if (diskProblem !== undefined) {
+    console.error(`✗ ${diskProblem}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  // ⑦ lane 卷：幂等建（inspect 非 0 才 create——lane 重跑同票续用同一卷，Q2=C 冷启动只付一次）。
+  const volume = laneVolumeName(lane);
+  const volumeProblem = ensureLaneVolume({ path: probe.path, volume });
+  if (volumeProblem !== undefined) {
+    console.error(`✗ ${volumeProblem}`);
+    process.exit(EXIT_STATUS.LANE_GATE);
+  }
+  laneGate = { lane, volume, runtime: probe.runtime, cliPath: probe.path, vmRamBytes: vm.bytes, capacity: laneCapacity(vm.bytes) };
+  console.log(`lane-gate: runtime=${probe.runtime}(${probe.source}) vm=${vm.bytes} bytes (${vm.how}) capacity=${laneGate.capacity} running_others=${running.size} volume=${volume} ownership=${ownershipPath(SESSIONS_REL_DIR, lane)}`);
+}
+
+// —— provider 选择（#138）：lane 模式 = lane provider（named volume 挂载进容器内
+//    worktree 的 node_modules——git 忽略路径，Q8 第 2 层；宿主目录挂载复用
+//    dshSandboxOptions 的 ~/.dsh 只读形态）；缺省 = 现行 podman provider，非 lane
+//    行为零改动。lane provider 的容器仍是票级（每票重建，生命周期同 ADR-0003 语态）。
+//    onSandboxReady 两分支相同：#145 settings 拷贝 + 容器内无凭据文件断言（复用，零新代码）。
+const dshSandboxHooks = {
+  sandbox: {
+    onSandboxReady: [
+      {
+        // settings.yaml 拷入容器 DSH_HOME（#145 AC：settings 拷贝保留）+ 断言
+        // ~/.dsh 下无凭据文件（存在即响亮失败）；lane 路由命中时追加
+        // sed 替换 agent-default-model 块（worker 的 agentDefaultModel 即改）。
+        // 凭据不走这里：launch 期已由 PodmanOptions.env -e 注入（见上）。
+        command: dshHomeReadyCommand(modelRoute.model),
+        timeoutMs: 15_000,
+      },
+    ],
   },
-});
+};
+
+let sandbox;
+if (laneGate !== null) {
+  const { createBindMountSandboxProvider } = await import("@ai-hero/sandcastle");
+  const laneShutdown: Array<() => void> = [];
+  sandbox = await createSandbox({
+    branch,
+    sandbox: makeLaneCliProvider({
+      createBindMountSandboxProvider,
+      spawn,
+      execFile,
+      execFileSync,
+      createInterface,
+      randomUUID,
+      statSync,
+      onShutdown: (fn: () => void) => {
+        laneShutdown.push(fn);
+        return () => {
+          const i = laneShutdown.indexOf(fn);
+          if (i >= 0) laneShutdown.splice(i, 1);
+        };
+      },
+    }, {
+      cliPath: laneGate.cliPath,
+      runtime: laneGate.runtime,
+      imageName: image,
+      lane: laneGate.lane,
+      volumeName: laneGate.volume,
+      containerTargetSegment: "node_modules",
+      userMounts: dshSandboxOptions(image, credential.env).mounts,
+      credentialEnv: credential.env,
+    }),
+    hooks: dshSandboxHooks,
+  });
+  // 信号收尾：容器随进程终止被清（execFileSync 同步 rm；exit hook 已把归属改 idle）。
+  // 仅 lane 模式注册——非 lane 模式不改变既有进程信号行为。
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      for (const h of laneShutdown.splice(0)) {
+        try { h(); } catch { /* 尽力而为 */ }
+      }
+      process.exit(1);
+    });
+  }
+} else {
+  const { podman } = await import("@ai-hero/sandcastle/sandboxes/podman");
+  sandbox = await createSandbox({ branch, sandbox: podman(dshSandboxOptions(image, credential.env)), hooks: dshSandboxHooks });
+}
 
 // 看门狗：墙钟上限（超时 = parked-timeout，夜间不烧整晚）
 const signal = AbortSignal.timeout(maxMinutes * 60_000);
@@ -289,6 +515,23 @@ if (verifyCmd) {
   const v = await sandbox.exec(verifyCmd);
   verify = { cmd: verifyCmd, exitCode: v.exitCode };
   console.log(`\n验证门 exit=${v.exitCode}: ${verifyCmd}`);
+}
+
+// —— Q8 验收判据（#138，仅 lane 模式）：沙箱跑完 git status --porcelain 必须为空。
+// 在 close 前于容器内执行（close 后 worktree 可能已清理）；判定逻辑在 worktreePollutionReport。
+// fail-closed（复审 F1）：exec 非 0（容器停掉/git 失败）≠ clean——判据**没核验成**时
+// 绝不判空放行（空 stdout 在 exec 失败时不可读作「无污染」）；只有 exit 0 才按 porcelain 判。
+let pollution: string[] | null = null;
+let pollutionProbe: { cmd: string; exitCode: number | null } | null = null;
+if (laneGate !== null) {
+  const p = await sandbox.exec("git status --porcelain");
+  if (p.exitCode !== 0) {
+    pollutionProbe = { cmd: "git status --porcelain", exitCode: p.exitCode };
+  } else {
+    const report = worktreePollutionReport(p.stdout ?? "");
+    if (!report.clean) pollution = report.lines;
+    else console.log("Q8 守卫: git status --porcelain 为空 ✓");
+  }
 }
 
 const closeRes = await sandbox.close();
@@ -319,6 +562,22 @@ if (worker.commits.length === 0) {
   checkpoint("parked-empty");
   console.error(`\nPARKED-EMPTY: worker 无 commit（dirty=${dirty}）。worktree: ${closeRes.preservedWorktreePath ?? "已清理"}`);
   process.exit(EXIT_STATUS.EMPTY);
+}
+if (pollution !== null) {
+  checkpoint("parked-pollution", { pollution: { lines: pollution.slice(0, 50) } });
+  console.error(`\n${pollutionMessage(pollution.slice(0, 50))}\n分支 ${branch} 已保留，返工时先补 .gitignore 或改输出路径。`);
+  process.exit(EXIT_STATUS.POLLUTION);
+}
+// fail-closed（复审 F1）：porcelain 探针本身没核验成（exec 非 0——容器半路停掉/git 失败）
+// ≠ clean，票进 parked-verify（验收判据核验失败语义），绝不带「未核验」状态合并。
+if (pollutionProbe !== null) {
+  checkpoint("parked-verify", { pollutionProbe });
+  console.error(
+    `\nPARKED-VERIFY: Q8 判据探针未核验成（git status --porcelain exit ${pollutionProbe.exitCode}——` +
+      `容器在 worker 结束后停掉或 git 失败时 stdout 为空不可读作「无污染」）。` +
+      `分支 ${branch} 已保留，复核容器/卷状态后重跑。`,
+  );
+  process.exit(EXIT_STATUS.VERIFY_FAILED);
 }
 if (verify && verify.exitCode !== 0) {
   checkpoint("parked-verify");

@@ -168,8 +168,8 @@ const runBash = (script, args, opts = {}) => {
 {
   mkdirSync(join(W, "bin"), { recursive: true });
   mkdirSync(join(W, ".sandcastle"), { recursive: true });
-  // 模板拷进假仓（同目录携带 lib.ts，#13 相对导入契约）
-  for (const f of ["audit-ticket.mts", "night-run.mts", "lib.ts", "run-ticket.mts", "dsh.ts", "dsh-config.ts"]) {
+  // 模板拷进假仓（同目录携带 lib.ts，#13 相对导入契约；#138 起 lane-sandbox.mts 同目录）
+  for (const f of ["audit-ticket.mts", "night-run.mts", "lib.ts", "run-ticket.mts", "dsh.ts", "dsh-config.ts", "lane-sandbox.mts"]) {
     cpSync(join(TPL, f), join(W, ".sandcastle", f));
   }
   // gh shim：per-issue JSON（node 转义换行，绕开 bash 转义坑）
@@ -214,7 +214,7 @@ const tsx = (args) => runBash(DRIVER, [W, ...args]);
 
 // 临时消费者没有 node_modules；Node 原生 TS 去类型，不能靠宿主依赖掩盖静态引用。
 {
-  const files = ["run-ticket.mts", "night-run.mts", "dsh.ts", "dsh-config.ts", "lib.ts"];
+  const files = ["run-ticket.mts", "night-run.mts", "dsh.ts", "dsh-config.ts", "lane-sandbox.mts", "lib.ts"];
   const probe = files.map(f => `await import(${JSON.stringify(pathToFileURL(join(W, ".sandcastle", f)).href)});`).join("\n");
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", probe], { encoding: "utf8", cwd: W });
   check("纯函数与 provider 模板在无任何 sandcastle 依赖的消费者中导入成功", r.status === 0);

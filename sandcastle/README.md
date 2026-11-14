@@ -11,8 +11,8 @@ AFK 执行；主会话只编排。三条车道：**Y（yolo，审计后无人值
 ## 项目接入（一次性）
 
 1. 把 `templates/` 拷进项目 `.sandcastle/`（Dockerfile / **setup.sh** / **build-image.sh** / **complete-check.sh** /
-   dsh.ts / dsh-config.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lib.ts——共享模块与模板同目录、
-   相对导入 `./lib.ts` / `./dsh-config.ts`，别漏拷）。
+   dsh.ts / dsh-config.ts / audit-ticket.mts / run-ticket.mts / night-run.mts / lane-sandbox.mts / lib.ts——共享模块与模板同目录、
+   相对导入 `./lib.ts` / `./dsh-config.ts` / `./lane-sandbox.mts`，别漏拷）。
    **setup.sh 前置条件**：宿主要有一个 msys 形态的 bash（Git for Windows / msys2，不得是 WSL 的
    `System32\bash.exe`）+ gcc 可达（PATH 上，或 msys2 的 `/ucrt64/bin/gcc`）——缺了先
    `bash .sandcastle/setup.sh` 看可行动报错（#43；判据与 e2e `findBash()` 同源）
@@ -194,6 +194,77 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
   - handoff 定向节示例（正文内加一行）：`本票模型：zai-coding-cn/glm-5.3-flash（lane B）——子会话起手把模型选择器对齐到此`
   - 批末回收示例：digest/总结加一列 `lane 预判 vs 实际`（A 预判跑成常规难度 → 下次降 B）
 
+## lane 卷与动态资源（#138，opt-in lane 模式）
+
+`run-ticket.mts --lane <name>` 进 lane 模式：容器仍是**票级**（每票重建，生命周期同
+[ADR-0003](../docs/adr/0003-sandbox-batch-mode.md) 的票级语态），但依赖产物（**默认挂
+`node_modules`**；更多构建输出目录需扩挂载点——卷挂载段 `containerTargetSegment`，且必须
+落在 git 忽略路径）落**该 lane 归属的 named volume**——冷启动只付一次（2026-10-20 grill
+Q2=C）。不给 `--lane` 时行为
+与之前完全一致（现行 Y 车道零改动）。机制实现 = `lane-sandbox.mts`（纯函数 + 注入 IO，
+可离线导入）。
+
+### 隔离边界（如实——两条缺口是拍板保留的，不假装解决）
+
+- **出网未受限**（Q1=D 的已知缺口）：容器内可出公网（实测 2026-10-20 apt/npm 通），
+  没有白名单代理——网络白名单与凭证代理留后续票。
+- **白天车道未覆盖**（Q3=A）：隔离收益只在 AFK 侧（沙箱批跑）；白天车道仍是
+  `git worktree` 直跑宿主（同一条缺口，要覆盖须先改 ADR-0006 结论 5，另一步）。
+- 凭据面（#145）：launch 期 `-e` 注入 + 容器内无凭据文件断言——lane 模式复用同一
+  onSandboxReady 钩子，零新代码。
+
+### 运行时探测（Q9=A，不假设用户的虚拟机环境）
+
+顺序冻结：`--runtime` > `DSH_CONTAINER_RUNTIME` > PATH 上 `podman` > `docker` > `nerdctl`，
+首个命中即用（与 `lib/runtime-probe.mjs` 同形）。指定了（`--runtime` / env）就必须命中，
+**不静默回落**别的运行时。容器操作只用跨运行时公共子集（run / image inspect / volume /
+exec / cp / rm）；运行时特有**动作**（如 `podman machine set/start`）只作按运行时分支的
+提示，不作为唯一路径，也**不自动执行**。
+
+失败响亮分层：CLI 缺席 → 安装指路；CLI 在但不可用（machine/daemon 没跑）→ `<rt> info`
+真跑失败 + 按运行时启动提示；VM 内存读不出 → 响亮失败，**不猜默认值**。
+
+### 动态资源公式（Q4=A / Q5=C / Q7=C，不设基准机）
+
+- 每 lane 内存下限 **1.5 GiB**；`并行 = floor(VM RAM ÷ 1.5 GiB)`（2 GiB machine = 1 lane、
+  4 GiB = 2、8 GiB = 5）。
+- **首次进沙箱现场探测**：VM 内存按运行时分支读（podman `machine list --format json`、
+  docker `info --format '{{.MemTotal}}'`、nerdctl `info`）；宿主空闲磁盘按**比例**
+  （不写死 GiB——512 GB 与 2 TB 的机器不能共用一个数；默认下限 10%，
+  `--disk-min-ratio` 可配）。
+- 请求超限（在跑 lane 数 + 1 > capacity）⇒ **响亮失败**（exit 8）+ 按运行时分支的
+  扩容指令，**不静默降级**。
+
+### lane 卷与归属（Q8=A 两层存储）
+
+1. 卷 = 容器运行时 **named volume**（`dsh-lane-<lane>`，活在 VM/引擎里，仓内零文件）；
+   幂等建（inspect 非 0 才 create）——lane 重跑同票续用同一卷。挂载点 = 容器内
+   worktree 的 `node_modules`（git 忽略路径——第 2 层）。
+2. 归属文件 = `.scratch/sessions/<lane>.json`（`.scratch/` 已 git 忽略），记录
+   lane/volume/runtime/state/pid；在跑判定按 pid 自愈（崩溃残留不占并行坑）；
+   JSON 损坏 = 响亮（状态面要人处理，不静默当无归属）。
+- **Q8 验收判据**：沙箱跑完容器内 `git status --porcelain` **为空**；非空 =
+  checkpoint `parked-pollution`（exit 9），分支保留。
+- **清卷**：`npx tsx .sandcastle/run-ticket.mts --clean-lane <name>`——删归属记录
+  **登记的**卷与文件（不按猜测名删）。
+
+### 上游契约与实测边界（如实）
+
+- `@ai-hero/sandcastle` 0.12.0 / 0.14.0 / v1-next 的 PodmanOptions 都**没有 volumes 字段**、
+  `mounts.hostPath` 必经宿主 `existsSync`、官方 provider 写死字面 `podman`——named volume
+  挂载因此走 lane-sandbox.mts 自实现 provider（包根公共工厂
+  `createBindMountSandboxProvider` + create 内自拼 `-v <volume>:<target>` 直通形态）；
+  worktree 创建 / git mount 解析 / commit 采集仍归 sandcastle 主库，worker 面不重写。
+- 实测面 = **podman 6.1.4**：machine list json 的 Memory 字符串字节数、探测命中、公式
+  读数均为本机实测；**docker/nerdctl 分支 fixture 驱动**（真机读数未验证）；lane provider
+  全链端到端读数留 [#147](https://github.com/ch1bug/dsh-matt-preset/issues/147)
+  （2026-11-14 拍板：验证面处置 = 先行开工、验证面延后，端到端读数等 #147 收口后补）。
+- 机制守卫：`tests/verify-lane-sandbox.mjs`（离线单测 + 非空洞扰动实录，纯函数不 spawn）。
+
+退出码新增（run-ticket EXIT_STATUS 单一事实源，night-run statusForExit 跟随）：
+`8` = lane 门拒绝（运行时缺席 / 资源超限 / 磁盘不足——环境前置，非 parked，无 checkpoint）；
+`9` = Q8 判据红（`parked-pollution`，进 digest 降级素材）。
+
 ## 已知边界（Windows 宿主实测）
 
 - PATH 上 `bash` 解析到 `C:\WINDOWS\system32\bash.exe`（WSL）时，`sandcastle-e2e.mjs`
@@ -225,5 +296,8 @@ npx tsx .sandcastle/night-run.mts --image localhost/<repo>:dsh \
   凭据注入的实现面在 [#145](https://github.com/ch1bug/dsh-matt-preset/issues/145)
   （launch 期 env，容器内无凭据文件断言）；真凭据真 turn 的沙箱 worker 验证见
   [#147](https://github.com/ch1bug/dsh-matt-preset/issues/147) 与 #93。
+- **lane 模式（#138）的两条隔离缺口**：出网未受限（Q1=D 已知缺口，白名单/凭证代理留
+  后续票）与白天车道未覆盖（Q3=A，要覆盖须先改 ADR-0006 结论 5）——上文
+  「lane 卷与动态资源」节的边界声明为准。
 
 完整调研：工作区 `research/sandcastle-matt-workflow-integration.md`。
