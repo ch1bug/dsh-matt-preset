@@ -133,11 +133,11 @@ python -m git_filter_repo --force \
   （比整仓 `SKIP_HOOKS=1` 细一档，且例外留在 diff 里可 review）。
   - **② 的「本机安装布局」这一条（#107）为什么是"形状"而不是"词表"**：把 `Program Files`
     写进词表只能抓住标准根，而票面点名的四条里恰有两条是**同一台机器的自定义安装根**
-    （`Other_Program_Files`、`Cadence`）——按词表追就是 D15 记的"无收敛军备竞赛"。
+    （`Other_Program_Files`、`Cadence`）——按词表追就是 D15 记的"无收敛军备竞赛"。 <!-- pii-allow: 判据自指——#107 形状vs词表论证的示例字面量，非本机串 -->
     故判据取**形状**：`<盘符>:/<目录>/<再一级>`，一级目录落进 `ALLOWED_INSTALL_ROOTS` 的不报。
   - **豁免面 `ALLOWED_INSTALL_ROOTS` 的判据 = "换台机器它还在不在"**：在（`msys64` /
-    `WINDOWS` / 占位符 `x`·`me`·`u`…）就不是某台机器的身份；不在（`Other_Program_Files` /
-    `Cadence` / `D:\Tools`）就是。它与 `ALLOWED_USERS` 同性质——**豁免面必须显式**，
+    `WINDOWS` / 占位符 `x`·`me`·`u`…）就不是某台机器的身份；不在（`Other_Program_Files` / <!-- pii-allow: 判据自指——#107 形状vs词表论证的示例字面量，非本机串 -->
+    `Cadence` / `D:\Tools`）就是。它与 `ALLOWED_USERS` 同性质——**豁免面必须显式**， <!-- pii-allow: 判据自指——#107 形状vs词表论证的示例字面量，非本机串 -->
     否则守卫会把自己与邻仓的合法写法判红。
   - **「不是身份」≠「可以进仓」（#120 拍 B，2026-10-19）**：`Program Files` 一族按
     "换台机器还在"判原是标准点，但作为**工具链地址依赖**的字面安装路径一律不写死——

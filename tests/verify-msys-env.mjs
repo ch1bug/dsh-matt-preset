@@ -88,7 +88,7 @@ function probeBash(candidate) {
 /** 候选顺序：msys2 标准安装点（本用例的目标环境）→ Git 自带 msys → PATH 上的 → WSL（多半不过）。 */
 const BASH_CANDIDATES = [
   'C:\\msys64\\usr\\bin\\bash.exe',
-  'C:\\Other_Program_Files\\Git\\usr\\bin\\bash.exe',
+  'C:\\Other_Program_Files\\Git\\usr\\bin\\bash.exe', // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
   'bash',
   'C:\\Windows\\System32\\bash.exe',
 ]
@@ -104,8 +104,8 @@ if (BASH === undefined) {
   // M1 是纯静态面（读文件内容），与 bash 能力无关 —— 单独跑，别让它被 skip 拖走
   const scriptText = readFileSync(SCRIPT, 'utf8')
   const executable = scriptText.split('\n').filter(l => !/^\s*#/.test(l)).join('\n')
-  const execOffenders = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => executable.includes(t))
-  if (execOffenders.length === 0) ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）')
+  const execOffenders = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => executable.includes(t)) // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
+  if (execOffenders.length === 0) ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）') // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
   else bad('M1. 本机安装布局字面量回到脚本里', execOffenders.join(','))
   skip('M2–M6', '没有可用的 msys 系 bash（候选都过不了"尊重 env + 尊重 PATH + 读得到脚本"三条能力探测）—— 语义面未验证')
   console.log(results.join('\n'))
@@ -203,8 +203,8 @@ if (W_IN_BASH === undefined) {
   console.log('\n=== MSYS-ENV VERIFY (M1–M6) ===')
   const scriptText0 = readFileSync(SCRIPT, 'utf8')
   const exec0 = scriptText0.split('\n').filter(l => !/^\s*#/.test(l)).join('\n')
-  const off0 = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => exec0.includes(t))
-  if (off0.length === 0) ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）')
+  const off0 = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => exec0.includes(t)) // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
+  if (off0.length === 0) ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）') // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
   else bad('M1. 本机安装布局字面量回到脚本里', off0.join(','))
   skip('M2–M6', `${BASH} 建不出夹具（mktemp/mkdir 失败）—— 语义面未验证`)
   console.log(results.join('\n'))
@@ -261,15 +261,15 @@ const scriptText = readFileSync(SCRIPT, 'utf8')
 try {
   // —— M1 静态面：本机安装布局字面量不在文件里 ——
   // 这一条与票面 AC1 同判据（那个 grep 是 AC 明文），但**不手抄 AC 的 grep 串**：
-  // 逐个查"本机专属安装根"的形态，且**必须**含 `Other_Program_Files` 与厂商目录名这两个
+  // 逐个查"本机专属安装根"的形态，且**必须**含 `Other_Program_Files` 与厂商目录名这两个 // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
   // 本票实测到的真实形态（只查 `Program Files` 会漏掉它们 —— 票面 triage 就漏了一个）。
   {
-    const offenders = ['Other_Program_Files', 'Cadence'].filter(t => scriptText.includes(t))
+    const offenders = ['Other_Program_Files', 'Cadence'].filter(t => scriptText.includes(t)) // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
     // `Program Files` 允许出现在**注释**里（说明用），但不允许出现在**可执行行**里
     const executable = scriptText.split('\n').filter(l => !/^\s*#/.test(l)).join('\n')
-    const execOffenders = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => executable.includes(t))
+    const execOffenders = ['Other_Program_Files', 'Cadence', 'Program Files'].filter(t => executable.includes(t)) // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
     if (offenders.length === 0 && execOffenders.length === 0)
-      ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）')
+      ok('M1. 脚本里无本机安装布局字面量（含票面未列的厂商目录 / Other_Program_Files）') // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
     else bad('M1. 本机安装布局字面量回到脚本里', `非注释面=${execOffenders.join(',')} 任意面=${offenders.join(',')}`)
   }
 
@@ -280,9 +280,9 @@ try {
     const CONTRACT = /(未设 MSYS_ENV_WIN_GIT_ROOT|推不出 Windows 标准安装根)/
     const loudLines = r.stderr.split('\n').filter(l => CONTRACT.test(l)).length
     // 缺输入时脚本仍会拼 `/ucrt64/bin` 与 `$HOME/.corepack/bin`（那是**固定**的、与本票无关），
-    // 但**不得**拼任何安装根：判据 = ADDED 里不出现 `nodejs` / `GitHub CLI` / `Other_Program_Files`。
+    // 但**不得**拼任何安装根：判据 = ADDED 里不出现 `nodejs` / `GitHub CLI` / `Other_Program_Files`。 // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
     const added = addedSegments(r.path)
-    const noRoots = !added.some(s => /(nodejs|GitHub CLI|Other_Program_Files|Cadence)/i.test(s))
+    const noRoots = !added.some(s => /(nodejs|GitHub CLI|Other_Program_Files|Cadence)/i.test(s)) // pii-allow: M1 判据数据自指——黑名单断言本体（守卫钉本机安装根不得入脚本，自身必含）
     if (r.rc === '0' && r.status === 0 && loudLines >= 2 && noRoots && r.system === '<unset>')
       ok('M2. 全缺输入 → 两条契约说明 + PATH 不拼任何安装根 + GIT_CONFIG_SYSTEM 不设', `契约行 ${loudLines}；prepend=[${added.join(' | ')}]`)
     else bad('M2. 缺输入的处置不符（静默？或猜了路径？或脚本没跑到？）', JSON.stringify({ rc: r.rc, added, system: r.system, loud: loudLines }))
