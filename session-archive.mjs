@@ -5,13 +5,18 @@
  * 维护插件，缓解宿主会话列表膨胀（上游 1096 形态）；v1 的配置/运行载体 = preset 插件
  * 自身面（文件形态），DSH 设置页集成属上游协作、另立不并本链。
  *
- * 本文件是**子票 A（#195）：骨架与配置面**。拆票分工：
- *   - 子票 A（本票）：插件注册（随 preset 分发）+ 配置面 v1（schema/读写/持久化）+
+ * 本文件承载子票 A（#195）与子票 B（#196）的实现。拆票分工：
+ *   - 子票 A（#195，已落地）：插件注册（随 preset 分发）+ 配置面 v1（schema/读写/持久化）+
  *     运行记录面（上次运行/下次运行/归档数/跳过数/失败原因，可回读文件形态）+
  *     调度 gate（启用/停用语义，AC4）——全部为**导出纯函数面**，
  *     单测双向钉在 tests/verify-session-archive.mjs（判据核心 = CHECKS 数组，AC5/AC6；
  *     tests/session-archive.spec.ts 为 vitest 薄入口——#180 双入口形态，复审批注①）。
- *   - 子票 B：归档执行（workspace registry 按组清点、保留期/保底消费、归档动作）。
+ *   - 子票 B（#196，已落地，本文件「归档选择与执行」段）：归档选择（per-workspace 分组 +
+ *     「无 workspace」虚拟组、各自保底最近 10、保留期、排除面、上限护栏）与执行
+ *     （调 registry.archiveSession 不带 stopActivity、活动拒绝跳过、幂等、失败继续）——
+ *     零写盘、消费清点源快照（结构契约，真实 registry 适配 = 子票 C 接线 / 子票 D seed）；
+ *     单测双向钉在 tests/verify-session-archive-plan.mjs（判据核心 = CHECKS 数组；
+ *     tests/session-archive-plan.spec.ts 为 vitest 薄入口，同 #180 双入口形态）。
  *   - 子票 C：计划触发——cordis-plugin-timer（`ctx.timeout/interval/debounce/throttle`，
  *     随 fiber 释放，CONTEXT.md 已核环境事实）挂到本文件的 `effectiveSchedule` gate 上：
  *     启用时注册 interval、停用即清（AC4 的运行时接线点）。
@@ -389,7 +394,8 @@ export function applyConfigChange(prevConfig, nextConfig, runlog, now = new Date
 }
 
 /**
- * 记一次运行（子票 B/C 的落账入口）：lastRun 四元读数 + totals 累计 + nextRun 刷新。
+ * 记一次运行（子票 C 计划触发的落账入口；outcome 由子票 B 的 runArchiveCycle 产出、
+ * 逐字段可直喂）：lastRun 四元读数 + totals 累计 + nextRun 刷新。
  * `outcome = { ok, archived, skipped, error? }`——archived/skipped 是非负整数计数，
  * 失败时 error 为失败原因字符串（截断到 ${ERROR_MAX_CHARS} 字符）。纯函数，写盘由
  * 调用方做。outcome 缺数字/负数 → 抛错（内部 API 契约，响亮不静默兜）。
@@ -417,11 +423,337 @@ export function recordRun(runlog, config, outcome, now = new Date()) {
   return { ...runlog, lastRun, totals, nextRun }
 }
 
+// ── 归档选择与执行（#196 子票 B：AC1 选择算法 / AC2 执行 / AC3 计数汇报）────────
+// 消费面契约：本段**零写盘、不 import 上游包**——上游 workspaceRegistry（registry-global
+// archivedSessionIds 只影响显示集合、archiveSession 无 stopActivity 时对有活动工作的会话
+// 先于写盘抛 WorkspaceActiveSessionError、归档同写清 pin、已归档 id 幂等 no-op——#196 票面
+// 机制事实节,上游 packages/workspace 源码核）以「清点源快照 + 归档动作」的**结构契约**注入
+// （下方 JSDoc typedef）；真实 registry 适配 = 子票 C 的计划触发接线 / 子票 D 的 seed 形态
+// 留档。单测以接口 mock 双向钉于 tests/verify-session-archive-plan.mjs（判据核心 = CHECKS；
+// tests/session-archive-plan.spec.ts 为 vitest 薄入口,#180 双入口同款）。
+
+/**
+ * 清点源快照（子票 C 接线 / 子票 D seed 从宿主面合成）。字段语义对着上游 registry：
+ * `lastActivityAt` = 排序与年龄判定用的时点毫秒数（adapter 决定取 header createdAt 还是
+ * 其它时点——本段只消费有限数值）；`active`/`live`/`subagent` = 排除面标记（上游活动家族
+ * turn/job/schedule/subagent 与 live 索引的布尔投影）；pinned/archived 既接受全局集合
+ * （`pinnedSessionIds`/`archivedSessionIds`，照上游 registry-global 形态）也接受逐会话
+ * 布尔标记，两处并集判定。archivedSessionIds 里的会话已从上游分组面隐藏（"sessions hidden
+ * from every grouping surface"）——快照里出现属防御形态：不入可见池、记 skipped('archived')。
+ * @typedef {object} ArchiveSnapshotView
+ * @property {Array<{sessionId: string, workspaceId?: string|null, lastActivityAt: number,
+ *   active?: boolean, live?: boolean, subagent?: boolean, pinned?: boolean, archived?: boolean}>} sessions
+ * @property {readonly string[]} [pinnedSessionIds]
+ * @property {readonly string[]} [archivedSessionIds]
+ */
+
+/**
+ * 每组（workspace 与「无 workspace」虚拟组各自）保底保留的最近会话数——#185 归档选择
+ * 第 1 条「每个 workspace 至少保留最近 10 个会话，无论年龄」；分诊定盘（#185 评论）：
+ * 按 workspace 分组 + 「无 workspace」虚拟组**各自**保底，不按全局只留 10。
+ */
+export const FLOOR_KEEP = 10
+
+/** 跳过原因词表（封闭集合——skipped[].reason 只取这些值，测试逐值钉）：
+ *  - `archived`：已在归档集合（幂等面——重复运行已归档跳过，AC2）；
+ *  - `pinned`：用户手工置顶（上游归档会同写清 pin——自动任务不覆盖用户置顶，#185 第 3 条）；
+ *  - `live`：当前 live 会话；
+ *  - `subagent`：subagent 使用中；
+ *  - `active`：registry 报告有活动工作（选择期标记或执行期 WorkspaceActiveSessionError）。
+ *  排除判定按 pinned → live → subagent → active 序，命中即止（多标记会话取第一序原因——
+ *  确定性，测试钉）；archived 在入池前判定，优先于一切。 */
+export const SKIP_REASONS = Object.freeze({
+  archived: 'archived',
+  pinned: 'pinned',
+  live: 'live',
+  subagent: 'subagent',
+  active: 'active',
+})
+
+/** 归档原因词表（plan 的 toArchive[].reason 封闭集合）：`retention` = 超保留期（年龄规则）；
+ *  `cap` = 上限护栏触发（可见数超上限，从旧到新补选，绝不破保底）。 */
+export const ARCHIVE_REASONS = Object.freeze({ retention: 'retention', cap: 'cap' })
+
+const byNewestFirst = (a, b) =>
+  b.lastActivityAt - a.lastActivityAt || (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0)
+const byOldestFirst = (a, b) => byNewestFirst(b, a)
+
+/** 「无 workspace」虚拟组判定：workspaceId 缺席 / null / 空串都落虚拟组（分诊定盘第 1 项：
+ *  散落会话不排除在缓解外）。非串非 null 的 workspaceId 在快照形状断言处响亮拒绝。 */
+const isVirtualWorkspace = (workspaceId) => workspaceId === null || workspaceId === undefined || workspaceId === ''
+
+/** 快照形状断言（响亮，S1 同族：清点面缺席/坏形状不静默当作空会话跑）。 */
+function assertSnapshotShape(view) {
+  if (view === null || typeof view !== 'object' || Array.isArray(view)) {
+    throw new Error(`selectArchivePlan：清点源快照必须是对象，收到 ${view === null ? 'null' : Array.isArray(view) ? 'array' : typeof view}。`)
+  }
+  if (!Array.isArray(view.sessions)) {
+    throw new Error(`selectArchivePlan：清点源快照缺 sessions 数组（清点面缺席——响亮失败，不当作空会话跑），收到 ${typeof view.sessions}。`)
+  }
+  const seen = new Set()
+  for (const [index, session] of view.sessions.entries()) {
+    if (session === null || typeof session !== 'object') {
+      throw new Error(`selectArchivePlan：sessions[${index}] 必须是对象，收到 ${session === null ? 'null' : typeof session}。`)
+    }
+    const id = session.sessionId
+    if (typeof id !== 'string' || id === '') {
+      throw new Error(`selectArchivePlan：sessions[${index}].sessionId 必须是非空字符串，收到 ${JSON.stringify(id)}。`)
+    }
+    if (seen.has(id)) {
+      throw new Error(`selectArchivePlan：sessions[${index}] 的 sessionId '${id}' 重复（同一会话两次入快照会重复计数/重复归档——响亮拒绝）。`)
+    }
+    seen.add(id)
+    if (!Number.isFinite(session.lastActivityAt)) {
+      throw new Error(`selectArchivePlan：sessions[${index}]（sessionId '${id}'）的 lastActivityAt 必须是有限数值毫秒时点，收到 ${JSON.stringify(session.lastActivityAt)}。`)
+    }
+    const workspaceId = session.workspaceId
+    if (!isVirtualWorkspace(workspaceId) && typeof workspaceId !== 'string') {
+      throw new Error(`selectArchivePlan：sessions[${index}]（sessionId '${id}'）的 workspaceId 必须是字符串或 null/''（虚拟组），收到 ${JSON.stringify(workspaceId)}。`)
+    }
+  }
+}
+
+/** 配置形状断言（B 消费 A 的 normalizeConfig 产出——防御性再断言，非法响亮拒绝不带病跑）。 */
+function assertCycleConfig(config) {
+  if (config === null || typeof config !== 'object') {
+    throw new Error(`selectArchivePlan：config 必须是对象（A 的 normalizeConfig 产出），收到 ${config === null ? 'null' : typeof config}。`)
+  }
+  if (!Number.isFinite(config.retentionDays) || config.retentionDays <= 0) {
+    throw new Error(`selectArchivePlan：config.retentionDays 必须是正数（保留期档位），收到 ${JSON.stringify(config.retentionDays)}。`)
+  }
+  const cap = config.cap
+  if (cap !== null && cap !== undefined && (!Number.isInteger(cap) || cap < 1)) {
+    throw new Error(`selectArchivePlan：config.cap 必须是 null（关）或 ≥1 的整数（上限护栏），收到 ${JSON.stringify(cap)}。`)
+  }
+}
+
+/** 排除面判定（#185 第 3 条 / #196 AC1）。判定序 pinned → live → subagent → active，
+ *  命中即止；pinned 照上游 registry-global 形态吃全局集合，也吃逐会话标记（并集）。 */
+function exclusionReason(session, pinned) {
+  if (pinned.has(session.sessionId) || session.pinned === true) return SKIP_REASONS.pinned
+  if (session.live === true) return SKIP_REASONS.live
+  if (session.subagent === true) return SKIP_REASONS.subagent
+  if (session.active === true) return SKIP_REASONS.active
+  return undefined
+}
+
+/** 单组计划：保底 → 年龄候选 → 排除面跳过 → 护栏补选（见各步注释）。 */
+function planGroup(workspaceId, sessions, { retentionMs, cap, pinned, now }) {
+  // 从新到旧（#185 归档选择第 1 条）；同时刻并列按 sessionId 码元序升序（非 localeCompare
+  // ——码元序跨环境确定，不随宿主 locale 漂）。执行序（byOldestFirst）= 本比较器的逐对
+  // 取反：不另立第二排序语义，「从旧到新」就是「从新到旧」总序的反转——同龄并列在执行序
+  // 中呈码元序降序（S8 用例两向都钉）。
+  const sorted = [...sessions].sort(byNewestFirst)
+  const floorCount = Math.min(FLOOR_KEEP, sorted.length)
+  const floorIds = sorted.slice(0, floorCount).map((session) => session.sessionId)
+  const floorSet = new Set(floorIds)
+  const visibleCount = sorted.length
+
+  const toArchive = []
+  const skipped = []
+  const excludedIds = new Set()
+  let keptYoung = 0
+
+  // 年龄规则（#185 第 2 条）+ 排除面（#185 第 3 条）：**排除面判定先行**——保底外会话
+  // 命中排除面即记 skipped（**无论年龄**：超龄排除位是「候选被排除」，年轻排除位也显式
+  // 记录而非静默保留——运行记录 totals.skipped 因此含年轻排除位，S4 young-pin 与 E5
+  // report.skipped 断言钉此口径）；年轻且未命中排除面的会话保留、不记跳过（keptYoung）；
+  // 超龄且未命中排除面的才构成归档候选（「超过」= 严格大于，恰好到点不归档）；保底内
+  // 不判排除面（保底无论年龄，排除面对它无意义）。
+  for (const session of sorted.slice(floorCount)) {
+    const reason = exclusionReason(session, pinned)
+    if (reason !== undefined) {
+      excludedIds.add(session.sessionId)
+      skipped.push({ sessionId: session.sessionId, reason })
+      continue
+    }
+    if (now.getTime() - session.lastActivityAt > retentionMs) {
+      toArchive.push({ sessionId: session.sessionId, reason: ARCHIVE_REASONS.retention })
+    } else {
+      keptYoung++
+    }
+  }
+
+  // 上限护栏（#185 第 6 条 / #196 AC1「超限从旧到新归档但绝不破保底」）：可见会话数（含
+  // 排除面会话——它们可见只是不可归档）超过 cap 时，把「本轮已选之后仍超出 cap」的余量
+  // 从旧到新补选。补选**年龄不设限**：年龄规则的候选在此前已全部选尽，若补选也要求超龄，
+  // 护栏与年龄规则完全重合、永不生效，票面「归档超出部分」无从谈起——护栏是防复发的第二
+  // 触发面。保底与排除面照旧成立：floorSet 不可选、排除面会话不可选（占着可见数选不走，
+  // 护栏到不了就把可选的选完，如实呈现而不是静默装平）。
+  if (cap !== null && visibleCount > cap) {
+    let need = visibleCount - toArchive.length - cap
+    if (need > 0) {
+      const selected = new Set(toArchive.map((entry) => entry.sessionId))
+      for (const session of [...sorted].sort(byOldestFirst)) {
+        if (need <= 0) break
+        const id = session.sessionId
+        if (floorSet.has(id) || selected.has(id) || excludedIds.has(id)) continue
+        selected.add(id)
+        toArchive.push({ sessionId: id, reason: ARCHIVE_REASONS.cap })
+        need--
+        keptYoung-- // 补选池 = 未超保留期的非排除候选（超龄者已在年龄步选尽），逐个从保留位转出
+      }
+    }
+  }
+
+  // 执行序从旧到新（护栏语义「从旧到新归档」；retention 选出者同序无碍——统一按时间升序；
+  // 同龄并列呈码元序降序——byOldestFirst 是「从新到旧」比较器的逐对取反，见函数头注释）。
+  const byId = new Map(sorted.map((session) => [session.sessionId, session]))
+  toArchive.sort((a, b) => byOldestFirst(byId.get(a.sessionId), byId.get(b.sessionId)))
+
+  return { workspaceId, visibleCount, floorCount, floorIds, toArchive, skipped, keptYoung }
+}
+
+/**
+ * 归档选择（#196 AC1，纯函数零副作用零写盘——单独调用即 dry-run 预览形态，#185 定盘 3
+ * 「预览将归档 N 个」）：per-workspace 分组 + 「无 workspace」虚拟组（各自独立）；
+ *   1. 各组保底最近 `FLOOR_KEEP` 个（无论年龄，不判排除面）；
+ *   2. 只把超保留期（`config.retentionDays`，严格大于）的会话作为归档候选；
+ *   3. 排除面判定先行：保底外会话命中 active / pinned / live / subagent 即记 skipped
+ *      原因（**无论年龄**——skipped 含年轻排除位，运行记录 totals.skipped 同口径；
+ *      年轻且未命中的保留不记跳过，keptYoung）；
+ *   4. 上限护栏 `config.cap`（null = 关）：组可见数（未归档，含排除面会话）超 cap 时，
+ *      从旧到新补选余量（年龄不设限——理由见 planGroup 注释），绝不破保底。
+ * 组序：非空 workspaceId 字典序升序、虚拟组殿后（确定性）；每组 toArchive 从旧到新。
+ * @param view  清点源快照（ArchiveSnapshotView，形状非法响亮抛）
+ * @param config A 的 normalizeConfig 产出（retentionDays/cap 再断言）
+ * @param now   计龄基准（缺省 now；测试注入固定时刻）
+ * @returns plan：`{ now, retentionDays, cap, groups: [{ workspaceId(虚拟组=null),
+ *   visibleCount, floorCount, floorIds, toArchive: [{sessionId, reason}], skipped:
+ *   [{sessionId, reason}], keptYoung }], toArchive: string[], skipped: [{sessionId, reason}] }`
+ */
+export function selectArchivePlan(view, config, now = new Date()) {
+  assertCycleConfig(config)
+  assertSnapshotShape(view)
+  const retentionMs = config.retentionDays * 24 * 60 * 60 * 1000
+  const cap = config.cap ?? null
+  const pinned = new Set(view.pinnedSessionIds ?? [])
+  const archived = new Set(view.archivedSessionIds ?? [])
+
+  // 分组（#196 AC1）：per-workspace + 「无 workspace」虚拟组；已在归档集合的会话不入池
+  // （幂等面：重复运行已归档跳过，AC2），记 skipped('archived')。
+  const pool = new Map()
+  const preSkipped = []
+  for (const session of view.sessions) {
+    if (session.archived === true || archived.has(session.sessionId)) {
+      preSkipped.push({ sessionId: session.sessionId, reason: SKIP_REASONS.archived })
+      continue
+    }
+    const key = isVirtualWorkspace(session.workspaceId) ? null : session.workspaceId
+    let list = pool.get(key)
+    if (list === undefined) pool.set(key, (list = []))
+    list.push(session)
+  }
+
+  const groupKeys = [...pool.keys()].sort((a, b) => {
+    if (a === null) return 1
+    if (b === null) return -1
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+  const groups = groupKeys.map((key) =>
+    planGroup(key, pool.get(key), { retentionMs, cap, pinned, now }),
+  )
+
+  return {
+    now: now.toISOString(),
+    retentionDays: config.retentionDays,
+    cap,
+    groups,
+    toArchive: groups.flatMap((group) => group.toArchive.map((entry) => entry.sessionId)),
+    skipped: [...preSkipped, ...groups.flatMap((group) => group.skipped)],
+  }
+}
+
+/** 上游 `WorkspaceActiveSessionError` 的结构判别：真实类把 `name` 设为该串
+ *  （packages/workspace/workspace/src/index.ts，#196 机制事实），接口 mock 同串即同判
+ *  ——本仓不 import 上游包（registry 为上游包，preset 测试面以 mock 落）。 */
+export function isActiveSessionError(error) {
+  return error?.name === 'WorkspaceActiveSessionError'
+}
+
+/**
+ * 执行归档计划（#196 AC2/AC3）：逐会话调 `registry.archiveSession(sessionId)`——**单参
+ * 调用、不带 `stopActivity`**（票面机制事实：无 stopActivity 时上游对有活动工作的会话
+ * 先于写盘拒绝，无人值守默认路径绝不停止用户正在做的工作；已归档 id 上游幂等 no-op）。
+ * 活动拒绝（isActiveSessionError）记 skipped（原因 active + 上游 message 摘要）；其余
+ * 抛错记 failed 后**继续处理其余候选**（AC3）；archiveSession 缺席/非函数响亮抛（归档
+ * 动作面缺席不静默跳过）。
+ * @param plan selectArchivePlan 的产出
+ * @param registry 归档动作面：`{ archiveSession(sessionId: string): Promise<void> }`（结构最小契约）
+ * @returns `{ archived: string[], skipped: [{sessionId, reason, detail?}], failed: [{sessionId, error}] }`
+ */
+export async function executeArchivePlan(plan, registry) {
+  if (plan === null || typeof plan !== 'object' || !Array.isArray(plan.groups) || !Array.isArray(plan.toArchive)) {
+    throw new Error('executeArchivePlan：plan 必须是 selectArchivePlan 的产出（缺 groups/toArchive 数组）。')
+  }
+  if (typeof registry?.archiveSession !== 'function') {
+    throw new Error(`executeArchivePlan：registry.archiveSession 必须是函数（归档动作面缺席——响亮失败不静默跳过），收到 ${typeof registry?.archiveSession}。`)
+  }
+  const archived = []
+  const skipped = []
+  const failed = []
+  // 执行序 = 组序（实体组字典序、虚拟组殿后）× 组内从旧到新——与 plan.toArchive（扁平
+  // 执行序,dry-run 面）同序。
+  for (const entry of plan.groups.flatMap((group) => group.toArchive)) {
+    const sessionId = entry?.sessionId
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      throw new Error(`executeArchivePlan：plan.toArchive 条目缺非空 sessionId，收到 ${JSON.stringify(entry)}。`)
+    }
+    try {
+      await registry.archiveSession(sessionId)
+      archived.push(sessionId)
+    } catch (error) {
+      if (isActiveSessionError(error)) {
+        skipped.push({ sessionId, reason: SKIP_REASONS.active, detail: String(error?.message ?? '') })
+      } else {
+        failed.push({ sessionId, error: String(error?.message ?? error) })
+      }
+    }
+  }
+  return { archived, skipped, failed }
+}
+
+/**
+ * 归档一轮（#196 AC1–AC3 组合入口）：选择 → 执行 → 汇总。**零写盘**——落账与运行记录
+ * 持久化由消费面（子票 C 计划触发）经 recordRun/writeRunlog 做；本函数的 `outcome` 即
+ * recordRun 的 outcome 形状（{ok, archived, skipped, error?}，**计数面**），逐字段可直喂
+ * （recordRun 的 failures 计数 = ok 取反，error 为失败汇总串、其内截断 500 字符）。
+ * @returns `{ plan, report, outcome }`——report = **明细面**：{ archivedIds: string[],
+ *   skipped: [{sessionId, reason, detail?}], failed: [{sessionId, error}] }（skipped =
+ *   选择期排除面 + archived 幂等面 + 执行期活动拒绝的并集）；outcome = **计数面**：
+ *   { ok: 本轮无归档失败, archived, skipped, error? }。
+ */
+export async function runArchiveCycle(view, config, registry, now = new Date()) {
+  const plan = selectArchivePlan(view, config, now)
+  const execution = await executeArchivePlan(plan, registry)
+  const skipped = [...plan.skipped.map((entry) => ({ ...entry })), ...execution.skipped]
+  const report = {
+    archivedIds: [...execution.archived],
+    skipped,
+    failed: execution.failed.map((entry) => ({ ...entry })),
+  }
+  const ok = execution.failed.length === 0
+  return {
+    plan,
+    report,
+    outcome: {
+      ok,
+      archived: execution.archived.length,
+      skipped: skipped.length,
+      ...(ok ? {} : { error: `归档失败 ${execution.failed.length} 个：${execution.failed.map((f) => `'${f.sessionId}'（${f.error}）`).join('；')}` }),
+    },
+  }
+}
+
 // ── cordis 插件注册面（AC1 骨架）───────────────────────────────────────────────
 // v1 骨架 = 只注册，无运行时副作用（不建目录、不写文件、不注册服务/工具）：配置与
-// 运行记录的读写、调度 gate 全在本文件的导出纯面（上方），单测双向钉于
-// tests/verify-session-archive.mjs（判据核心；tests/session-archive.spec.ts 为 vitest 薄入口，#180 双入口）。子票 C 在 mount 上把 cordis-plugin-timer 接到
-// effectiveSchedule gate（启用注册 interval、停用即清）；行 config `storageDir`
+// 运行记录的读写、调度 gate 在本文件的导出纯面（上方），单测双向钉于
+// tests/verify-session-archive.mjs（判据核心；tests/session-archive.spec.ts 为 vitest 薄
+// 入口，#180 双入口）；归档选择与执行（子票 B）的导出纯面见「归档选择与执行」段，单测
+// 双向钉于 tests/verify-session-archive-plan.mjs（tests/session-archive-plan.spec.ts 为
+// vitest 薄入口）。子票 C 在 mount 上把 cordis-plugin-timer 接到
+// effectiveSchedule gate（启用注册 interval、停用即清）并从真实 registry 合成清点源快照；
+// 行 config `storageDir`
 // 是部署/测试注入缝（挂具经 DSH_HOME 临时目录隔离，与本缝等价可互换）。
 
 /**
@@ -448,6 +780,6 @@ export function apply(ctx, config = {}) {
     )
   }
   // 无副作用声明（v1）：挂载即 started（loader 的挂载审计锚），任何实际工作都在
-  // 消费面（子票 B/C）首次调用读写函数时惰性发生。
+  // 消费面（子票 C 计划触发/手动运行入口）首次调用读写函数时惰性发生。
   void ctx
 }
