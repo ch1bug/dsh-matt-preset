@@ -19,10 +19,15 @@
  *   W4 setup.sh 离线红/绿两态真跑（TOOLCHAIN_UNAME_S/R、TOOLCHAIN_GCC 注入钩子，
  *      见 setup.sh 头注释）：绿态 exit 0；WSL 红态 / gcc 不可达红态 exit 1 且报错
  *      含可行动关键词——改坏判别（红绿颠倒/分支漏）时本段变红。
+ *      W4 precheck（#190）：PATH 首个 bash 为 WSL shim（system32\bash.exe，无 MSYS
+ *      路径转换）时，W4 递入的 Windows 反斜杠路径被 POSIX 解析吞掉反斜杠 → 恒红，
+ *      且报错形态是环境侧异常非用例失败——此时 W4 整段 `SKIP (loud)` 降级（点名
+ *      「PATH bash=WSL shim，W4 未验证」，verify-all 据此标 PASS*），W1–W3 照常跑，
+ *      整体仍 exit 0。判据语义不变：非 shim 环境 W4 真跑面一字不动。
  *
  * 不 import @deepseek-ai/* / @ai-hero/*；不依赖 podman；纯快集用例。
  */
-import { readFileSync, mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -158,69 +163,112 @@ console.log(
   (gccProbe.status === 0 ? '（gcc 可达）' : '（gcc 不可达——真环境跑 night-run 会 exit 3、setup.sh 会 exit 1，均给可行动错误）'),
 )
 
+// ── W4 precheck（#190）：PATH 首个 bash 是否 WSL shim —— 是则 W4 环境侧 loud skip ──
+// 机制：PATH 首个 bash = C:\WINDOWS\system32\bash.exe（WSL shim）时，W4 递给 bash 的
+// 是 Windows 反斜杠路径，WSL bash 按 POSIX 解析把反斜杠当转义吞掉 → 报
+// `D:…setup.sh: No such file or directory`；且 shim 无 cygpath，System32 漂移分支的
+// 真 bash 绝对路径固定解析失败——三 ✗ 全是环境侧异常，非用例失败（#190 症状）。
+// 降级口径：W4 整段 `SKIP (loud)` + 点名「PATH bash=WSL shim，W4 未验证」+ 整体仍
+// exit 0（verify-all 据此标 PASS*，与 M4「镜像缺失 loud skip」同形态）；W1–W3 照常跑。
+// 判据语义不变：非 shim 环境下 W4 真跑面一字不动（下面的 else 分支就是原逻辑）。
+//
+// shim 判据（票面候选三选二，取可实现者组合，命中任一即判 shim；仅 win32 宿主判）：
+//   a. uname -s 读数恰为 `Linux` —— WSL shim 的 uname 恒输出 Linux（msys 形态输出
+//      MINGW*_NT-*）。读数复用 W3 的 uname 探针（同一 spawnSync('bash', ['-c',
+//      'uname -s'])，不重复起进程）。注意「恰为 Linux」而非「非 MINGW|MSYS」：
+//      Cygwin bash（CYGWIN_NT-*）有 cygpath 与路径转换，W4 能真跑，不误降级——
+//      降级口径宁窄勿宽，能真跑就真跑。
+//   b. PATH 解析首个 bash.exe 位于 System32 目录 —— WSL shim 的固定安装位置形态。
+//   票面候选「无 cygpath」未采：shim 环境 cygpath 缺席是 a/b 的派生现象，单独判它
+//   反而会误伤真 cygwin 环境。
+const firstBashDir = (() => {
+  if (process.platform !== 'win32') return null
+  for (const raw of (process.env.PATH ?? '').split(';')) {
+    const dir = raw.trim().replace(/^"|"$/g, '')
+    if (dir === '') continue
+    try {
+      if (existsSync(join(dir, 'bash.exe'))) return dir
+    } catch { /* 不可读目录跳过，继续找 */ }
+  }
+  return null
+})()
+const shimByUname = unameProbe.status === 0 && unameOut === 'Linux'
+const shimBySystem32 = firstBashDir !== null && /system32/i.test(firstBashDir)
+const IS_WSL_SHIM = process.platform === 'win32' && (shimByUname || shimBySystem32)
+
 // ── W4: setup.sh 离线红/绿两态真跑（票面 AC①⑤：fail-fast + 非空洞）────────────
 // 注入钩子（setup.sh 头注释声明）：TOOLCHAIN_UNAME_S/R 覆盖 uname、TOOLCHAIN_GCC=1/0
 // 强制 gcc 读数——红/绿两态完全离线确定，不依赖本机工具链形态。
 // 非空洞判据：判别逻辑被注入读数真跑——改坏判别（红绿颠倒 / 分支漏）时本段红。
 const SETUP_PATH = resolve(REPO, 'sandcastle', 'templates', 'setup.sh')
-const syntax = spawnSync('bash', ['-n', SETUP_PATH], { encoding: 'utf8' })
-if (syntax.status === 0) {
-  ok('W4. setup.sh 通过 bash -n（模板可解析）')
+if (IS_WSL_SHIM) {
+  // S1 缺席必响亮：W4 本轮**未验证**显式点名——不静默绿，也不记 FAIL（环境侧异常）。
+  const why = [
+    shimByUname ? `uname -s=${unameOut}（win32 宿主）` : null,
+    shimBySystem32 ? `PATH 首个 bash.exe 在 ${firstBashDir}` : null,
+  ].filter(Boolean).join('；')
+  console.log(`  !! SKIP (loud) - PATH bash=WSL shim，W4 未验证 —— 环境侧降级（#190），非用例失败；命中判据：${why}`)
+  console.log('  ℹ W1–W3 照常跑；W4 真读数需在 msys2（或含 cygpath 的 bash）前置 PATH 的环境重跑本守卫')
 } else {
-  bad('W4. setup.sh 语法错误', `exit=${syntax.status} ${(syntax.stderr ?? '').split('\n')[0]}`)
-}
-
-const runSetup = (env) => {
-  const e = { ...process.env, ...env }
-  // 空值=未注入：清掉空串与父 shell 残留，让 setup.sh 的 `:-`（默认读数）与 `+x`
-  // （注入开关）都走生产路径语义——TOOLCHAIN_GCC='' 会被 gcc_reachable 的 [ -n +x ]
-  // 误判成「注入了不可达」。
-  for (const k of ['TOOLCHAIN_UNAME_S', 'TOOLCHAIN_UNAME_R', 'TOOLCHAIN_GCC']) {
-    if (e[k] === undefined || e[k] === '') delete e[k]
-  }
-  return spawnSync('bash', [SETUP_PATH], { encoding: 'utf8', env: e })
-}
-const w4 = []
-const green = runSetup({ TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '1' })
-w4.push(['绿态（msys + gcc 可达）→ exit 0', green.status === 0])
-const wsl = runSetup({ TOOLCHAIN_UNAME_S: 'Linux', TOOLCHAIN_UNAME_R: '5.15.167.4-microsoft-standard-WSL2', TOOLCHAIN_GCC: '1' })
-w4.push(['WSL 红态（uname -r 含 microsoft）→ exit 1 且点名 WSL',
-  wsl.status === 1 && (wsl.stderr ?? '').includes('WSL')])
-const gccRed = runSetup({ TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '0' })
-w4.push(['gcc 不可达红态 → exit 1 且指明 msys2',
-  gccRed.status === 1 && (gccRed.stderr ?? '').includes('msys2')])
-// System32 bash 漂移分支（票面 AC①「bash 可直达」）：仅 Windows 宿主真跑——需要
-// cmd.exe 做假 bash.exe。外层 bash 必须**绝对路径**：PATH 前置 fake 后，'bash' 会被
-// node 解析到假 bash.exe（实测 cmd.exe 顶替跑出 banner）——先在无污染时经 cygpath
-// 把真 bash 固定成 Windows 绝对路径。
-const BASH_WIN = (spawnSync('bash', ['-c', 'cygpath -w "$(command -v bash)"'], { encoding: 'utf8' }).stdout ?? '').trim()
-if (process.platform === 'win32') {
-  if (BASH_WIN === '') {
-    bad('W4. System32 漂移态：真 bash 绝对路径解析失败（cygpath 不可用？）', '环境侧异常，非用例失败')
+  const syntax = spawnSync('bash', ['-n', SETUP_PATH], { encoding: 'utf8' })
+  if (syntax.status === 0) {
+    ok('W4. setup.sh 通过 bash -n（模板可解析）')
   } else {
-    const fakeDir = join(mkdtempSync(join(tmpdir(), 'verify-bash-probe-s32-')), 'fake-system32')
-    mkdirSync(fakeDir, { recursive: true })
-    copyFileSync(join(process.env.WINDIR ?? 'C:/Windows', 'System32', 'cmd.exe'), join(fakeDir, 'bash.exe'))
-    const s32 = spawnSync(BASH_WIN, [SETUP_PATH], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${fakeDir};${process.env.PATH ?? ''}`, TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '1' },
-    })
-    w4.push(['System32 bash 漂移红态 → exit 1 且点名 System32',
-      s32.status === 1 && /system32/i.test(s32.stderr ?? '')])
-    rmSync(join(fakeDir, '..'), { recursive: true, force: true })
+    bad('W4. setup.sh 语法错误', `exit=${syntax.status} ${(syntax.stderr ?? '').split('\n')[0]}`)
   }
-} else {
-  console.log('  ℹ System32 bash 漂移分支真跑：非 Windows 宿主不做（该形态仅在 win32 存在）—— loud skip')
-}
 
-const w4Missing = w4.filter(([, pass]) => !pass).map(([n]) => n)
-if (w4Missing.length === 0) {
-  ok('W4. setup.sh 离线红/绿两态真跑（注入读数）', `${w4.length} 态`)
-} else {
-  bad('W4. setup.sh 判别行为不符（改坏判别/分支漏会在此红）', w4Missing.join(', '))
+  const runSetup = (env) => {
+    const e = { ...process.env, ...env }
+    // 空值=未注入：清掉空串与父 shell 残留，让 setup.sh 的 `:-`（默认读数）与 `+x`
+    // （注入开关）都走生产路径语义——TOOLCHAIN_GCC='' 会被 gcc_reachable 的 [ -n +x ]
+    // 误判成「注入了不可达」。
+    for (const k of ['TOOLCHAIN_UNAME_S', 'TOOLCHAIN_UNAME_R', 'TOOLCHAIN_GCC']) {
+      if (e[k] === undefined || e[k] === '') delete e[k]
+    }
+    return spawnSync('bash', [SETUP_PATH], { encoding: 'utf8', env: e })
+  }
+  const w4 = []
+  const green = runSetup({ TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '1' })
+  w4.push(['绿态（msys + gcc 可达）→ exit 0', green.status === 0])
+  const wsl = runSetup({ TOOLCHAIN_UNAME_S: 'Linux', TOOLCHAIN_UNAME_R: '5.15.167.4-microsoft-standard-WSL2', TOOLCHAIN_GCC: '1' })
+  w4.push(['WSL 红态（uname -r 含 microsoft）→ exit 1 且点名 WSL',
+    wsl.status === 1 && (wsl.stderr ?? '').includes('WSL')])
+  const gccRed = runSetup({ TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '0' })
+  w4.push(['gcc 不可达红态 → exit 1 且指明 msys2',
+    gccRed.status === 1 && (gccRed.stderr ?? '').includes('msys2')])
+  // System32 bash 漂移分支（票面 AC①「bash 可直达」）：仅 Windows 宿主真跑——需要
+  // cmd.exe 做假 bash.exe。外层 bash 必须**绝对路径**：PATH 前置 fake 后，'bash' 会被
+  // node 解析到假 bash.exe（实测 cmd.exe 顶替跑出 banner）——先在无污染时经 cygpath
+  // 把真 bash 固定成 Windows 绝对路径。
+  const BASH_WIN = (spawnSync('bash', ['-c', 'cygpath -w "$(command -v bash)"'], { encoding: 'utf8' }).stdout ?? '').trim()
+  if (process.platform === 'win32') {
+    if (BASH_WIN === '') {
+      bad('W4. System32 漂移态：真 bash 绝对路径解析失败（cygpath 不可用？）', '环境侧异常，非用例失败')
+    } else {
+      const fakeDir = join(mkdtempSync(join(tmpdir(), 'verify-bash-probe-s32-')), 'fake-system32')
+      mkdirSync(fakeDir, { recursive: true })
+      copyFileSync(join(process.env.WINDIR ?? 'C:/Windows', 'System32', 'cmd.exe'), join(fakeDir, 'bash.exe'))
+      const s32 = spawnSync(BASH_WIN, [SETUP_PATH], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${fakeDir};${process.env.PATH ?? ''}`, TOOLCHAIN_UNAME_S: 'MINGW64_NT-10.0-26300', TOOLCHAIN_GCC: '1' },
+      })
+      w4.push(['System32 bash 漂移红态 → exit 1 且点名 System32',
+        s32.status === 1 && /system32/i.test(s32.stderr ?? '')])
+      rmSync(join(fakeDir, '..'), { recursive: true, force: true })
+    }
+  } else {
+    console.log('  ℹ System32 bash 漂移分支真跑：非 Windows 宿主不做（该形态仅在 win32 存在）—— loud skip')
+  }
+
+  const w4Missing = w4.filter(([, pass]) => !pass).map(([n]) => n)
+  if (w4Missing.length === 0) {
+    ok('W4. setup.sh 离线红/绿两态真跑（注入读数）', `${w4.length} 态`)
+  } else {
+    bad('W4. setup.sh 判别行为不符（改坏判别/分支漏会在此红）', w4Missing.join(', '))
+  }
+  // 本机真跑读数（不注入）：只打印不断言——本机 bash 形态差异是探针职责，不是守卫断言面。
+  const real = runSetup({})
+  console.log(`  ℹ setup.sh 本机真跑读数（不断言）：exit=${real.status}`)
 }
-// 本机真跑读数（不注入）：只打印不断言——本机 bash 形态差异是探针职责，不是守卫断言面。
-const real = runSetup({})
-console.log(`  ℹ setup.sh 本机真跑读数（不断言）：exit=${real.status}`)
 
 report('SANDCASTLE-BASH-PROBE VERIFY (W1–W4)')
