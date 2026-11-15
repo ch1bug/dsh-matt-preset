@@ -11,9 +11,11 @@
  * 分层：
  *   W1 文本级：判据串（GCC 探针串单一常量）在 **三处**（e2e findBash / night-run
  *      bashToolchainProblem / setup.sh）逐字在场——**双向钉**：改任何一侧判据串守卫即红；
- *      另钉 main 预检调用 / 退出码 / WSL 分支 / 可行动指引。
+ *      另钉 main 预检调用（#191 起传候选表）/ 退出码 / WSL 分支（判据不放宽）/
+ *      候选发现函数 / msys2 标准点候选 / 汇总文案 / 可行动指引。
  *   W2 行为级：副本 import（只换导入边，被测函数逐字节是仓内那份，手法同
- *      verify-sandcastle-retro.mjs Y6）注入假执行器，覆盖四分支 + 非 win32 不误杀。
+ *      verify-sandcastle-retro.mjs Y6）注入假执行器 + 假候选表，覆盖四分支 +
+ *      候选探测放行/汇总（#191）+ bashCandidates 发现面 + 非 win32 不误杀。
  *   W3 真探针段：真 bash 里直跑两条探针脚本（uname 关断言可执行；gcc 关只打印读数
  *      不断言——本机工具链形态差异是合法状态，报它本来就是探针的职责）。
  *   W4 setup.sh 离线红/绿两态真跑（TOOLCHAIN_UNAME_S/R、TOOLCHAIN_GCC 注入钩子，
@@ -24,6 +26,12 @@
  *      且报错形态是环境侧异常非用例失败——此时 W4 整段 `SKIP (loud)` 降级（点名
  *      「PATH bash=WSL shim，W4 未验证」，verify-all 据此标 PASS*），W1–W3 照常跑，
  *      整体仍 exit 0。判据语义不变：非 shim 环境 W4 真跑面一字不动。
+ *
+ * #191（2026-11-15）：bashToolchainProblem 扩为候选探测（签名加 candidates 参数，
+ *   BashProbeRunner 加 bash 参数）——PATH 首个 bash 不合格时依次探测 PATH 其余
+ *   bash.exe 与 msys2 标准安装点，取第一个合格者；全部不合格才红且逐候选列出
+ *   失败原因（判据不放宽：WSL bash 仍不放过）。W1 判据串按新形态对齐、W2 补
+ *   候选探测用例；W3/W4 零改动。
  *
  * 不 import @deepseek-ai/* / @ai-hero/*；不依赖 podman；纯快集用例。
  */
@@ -66,19 +74,23 @@ for (const [rel, text] of [
 }
 if (NIGHT === null || E2E === null || SETUP === null) report('SANDCASTLE-BASH-PROBE VERIFY (W1–W4)')
 
-// ── W1: 文本级 —— 判据串三处双向钉 + main 预检消费 + 可行动指引 ─────────────
+// ── W1: 文本级 —— 判据串三处双向钉 + main 预检消费（#191 候选表）+ 可行动指引 ──
 const W1_CHECKS = [
   ['判据串在 e2e findBash()（漂移即红）', E2E.includes(PROBE_GCC)],
   ['判据串在 night-run bashToolchainProblem（漂移即红）', NIGHT.includes(PROBE_GCC)],
   ['判据串在 setup.sh gcc_reachable（漂移即红）', SETUP.includes(PROBE_GCC)],
   ['探针纯函数已导出', NIGHT.includes('export function bashToolchainProblem(')],
-  ['main 预检位真调用探针', NIGHT.includes('bashToolchainProblem(probeRun, process.platform)')],
+  ['候选发现函数已导出（#191）', NIGHT.includes('export function bashCandidates(')],
+  ['main 预检位真调用探针并传候选表（#191）', NIGHT.includes('bashToolchainProblem(probeRun, process.platform, bashCandidates(')],
   ['预检失败 exit 3（不带病发射）', /if \(toolchainProblem\) \{[\s\S]*?process\.exit\(3\)/.test(NIGHT)],
   ['头注释声明退出码 3', NIGHT.includes('3=bash 工具链自检失败')],
   ['uname 判据在场（uname -s）', NIGHT.includes('uname -s')],
-  ['WSL 漂移分支（win32 + 非 msys 形态）', NIGHT.includes("platform === \"win32\" && !/MINGW|MSYS/i.test(s)")],
+  ['WSL 漂移分支（win32 + 非 msys 形态，判据不放宽）', NIGHT.includes("platform === \"win32\" && !/MINGW|MSYS/i.test(s)")],
+  ['WSL 候选红态点名不放过（判据不放宽，#191）', NIGHT.includes('WSL bash（uname -s = Linux')],
   ['可行动错误指明 msys2 安装', NIGHT.includes('https://www.msys2.org')],
   ['可行动错误指明设 PATH', NIGHT.includes('前置到 PATH')],
+  ['msys2 标准点候选在场（e2e findBash 先例同款，#191）', NIGHT.includes('C:/msys64/usr/bin/bash.exe')],
+  ['汇总报错列出已探测候选与各自失败原因（缺席必响亮，#191）', NIGHT.includes('已探测候选与各自失败原因')],
   ['setup.sh fail-fast 语义（die→exit 1）', /die\(\) \{[\s\S]*?exit "\$\{2:-1\}"/.test(SETUP)],
   ['setup.sh WSL 内核分支（microsoft）', /\*microsoft\*/.test(SETUP)],
   ['setup.sh System32 bash 分支（票面 AC① bash 直达）', /system32/i.test(SETUP)],
@@ -89,7 +101,7 @@ if (w1Missing.length === 0)
   ok('W1. 判据串三处双向钉 + 探针/预检/退出码/可行动指引全部在场', `${W1_CHECKS.length} 条`)
 else bad('W1. 探针面缺失或判据漂移', w1Missing.join(', '))
 
-// ── W2: 行为级 —— 副本 import + 假执行器注入，四分支 + 非 win32 不误杀 ────────
+// ── W2: 行为级 —— 副本 import + 假执行器/假候选表注入，四分支 + 候选探测（#191）──
 let scratch = null
 try {
   scratch = mkdtempSync(join(REPO, '.scratch', 'verify-bash-probe-'))
@@ -108,35 +120,75 @@ try {
 
   const mod = await import(pathToFileURL(join(scratch, 'night-run.mts')).href)
   if (typeof mod.bashToolchainProblem !== 'function') throw new Error('bashToolchainProblem 未导出')
+  if (typeof mod.bashCandidates !== 'function') throw new Error('bashCandidates 未导出')
 
-  /** 假执行器：按脚本内容返回预置读数（不碰真 bash）。 */
-  const fakeRun = (map) => (script) => {
-    for (const [needle, res] of map) if (script.includes(needle)) return res
-    throw new Error('fakeRun 未覆盖脚本：' + script)
+  /** 假执行器：按 (候选 bash, 脚本) 匹配返回预置读数（不碰真 bash）；未覆盖组合响亮 throw。 */
+  const fakeRun = (map) => (bash, script) => {
+    for (const [b, needle, res] of map) if (bash === b && script.includes(needle)) return res
+    throw new Error(`fakeRun 未覆盖：bash=${bash} script=${script.slice(0, 40)}`)
   }
   const okUname = { status: 0, stdout: 'MINGW64_NT-10.0-26300\n' }
   const wslUname = { status: 0, stdout: 'Linux\n' }
   const gccOk = { status: 0, stdout: '' }
   const gccMiss = { status: 1, stdout: '' }
+  const noExec = { status: null, stdout: '' }
+  const MSYS2 = 'C:/msys64/usr/bin/bash.exe'
 
   const w2 = []
-  // a. msys 形态 + gcc 可达 → 通过
-  w2.push(['msys 形态 + gcc 可达 → 放行', mod.bashToolchainProblem(fakeRun([['uname', okUname], ['gcc', gccOk]]), 'win32') === undefined])
-  // b. WSL bash（uname=Linux）+ win32 → 报 WSL 漂移
-  const wslProblem = mod.bashToolchainProblem(fakeRun([['uname', wslUname]]), 'win32')
+  // a. 单候选：msys 形态 + gcc 可达 → 通过
+  w2.push(['msys 形态 + gcc 可达 → 放行',
+    mod.bashToolchainProblem(fakeRun([['c1', 'uname', okUname], ['c1', 'gcc', gccOk]]), 'win32', ['c1']) === undefined])
+  // b. 单候选 WSL bash（uname=Linux）+ win32 → 红且点名 WSL（判据不放宽）
+  const wslProblem = mod.bashToolchainProblem(fakeRun([['c1', 'uname', wslUname]]), 'win32', ['c1'])
   w2.push(['WSL bash（uname=Linux）→ 红且点名 WSL', typeof wslProblem === 'string' && wslProblem.includes('WSL')])
-  // c. msys 形态但 gcc 缺 → 红且指明 msys2 / ucrt64 修复路径
-  const gccProblem = mod.bashToolchainProblem(fakeRun([['uname', okUname], ['gcc', gccMiss]]), 'win32')
-  w2.push(['gcc 不可达 → 红且指明 msys2/ucrt64 修复', typeof gccProblem === 'string' && gccProblem.includes('msys2') && gccProblem.includes('ucrt64')])
-  // d. bash 缺失 → 红且可行动
-  const noBash = mod.bashToolchainProblem(fakeRun([['uname', { status: null, stdout: '' }]]), 'win32')
+  // c. 单候选 msys 形态但 gcc 缺 → 红且指明 msys2 / ucrt64 修复路径
+  const gccProblem = mod.bashToolchainProblem(fakeRun([['c1', 'uname', okUname], ['c1', 'gcc', gccMiss]]), 'win32', ['c1'])
+  w2.push(['gcc 不可达 → 红且指明 msys2/ucrt64 修复',
+    typeof gccProblem === 'string' && gccProblem.includes('msys2') && gccProblem.includes('ucrt64')])
+  // d. 单候选 bash 缺失 → 红且可行动
+  const noBash = mod.bashToolchainProblem(fakeRun([['c1', 'uname', noExec]]), 'win32', ['c1'])
   w2.push(['bash 缺失 → 红且指明 PATH/安装', typeof noBash === 'string' && noBash.includes('不在 PATH')])
   // e. 非 win32 宿主（原生 Linux）不因 uname=Linux 被误杀
-  w2.push(['原生 Linux 宿主 → 不误杀 uname=Linux', mod.bashToolchainProblem(fakeRun([['uname', wslUname], ['gcc', gccOk]]), 'linux') === undefined])
+  w2.push(['原生 Linux 宿主 → 不误杀 uname=Linux',
+    mod.bashToolchainProblem(fakeRun([['c1', 'uname', wslUname], ['c1', 'gcc', gccOk]]), 'linux', ['c1']) === undefined])
+  // f. 候选探测（#191 票面核心场景）：PATH 首个 = WSL shim + msys2 标准点合格 → 放行
+  w2.push(['PATH 首个 WSL shim + msys2 标准点合格 → 放行（不再因 PATH 顺序误杀）',
+    mod.bashToolchainProblem(
+      fakeRun([['bash', 'uname', wslUname], [MSYS2, 'uname', okUname], [MSYS2, 'gcc', gccOk]]),
+      'win32', ['bash', MSYS2]) === undefined])
+  // g. 候选探测：首个缺 gcc + 次候选 gcc 可达 → 放行
+  w2.push(['首个缺 gcc + 次候选 gcc 可达 → 放行',
+    mod.bashToolchainProblem(
+      fakeRun([['c1', 'uname', okUname], ['c1', 'gcc', gccMiss], ['c2', 'uname', okUname], ['c2', 'gcc', gccOk]]),
+      'win32', ['c1', 'c2']) === undefined])
+  // h. 全部候选不合格 → 红且逐候选列出失败原因（缺席必响亮）
+  const allRed = mod.bashToolchainProblem(
+    fakeRun([['bash', 'uname', wslUname], [MSYS2, 'uname', noExec]]), 'win32', ['bash', MSYS2])
+  w2.push(['全部候选不合格 → 红且列出各候选与各自失败原因',
+    typeof allRed === 'string'
+      && allRed.includes('全部不合格')
+      && allRed.includes('已探测候选与各自失败原因')
+      && allRed.includes('WSL')
+      && allRed.includes(MSYS2)])
+  // i. 空候选表 → 红且响亮（不静默放行）
+  w2.push(['空候选表 → 红且响亮', typeof mod.bashToolchainProblem(fakeRun([]), 'win32', []) === 'string'])
+  // j. 候选发现（win32）：bash + PATH 枚举（存在者、同目录去重）+ msys2 标准点
+  const fakeBin = join(scratch, 'fake-path-bin')
+  mkdirSync(fakeBin, { recursive: true })
+  writeFileSync(join(fakeBin, 'bash.exe'), '')
+  const cands = mod.bashCandidates(`${fakeBin};${fakeBin};C:\\no\\such\\dir`, 'win32')
+  w2.push(['bashCandidates（win32）：bash + PATH 枚举 + msys2 标准点 + 同目录去重',
+    cands[0] === 'bash'
+      && cands.filter((c) => c.toLowerCase() === join(fakeBin, 'bash.exe').toLowerCase()).length === 1
+      && cands[cands.length - 1] === MSYS2
+      && !cands.some((c) => c.includes('no\\such'))])
+  // k. 候选发现（非 win32）：单候选，与原 PATH 首个语义等价
+  w2.push(['bashCandidates（非 win32）：单候选 ["bash"]',
+    JSON.stringify(mod.bashCandidates('/usr/bin:/bin', 'linux')) === JSON.stringify(['bash'])])
 
   const w2Missing = w2.filter(([, pass]) => !pass).map(([n]) => n)
   if (w2Missing.length === 0)
-    ok('W2. 行为级：注入执行器覆盖四分支 + 非 win32 不误杀', `${w2.length} 条`)
+    ok('W2. 行为级：注入执行器/候选表覆盖四分支 + 候选探测（#191）+ 非 win32 不误杀', `${w2.length} 条`)
   else bad('W2. 探针判定分支行为不符', w2Missing.join(', '))
 } catch (error) {
   bad('W2. 行为级探针', String(error?.message ?? error).split('\n')[0])

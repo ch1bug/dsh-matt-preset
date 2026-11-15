@@ -20,20 +20,26 @@
  *     串行（本模板只给分组与提示文本；真执行归编排会话）
  *   - digest 附「retro 素材」段：返工 / 踩踏 / 降级 / 波次合并的**摘要素材**，喂给
  *     清晨主会话的批末 retro（#71 规则）。**容器内不跑 retro**（Q73-1）：这里只喂料。
- *   - 发车前自检 bash 工具链（#43）：Windows 宿主的 PATH bash 会漂移到 WSL bash
- *     （uname=Linux、无 msys /c 映射）或 Git bash（无 gcc）。夜跑宿主链本身
- *     （night-run→run-ticket→podman provider）经 npx/git/gh/podman CLI 直启、不经宿主
- *     bash（实测：@ai-hero/sandcastle 0.12.0 podman provider 宿主侧全部 execFile/spawn
- *     podman CLI，容器内走 sh -c）——探针是与 e2e findBash()（#30 修复先例）同判据的
- *     宿主工具链守门：漂移的 PATH bash 会让任何宿主 bash 步骤（templates/setup.sh、
- *     消费者自建的 gh shim 编译、e2e 搭台）以含糊方式挂，这里在烧批前统一响亮核对：
- *     bash 可执行 + uname 非 Linux（msys 形态）+ gcc 直达或 /ucrt64/bin/gcc 存在；
- *     失败给可行动错误（指明设 PATH 或安装 msys2），绝不带病发射。
+ *   - 发车前自检 bash 工具链（#43，#191 起发现面扩为候选探测）：Windows 宿主的
+ *     PATH bash 会漂移到 WSL bash（uname=Linux、无 msys /c 映射）或 Git bash（无
+ *     gcc）。夜跑宿主链本身（night-run→run-ticket→podman provider）经
+ *     npx/git/gh/podman CLI 直启、不经宿主 bash（实测：@ai-hero/sandcastle 0.12.0
+ *     podman provider 宿主侧全部 execFile/spawn podman CLI，容器内走 sh -c）——探针
+ *     是与 e2e findBash()（#30 修复先例）同判据的宿主工具链守门：漂移的 bash 会让
+ *     任何宿主 bash 步骤（templates/setup.sh、消费者自建的 gh shim 编译、e2e 搭台）
+ *     以含糊方式挂，这里在烧批前统一响亮核对：bash 可执行 + uname 非 Linux（msys
+ *     形态）+ gcc 直达或 /ucrt64/bin/gcc 存在。#191：判据逐候选不变（WSL bash 仍
+ *     不放过——path 翻译语义不兼容），发现面从「PATH 首个」扩为候选探测（PATH 首个
+ *     → PATH 其余 bash.exe → msys2 标准安装点），取第一个合格候选放行——不再因
+ *     PATH 顺序误杀同机可用的 msys2/git-bash；全部候选不合格才 exit 3，报错列出
+ *     已探测候选与各自失败原因。失败给可行动错误（指明设 PATH 或安装 msys2），
+ *     绝不带病发射。
  *
  * 退出码：0=全部处理完  2=配额熔断提前停止（队列可重跑续命）  3=bash 工具链自检失败
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { arg, isMain } from "./lib.ts";
 import { EXIT_STATUS } from "./run-ticket.mts";
 
@@ -41,46 +47,94 @@ import { EXIT_STATUS } from "./run-ticket.mts";
 // bash 工具链自检（#43；参照 tests/sandcastle-e2e.mjs findBash()，#30 修复先例）
 // ============================================================
 
-/** 一条 `bash -c` 探针的执行形态（main 里传真实现；测试注入假执行器，不依赖本机工具链）。 */
-export type BashProbeRunner = (script: string) => { status: number | null; stdout: string };
+/**
+ * 一条 `bash -c` 探针的执行形态（main 里传真实现；测试注入假执行器，不依赖本机
+ * 工具链）。bash = 被探测的候选 bash 命令（#191 候选探测：按候选逐个起跑）。
+ */
+export type BashProbeRunner = (bash: string, script: string) => { status: number | null; stdout: string };
 
 /**
- * bash 工具链能力探针，判据与 e2e findBash() 同源（#43）：
+ * 候选 bash 发现（#191）：「bash 工具链可用」不应被绑定成「PATH 首个 bash 合格」——
+ * 实测形态（票面 #191）：PATH 首个 bash = system32 WSL shim 时旧预检 exit 3，而同机
+ * msys2/git-bash 工具链在场且合格，只是被 PATH 顺序（或系统搜索顺序）挡住。
+ * 候选顺序（探测顺序即优先序）：
+ *   1. "bash" —— 现行为保序优先（spawnSync 按系统搜索顺序解析），不改既有环境读数；
+ *   2. win32 上 PATH 逐目录枚举的 bash.exe 绝对路径（按 PATH 顺序、同目录去重）——
+ *      覆盖 git-bash / msys2 在 PATH 上但被 shim 挡位的形态；
+ *   3. msys2 标准安装点 C:/msys64/usr/bin/bash.exe（e2e findBash() 先例同款，#120 ④）。
+ * Git for Windows 的字面安装路径（Program Files 一族）不写死——与 e2e #120 口径 B
+ * 同判：写死机器布局 = 绑定环境（本票要拆的正是这个）；不在标准点的 git-bash 把其
+ * usr/bin 前置到 PATH 即被候选 2 自然发现。e2e 的 env 覆盖位（SANDCASTLE_E2E_BASH）
+ * 属 e2e 自身约定，night-run 侧无对应约定、不引入。「bash」与 PATH 枚举命中可能
+ * 解析到同一物（重复探测一次，宁重复勿漏——系统搜索顺序可能让「bash」命中 PATH
+ * 之外的 System32）。缺席的标准点也保留为候选（探测报缺席原因，缺席必响亮）。
+ * 非 win32 宿主：bash 无漂移形态，单候选（与原 PATH 首个语义等价）。
+ */
+export function bashCandidates(pathValue: string, platform: string): string[] {
+  if (platform !== "win32") return ["bash"];
+  const cands = ["bash"];
+  const seen = new Set<string>();
+  for (const raw of pathValue.split(";")) {
+    const dir = raw.trim().replace(/^"|"$/g, "");
+    if (dir === "" || seen.has(dir.toLowerCase())) continue;
+    seen.add(dir.toLowerCase());
+    const exe = join(dir, "bash.exe");
+    if (existsSync(exe)) cands.push(exe);
+  }
+  cands.push("C:/msys64/usr/bin/bash.exe");
+  return cands;
+}
+
+/**
+ * bash 工具链能力探针，判据与 e2e findBash() 同源（#43），#191 起按候选逐个判定
+ * （candidates 顺序即探测顺序，取第一个合格者；判据不放宽）：
  *   ① bash 可执行，且 Windows 宿主上 `uname -s` 非 Linux（msys 形态 = MINGW 或 MSYS
  *      前缀；WSL bash 报 Linux——它没有 msys /c 路径映射，宿主侧的 bash 步骤
  *      （setup.sh、消费者自建的 shim 编译）会以含糊失败挂掉）；
  *   ② gcc 直达（command -v gcc）或 msys2 标准位 /ucrt64/bin/gcc.exe 存在。
- * 返回 undefined=自检通过；否则返回**可行动错误**全文（指明设 PATH 或安装 msys2）。
- * 非 Windows 宿主（原生 Linux/macOS）跳过 ① 的形态判定——uname=Linux 是真内核而非漂移，
- * 只做 ② 的 gcc 关。
+ * 返回 undefined=存在合格候选；否则返回**可行动错误**全文：已探测候选与各自失败
+ * 原因逐一列出（缺席必响亮），附修复指引（指明设 PATH 或安装 msys2）。
+ * 非 Windows 宿主（原生 Linux/macOS）跳过 ① 的形态判定——uname=Linux 是真内核而非
+ * 漂移，只做 ② 的 gcc 关。
  */
-export function bashToolchainProblem(run: BashProbeRunner, platform: string): string | undefined {
-  const uname = run("uname -s");
-  if (uname.status !== 0) {
-    return (
-      "✗ bash 工具链自检失败：bash 不在 PATH 上或不可执行（uname -s 退出 " +
-      `${uname.status}）。\n` +
-      "  修复方式之一：安装 Git for Windows 或 msys2（https://www.msys2.org），" +
-      "或把其 usr/bin 前置到 PATH 后重跑。"
-    );
+export function bashToolchainProblem(
+  run: BashProbeRunner,
+  platform: string,
+  candidates: string[],
+): string | undefined {
+  const tried: string[] = [];
+  for (const bash of candidates) {
+    const uname = run(bash, "uname -s");
+    if (uname.status !== 0) {
+      tried.push(`  - ${bash}：bash 不在 PATH 上或不可执行（uname -s 退出 ${uname.status}）`);
+      continue;
+    }
+    const s = uname.stdout.trim();
+    if (platform === "win32" && !/MINGW|MSYS/i.test(s)) {
+      tried.push(
+        `  - ${bash}：` +
+          (s === "Linux"
+            ? "WSL bash（uname -s = Linux，无 msys /c 路径映射——宿主侧 bash 步骤会含糊挂掉，不放过）"
+            : `bash 不是 msys 形态（uname -s = ${s}）`),
+      );
+      continue;
+    }
+    const gcc = run(bash, "command -v gcc >/dev/null 2>&1 || test -x /ucrt64/bin/gcc.exe");
+    if (gcc.status !== 0) {
+      tried.push(`  - ${bash}：gcc 不可达（PATH 上没有 gcc，msys2 标准位 /ucrt64/bin/gcc.exe 也不存在）`);
+      continue;
+    }
+    return undefined; // 候选中首个合格者——放行（WSL 候选在形态关已被拒，不放过）
   }
-  const s = uname.stdout.trim();
-  if (platform === "win32" && !/MINGW|MSYS/i.test(s)) {
-    return (
-      `✗ bash 工具链自检失败：PATH 上的 bash 不是 msys 形态（uname -s = ${s}；` +
-      "常见于 WSL bash——无 msys /c 路径映射）。\n" +
-      "  修复方式之一：把 Git for Windows / msys2 的 usr/bin 前置到 PATH 后重跑。"
-    );
-  }
-  const gcc = run("command -v gcc >/dev/null 2>&1 || test -x /ucrt64/bin/gcc.exe");
-  if (gcc.status !== 0) {
-    return (
-      "✗ bash 工具链自检失败：gcc 不可达（PATH 上没有 gcc，msys2 标准位 /ucrt64/bin/gcc.exe 也不存在）。\n" +
-      "  修复方式之一：安装 msys2（https://www.msys2.org）并 `pacman -S mingw-w64-ucrt-x86_64-gcc`，" +
-      "或把 msys2 的 usr/bin 与 ucrt64/bin 前置到 PATH 后重跑。"
-    );
-  }
-  return undefined;
+  return (
+    `✗ bash 工具链自检失败：${candidates.length} 个候选 bash 全部不合格。\n` +
+    "  已探测候选与各自失败原因：\n" +
+    tried.join("\n") +
+    "\n" +
+    "  修复方式之一：安装 msys2（https://www.msys2.org）并 `pacman -S mingw-w64-ucrt-x86_64-gcc`，" +
+    "或把 Git for Windows / msys2 的 usr/bin（及 ucrt64/bin）前置到 PATH 后重跑——" +
+    "PATH 上其余 bash.exe 与 msys2 标准安装点都会作为候选被自动探测。"
+  );
 }
 
 // ============================================================
@@ -377,13 +431,13 @@ export function skipReason(prevStatus: string): string | undefined {
 // ============================================================
 // CLI 主体整体包在 main()：冒烟测试 import 纯函数时不读队列、不 spawn、不退出。
 function main(): void {
-// #43：发车前 bash 工具链自检（判据与 e2e findBash() 同源）——失败 exit 3，
-// 在烧批前把宿主工具链形态响亮核对掉，绝不带病发射。
-const probeRun: BashProbeRunner = (script) => {
-  const r = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+// #43/#191：发车前 bash 工具链自检（判据与 e2e findBash() 同源；#191 起候选探测）——
+// 失败 exit 3，在烧批前把宿主工具链形态响亮核对掉，绝不带病发射。
+const probeRun: BashProbeRunner = (bash, script) => {
+  const r = spawnSync(bash, ["-c", script], { encoding: "utf8" });
   return { status: r.status, stdout: r.stdout ?? "" };
 };
-const toolchainProblem = bashToolchainProblem(probeRun, process.platform);
+const toolchainProblem = bashToolchainProblem(probeRun, process.platform, bashCandidates(process.env.PATH ?? "", process.platform));
 if (toolchainProblem) {
   console.error(toolchainProblem);
   process.exit(3);
