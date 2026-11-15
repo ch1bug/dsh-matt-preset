@@ -17,10 +17,15 @@
  *     零写盘、消费清点源快照（结构契约，真实 registry 适配 = 子票 C 接线 / 子票 D seed）；
  *     单测双向钉在 tests/verify-session-archive-plan.mjs（判据核心 = CHECKS 数组；
  *     tests/session-archive-plan.spec.ts 为 vitest 薄入口，同 #180 双入口形态）。
- *   - 子票 C：计划触发——cordis-plugin-timer（`ctx.timeout/interval/debounce/throttle`，
- *     随 fiber 释放，CONTEXT.md 已核环境事实）挂到本文件的 `effectiveSchedule` gate 上：
- *     启用时注册 interval、停用即清（AC4 的运行时接线点）。
- *   - 子票 D：seed 验证（1096 复现形态夹具）。
+ *   - 子票 C（#197，已落地，本文件「计划与触发」段）：计划频率与触发面——tick + gate
+ *     形态（cordis-plugin-timer 只当 ticker：`ctx.interval` 60s tick，随 fiber 释放；
+ *     三频率语义全在子票 A 的 `computeNextRun`/`effectiveSchedule` 纯函数面，载体判定
+ *     「tick + gate 可承载任意频率」——不升级上报）+ 补跑（错过不补多批、启动后最多
+ *     补跑一次）+ 单实例互斥 + 触发面（立即运行一次 / dry-run 预览）+ 真实 registry
+ *     快照合成（sessionQuery + workspaceRegistry 结构投影，buildSnapshotView 纯函数）。
+ *     单测双向钉在 tests/verify-session-archive-schedule.mjs（判据核心 = CHECKS 数组；
+ *     tests/session-archive-schedule.spec.ts 为 vitest 薄入口，同 #180 双入口形态）。
+ *   - 子票 D：seed 验证（1096 复现形态夹具）+ 插件接线测试（mount 形态）。
  *
  * 边界（ADR-0001 口径，票面原文）：**不装 dsh-schedule**（会话级提醒服务，冷会话不投递；
  * D3/ADR-0001:26 先例——「本插件不装 dsh-schedule」）；**不恢复 scheduled-jobs.mjs 技能
@@ -35,7 +40,9 @@
  *
  * 并发面（v1 声明）：standing mount 单实例、单 fiber（cordis 语义），写盘走
  * tmp+rename 原子替换；不做跨进程文件锁——第二份写入面（子票 C 的 tick 与将来的
- * 配置面 UI 同进程串行）出现时再升级，此处显式声明而非静默假设。
+ * 配置面 UI 同进程串行）出现时再升级，此处显式声明而非静默假设。子票 C 在此声明
+ * 之上加了进程内单实例互斥（createRunMutex，AC3）——同一 fiber 上 tick 与手动触发
+ * 的异步交错窗口共用同一互斥标志，重叠触发的第二方被拒绝并记录。
  */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -43,6 +50,17 @@ import { dirname, isAbsolute, join } from 'node:path'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'session-archive'
+
+/**
+ * Cordis 服务注入声明（cordis Loader 把模块 namespace 当对象插件，vendor/cordis
+ * registry.ts 的 `Inject.resolve(plugin.inject)` 直接消费本导出）：本插件挂载时注册
+ * timer tick（apply 内 `ctx.interval`），timer 是 mixin 服务（vendor/timer：
+ * `ctx.mixin('timer', […])`），**未经 inject 声明直接读 `ctx.interval` 会在 cordis 的
+ * ctx proxy 处抛 `cannot get property "interval" without inject`**（reflect.ts get trap
+ * ——verify-dual-env 真宿主挂载实测拦下的形态，#197）。声明后 timer 成为必需服务：
+ * 宿主缺席 timer 时本插件不激活并响亮（比静默无调度好——调度面缺席必须现形）。
+ */
+export const inject = ['timer']
 
 // ── 配置面 v1（票面 AC2 的四项，逐字段对应）────────────────────────────────────
 // schema 形态 = 校验器白名单（未知键/非法值响亮拒绝，点名问题——配置错拼静默失效是
@@ -745,14 +763,428 @@ export async function runArchiveCycle(view, config, registry, now = new Date()) 
   }
 }
 
-// ── cordis 插件注册面（AC1 骨架）───────────────────────────────────────────────
-// v1 骨架 = 只注册，无运行时副作用（不建目录、不写文件、不注册服务/工具）：配置与
-// 运行记录的读写、调度 gate 在本文件的导出纯面（上方），单测双向钉于
-// tests/verify-session-archive.mjs（判据核心；tests/session-archive.spec.ts 为 vitest 薄
-// 入口，#180 双入口）；归档选择与执行（子票 B）的导出纯面见「归档选择与执行」段，单测
-// 双向钉于 tests/verify-session-archive-plan.mjs（tests/session-archive-plan.spec.ts 为
-// vitest 薄入口）。子票 C 在 mount 上把 cordis-plugin-timer 接到
-// effectiveSchedule gate（启用注册 interval、停用即清）并从真实 registry 合成清点源快照；
+// ── 计划与触发（#197 子票 C：AC1 三频率接线 / AC2 补跑 / AC3 单实例互斥 / AC4 触发面）
+// 形态总述：**tick + gate**——cordis-plugin-timer（`ctx.interval`，vendor/timer/src/index.ts
+// 在场：`interval(callback, delay): () => void`，mixin 到 ctx、随 fiber 释放自动清，
+// CONTEXT.md:41 已核环境事实）只当固定间隔 ticker（TICK_MS），**三频率语义全在子票 A
+// 的纯函数面**（computeNextRun 排班 / effectiveSchedule gate 判停）——tick 内消费
+// runlog.nextRun 存储面判定到点/错过。载体能力判定（票面 AC1 升级上报判据）：interval
+// tick + gate 判定可承载任意频率形态，**载体能力足够，不升级上报**；D3/ADR-0001 边界
+// 照旧——不装 dsh-schedule（会话级提醒服务，冷会话不投递），不 import 宿主 schedule 服务。
+//
+// 错过判定（AC2）的语义源 = **runlog.nextRun 存储面**（上次排定的计划时点，runs.json
+// 持久锚），不是 effectiveSchedule 的派生面——派生面严格晚于 now、永远不会「已过」，
+// 用它判定补跑则补跑永不触发。错过不补多批由 recordRun 刷 nextRun 机械保证：补跑
+// （或到点运行）落账后 nextRun 重算到未来，不管错过几个周期也只跑本轮这一批。
+// 「启动后最多补跑一次」由 decideTick 的 catchupDone 决策面置位保证：第一次判到错过
+// 即消耗补跑窗口（原因标 catchup），此后错过一律按 scheduled 到点运行——补跑窗口
+// 零次或一次，不会因互斥拒绝等原因反复重试补跑。
+//
+// 触发面（AC4）：立即运行一次（runOnce，手动入口）+ dry-run 预览（dryRun，调 #196
+// selectArchivePlan 只算不执行）。gate 消费面照 #195 注释口径「任何触发点（timer tick /
+// 手动运行入口）」：runOnce 也判 gate（停用拒绝）；dry-run 是只读审计面不判 gate（停用
+// 下允许预览——启用前审计是它的本职），取舍在案。落账（recordRun + writeRunlog）在本
+// 段接线内做——#196 runArchiveCycle 零写盘留给消费面的声明在此兑现。
+
+/** tick 周期（毫秒）：60s——三频率语义的最小粒度是分钟（`HH:mm`），60s tick 的触发
+ *  延迟上限 ≤1 分钟；到点判定看 nextRun 时点而非 tick 计数，tick 只影响延迟不积累
+ *  漂移。导出为常量供判据钉（apply 接线消费同一常量，不另写第二份）。 */
+export const TICK_MS = 60_000
+
+/** 触发原因词表（触发面运行与事件记录的 trigger 封闭集合）：`scheduled` = 计划到点；
+ *  `catchup` = 错过后的补跑窗口（AC2，本轮启动最多一次）；`manual` = 手动立即运行。 */
+export const TRIGGER_KINDS = Object.freeze({ scheduled: 'scheduled', catchup: 'catchup', manual: 'manual' })
+
+/** tick 决策动作词表（decideTick 产出 kind 封闭集合）：
+ *  - `none`：不动（停用无残留 / 启用未到点）；
+ *  - `clear-next-run`：停用但 runs.json 残留 nextRun——清盘写回 null（停用态回读面一致；
+ *    #195 applyConfigChange 只覆盖 UI 面切换，文件面手改 config.json 的残留在此清理）；
+ *  - `init-schedule`：启用但无有效排班（首装 / 记录面重置）——排定首班（nextRun 严格
+ *    未来），随 tick 写盘；
+ *  - `run`：到点或错过——触发一轮归档（trigger 指明 scheduled/catchup）。 */
+export const TICK_ACTIONS = Object.freeze({
+  none: 'none',
+  clearNextRun: 'clear-next-run',
+  initSchedule: 'init-schedule',
+  run: 'run',
+})
+
+/**
+ * 错过判定（AC2）：上次排定的计划时点（`runlog.nextRun` 存储面）已到或已过 → true。
+ * enabled=false → false（gate 权威，停用没有「错过」）；nextRun 缺席或坏串 → false
+ * （从没排过班 / 记录面重置态——排班由 init-schedule 分支重建，不在此判错过）。
+ * 到点即算错过（`<=`）：nextRun 是「计划时点」，now 恰好等于它就该跑——#195 weekly
+ * 严格语义（到点不排下一轮）的对偶面，两者合起来才是完整的一轮语义。
+ */
+export function hasMissedRun(config, runlog, now = new Date()) {
+  if (!config?.enabled) return false
+  const nextRun = runlog?.nextRun
+  if (typeof nextRun !== 'string' || nextRun === '') return false
+  const scheduledAt = Date.parse(nextRun)
+  if (!Number.isFinite(scheduledAt)) return false
+  return scheduledAt <= now.getTime()
+}
+
+/**
+ * tick 决策（纯函数状态机；IO 由接线面执行）。入参 catchupDone = 本轮启动（mount
+ * 生命周期）补跑窗口是否已消耗；返回 `{ kind, catchupDone, trigger?, nextRun?, problem? }`
+ * ——catchupDone 是**新状态**（调用方用它更新，决策面置位 = 窗口消耗按「判到」计，
+ * 不按「执行成功」计，故互斥拒绝后也不会反复重试补跑）。
+ * @param config 规范化配置（normalizeConfig 产出；坏配置由 readConfig 兜底成默认关，
+ *   gate 判定自然停——坏配置不带半份跑）
+ * @param runlog 运行记录（readRunlog 产出；坏文件已重置空 + problems）
+ * @param opts `now`（判定基准）与 `catchupDone`（窗口状态）
+ */
+export function decideTick(config, runlog, { now = new Date(), catchupDone = false } = {}) {
+  if (!config?.enabled) {
+    const stale = typeof runlog?.nextRun === 'string' && runlog.nextRun !== ''
+    return { kind: stale ? TICK_ACTIONS.clearNextRun : TICK_ACTIONS.none, catchupDone }
+  }
+  const nextRun = runlog?.nextRun
+  if (typeof nextRun !== 'string' || nextRun === '' || !Number.isFinite(Date.parse(nextRun))) {
+    // 启用但无有效排班（首装 / 记录面重置）：排首班。computeNextRun 在规范化配置启用态
+    // 恒有未来时点（weekly/semimonthly/monthly 三形态各自的下一候选必在未来）；null 是
+    // 理论不可达的防御形态——不写盘不刷屏（每 tick 重写同一 null 才是真风险），problem
+    // 字段响亮带出。
+    const scheduled = computeNextRun(config, now)
+    if (scheduled === null) {
+      return { kind: TICK_ACTIONS.none, catchupDone, problem: '排班计算返回空（规范化配置启用态理论不可达——防御形态不写盘）' }
+    }
+    return { kind: TICK_ACTIONS.initSchedule, catchupDone, nextRun: scheduled.toISOString() }
+  }
+  if (!hasMissedRun(config, runlog, now)) return { kind: TICK_ACTIONS.none, catchupDone }
+  // 错过：补跑窗口未消耗 → catchup（本轮启动唯一一次补跑）；已消耗 → scheduled 到点运行
+  // （不是补跑——落账后 nextRun 刷新回未来，正常运行序）。
+  return {
+    kind: TICK_ACTIONS.run,
+    trigger: catchupDone ? TRIGGER_KINDS.scheduled : TRIGGER_KINDS.catchup,
+    catchupDone: true,
+  }
+}
+
+/**
+ * 单实例互斥（AC3）：同一时刻只允许一个归档任务实例。进程内闭包标志——standing mount
+ * 单 fiber 串行（#195 并发面声明），tick 与手动触发的**异步交错窗口**（runArchiveCycle
+ * 的 await 点）共用同一标志；tryBegin 失败 = 重叠触发的第二方被拒（不执行不落账），
+ * 调用方 tryBegin 后必须 finally end（接线面内聚，外部不直接消费 mutex）。
+ */
+export function createRunMutex() {
+  let running = false
+  return {
+    isRunning: () => running,
+    tryBegin: () => {
+      if (running) return false
+      running = true
+      return true
+    },
+    end: () => {
+      running = false
+    },
+  }
+}
+
+/**
+ * 快照合成纯函数（真实 adapter 的投影面）：把 `sessionQuery.listSessions()` 的
+ * SessionRecord 最小面（`{ header: { id, createdAt, origin? }, live }`——上游
+ * packages/session-query/session-query/src/index.ts:169 与 session-format/src/types.ts:16
+ * 在案：createdAt 毫秒时点、origin 'subagent' 标记）与 workspace 成员面
+ * （registry.list() 的 `{ id, sessionIds }` 投影）合成 #196 的 ArchiveSnapshotView。
+ * 投影语义：
+ *   - `lastActivityAt` ← `header.createdAt`——**保守取舍**：只有创建时点可用（updatedAt
+ *     需逐会话读投影，1096 量级下不可承受）；createdAt 低估年龄 = 少归档——宁可漏归档
+ *     不可误归档，取舍在案（#196 契约注释「adapter 决定取 header createdAt 还是其它
+ *     时点」的裁决）。
+ *   - `subagent` ← `header.origin === 'subagent'`；`live` ← `record.live`（live store
+ *     在场即 live 会话）。
+ *   - `active` 选择期投影 **v1 缺席**（显式降级声明，S3）：上游活动家族（turn/job/
+ *     schedule/subagent waterfall）无低成本批量投影面——活动会话由执行期兜底：上游
+ *     `archiveSession` 无 stopActivity 时先于写盘抛 WorkspaceActiveSessionError，#196
+ *     executeArchivePlan 记 skipped(active) 继续（E2 已钉）。选择期少排除 = 预览计数
+ *     可能偏高，不产生破坏性后果。
+ *   - `workspaceId` ← 成员面匹配；不在任何 workspace 成员面的会话落「无 workspace」
+ *     虚拟组（null，散落会话不排除在缓解外，#185 定盘）；同一会话重复出现在多个
+ *     workspace 成员面 = 上游形状异常，响亮抛（跨组重复归档不可静默容忍）。
+ *   - `archivedSessionIds` 里的会话**不入 sessions**（adapter 层滤除）——归档是显示层
+ *     操作，sessionQuery 仍会列举已归档会话，不滤则每轮 totals.skipped 全量增长误导；
+ *     #196 选择算法的 archived 幂等面保留作防御形态（快照仍含已归档会话时正确跳过）。
+ *   - `pinnedSessionIds` 全局集合原样透传（#196 双形态并集判定消费）。
+ * 形状非法（records 非数组 / 条目缺 header / createdAt 非法 / 成员面条目坏）响亮抛
+ * 点名——快照是清点面，缺席/坏形状不静默当作空会话跑（S1）。
+ * @returns ArchiveSnapshotView（#196 selectArchivePlan 直喂形态）
+ */
+export function buildSnapshotView({ records, memberships, pinnedSessionIds = [], archivedSessionIds = [] }) {
+  if (!Array.isArray(records)) {
+    throw new Error(`buildSnapshotView：records 必须是数组（sessionQuery.listSessions() 投影），收到 ${Array.isArray(records) ? 'array' : typeof records}。`)
+  }
+  if (!Array.isArray(memberships)) {
+    throw new Error(`buildSnapshotView：memberships 必须是数组（registry.list() 成员投影），收到 ${Array.isArray(memberships) ? 'array' : typeof memberships}。`)
+  }
+  const memberOf = new Map()
+  for (const [index, membership] of memberships.entries()) {
+    if (membership === null || typeof membership !== 'object' || typeof membership.workspaceId !== 'string' || membership.workspaceId === '' || !Array.isArray(membership.sessionIds)) {
+      throw new Error(`buildSnapshotView：memberships[${index}] 必须是 { workspaceId: 非空字符串, sessionIds: 数组 }（registry.list() 成员投影），收到 ${JSON.stringify(membership)}。`)
+    }
+    for (const sessionId of membership.sessionIds) {
+      if (typeof sessionId !== 'string' || sessionId === '') {
+        throw new Error(`buildSnapshotView：memberships[${index}]（workspace '${membership.workspaceId}'）的 sessionIds 条目必须是非空字符串，收到 ${JSON.stringify(sessionId)}。`)
+      }
+      if (memberOf.has(sessionId)) {
+        throw new Error(`buildSnapshotView：sessionId '${sessionId}' 同时出现在两个 workspace 成员面（'${memberOf.get(sessionId)}' 与 '${membership.workspaceId}'）——上游形状异常（成员面应唯一），跨组重复归档不可静默容忍。`)
+      }
+      memberOf.set(sessionId, membership.workspaceId)
+    }
+  }
+  const archived = new Set()
+  for (const [index, id] of (archivedSessionIds ?? []).entries()) {
+    if (typeof id !== 'string' || id === '') {
+      throw new Error(`buildSnapshotView：archivedSessionIds[${index}] 必须是非空字符串，收到 ${JSON.stringify(id)}。`)
+    }
+    archived.add(id)
+  }
+  const pinned = new Set()
+  for (const [index, id] of (pinnedSessionIds ?? []).entries()) {
+    if (typeof id !== 'string' || id === '') {
+      throw new Error(`buildSnapshotView：pinnedSessionIds[${index}] 必须是非空字符串，收到 ${JSON.stringify(id)}。`)
+    }
+    pinned.add(id)
+  }
+  const sessions = []
+  for (const [index, record] of records.entries()) {
+    if (record === null || typeof record !== 'object' || record.header === null || typeof record.header !== 'object') {
+      throw new Error(`buildSnapshotView：records[${index}] 必须是 { header: { id, createdAt, ... }, live }（SessionRecord 投影），收到 ${JSON.stringify(record)}。`)
+    }
+    const { header } = record
+    const sessionId = header.id
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      throw new Error(`buildSnapshotView：records[${index}].header.id 必须是非空字符串，收到 ${JSON.stringify(sessionId)}。`)
+    }
+    if (archived.has(sessionId)) continue // 归档显示层仍列举——adapter 层滤除（理由见函数头注释）
+    if (!Number.isFinite(header.createdAt) || header.createdAt < 0) {
+      throw new Error(`buildSnapshotView：records[${index}]（sessionId '${sessionId}'）的 header.createdAt 必须是非负毫秒时点（SessionFormatHeader 校验面同款），收到 ${JSON.stringify(header.createdAt)}。`)
+    }
+    sessions.push({
+      sessionId,
+      workspaceId: memberOf.get(sessionId) ?? null,
+      lastActivityAt: header.createdAt,
+      live: record.live === true,
+      subagent: header.origin === 'subagent',
+    })
+  }
+  return { sessions, pinnedSessionIds: [...pinned], archivedSessionIds: [...archived] }
+}
+
+/**
+ * 真实 ctx 快照合成（接线面）：从宿主 ctx 取 `workspaceRegistry`（上游 Service，super(ctx,
+ * 'workspaceRegistry')，本仓 handoff-tool.mjs:615 同款先例——ctx.get 缺席返回 undefined）
+ * 与 `sessionQuery`（上游 SessionQueryEngine，listSessions(signal?) 全量 live-preferred
+ * corpus），合成 ArchiveSnapshotView。服务缺席**或形状不完整****响亮抛**——触发面与
+ * handoff-tool 的机会性 skip（undefined → 零字段不告警）不同：归档触发面拿着空清单或
+ * 缺面清单跑 = 一次假运行，响亮失败让 gate/事件面现形，不静默跑空（复审轮①，2026-11-15：
+ * registry.list 缺席静默置空 = 全部会话落虚拟组、per-workspace 保底语义静默丢失；
+ * pinnedSessionIds/archivedSessionIds 缺席静默清空排除面 = pinned 会话被选中归档且上游
+ * 归档同写清 pin = 用户置顶被静默清除——与同函数 sessionQuery 的响亮契约对称化）。
+ * @param ctx cordis ctx（apply 挂载面传入；测试给 provide 缝的 mock ctx）
+ */
+export async function synthesizeSnapshot(ctx) {
+  const registry = ctx?.get?.('workspaceRegistry')
+  const sessionQuery = ctx?.get?.('sessionQuery')
+  if (registry === undefined) {
+    throw new Error('synthesizeSnapshot：workspaceRegistry 服务缺席（ctx.get 返回 undefined）——归档动作面与成员面不可用，响亮失败不静默跑空。')
+  }
+  if (typeof registry.list !== 'function') {
+    throw new Error('synthesizeSnapshot：workspaceRegistry 缺 list()（成员面不可用——静默置空会让全部会话落「无 workspace」虚拟组、per-workspace 保底语义静默丢失），响亮失败不静默跑空。')
+  }
+  if (registry.pinnedSessionIds === undefined || registry.archivedSessionIds === undefined) {
+    throw new Error(`synthesizeSnapshot：workspaceRegistry 缺 pinnedSessionIds/archivedSessionIds 全局集合（排除面不可用——静默清空会让 pinned 会话被选中归档，而上游归档同写清 pin = 用户置顶被静默清除），收到 pinned=${JSON.stringify(registry.pinnedSessionIds)} archived=${JSON.stringify(registry.archivedSessionIds)}，响亮失败不静默跑空。`)
+  }
+  if (sessionQuery === undefined || typeof sessionQuery.listSessions !== 'function') {
+    throw new Error('synthesizeSnapshot：sessionQuery 服务缺席或无 listSessions（ctx.get 返回 undefined）——清点面不可用，响亮失败不静默跑空。')
+  }
+  const records = await sessionQuery.listSessions()
+  const memberships = registry.list().map((workspace) => {
+    if (typeof workspace?.id !== 'string' || workspace.id === '') {
+      throw new Error(`synthesizeSnapshot：registry.list() 条目的 id 必须是非空字符串（不 String() 洗值——任意值洗成串会造出假实体组绕过成员面校验），收到 ${JSON.stringify(workspace?.id)}。`)
+    }
+    if (!Array.isArray(workspace.sessionIds)) {
+      throw new Error(`synthesizeSnapshot：registry.list() 条目（workspace '${workspace.id}'）缺 sessionIds 数组（成员面形状不完整——响亮失败不静默当空成员跑），收到 ${JSON.stringify(workspace.sessionIds)}。`)
+    }
+    return { workspaceId: workspace.id, sessionIds: [...workspace.sessionIds] }
+  })
+  return buildSnapshotView({
+    records,
+    memberships,
+    pinnedSessionIds: [...registry.pinnedSessionIds],
+    archivedSessionIds: [...registry.archivedSessionIds],
+  })
+}
+
+/**
+ * 调度器（触发面组合入口）：闭包持有互斥（AC3）与补跑窗口状态（AC2），runOnce /
+ * dryRun / tick 三入口共读同一状态。全部 IO 经 deps 注入——单测以内存夹具 / mock
+ * registry 双向钉（#196 同款纪律：不触盘不读真实 home），apply 接线用真实 deps。
+ * @param deps
+ *   - `storageDir`：配置与运行记录读写目录（#195 读写面消费）；
+ *   - `snapshot`：`async () => ArchiveSnapshotView`——真实 = synthesizeSnapshot(ctx)，
+ *     测试 = 内存夹具；
+ *   - `archiveSession`：`async (sessionId) => void`——真实 = registry.archiveSession 绑定
+ *     （单参形态，#196 E1），测试 = mock 计数；
+ *   - `now`（可选）：时钟注入缝（缺省 () => new Date()；判定/落账用同一时点快照）；
+ *   - `onEvent`（可选）：`(event) => void` 事件侧出口（真实 = ctx.logger；测试收集断言；
+ *     出口本身抛错不回传进触发面——logger 故障不阻断归档）。
+ * @returns `{ tick, runOnce, dryRun }`：
+ *   - `runOnce(trigger)`：立即运行一轮（AC4）。gate 判定（停用拒绝——#195「任何触发点
+ *     消费本 gate」含手动入口）→ 互斥 tryBegin（占用拒绝）→ 合成快照 → runArchiveCycle
+ *     （#196：选择+执行）→ readRunlog → recordRun → writeRunlog（落账）。返回
+ *     `{ started: true, trigger, outcome, report }` 或 `{ started: false, reason,
+ *     problems? }`（reason ∈ disabled / busy / config-invalid）。
+ *   - `dryRun()`：dry-run 预览（AC4）——readConfig → 合成快照 → selectArchivePlan 只算
+ *     不执行（archiveSession 零调用、runs.json 零写盘）。**不判 gate**（停用下允许
+ *     预览——启用前审计是 dry-run 的本职，取舍见段头）。返回 `{ ok: true, count, plan }`
+ *     或 `{ ok: false, problems }`。
+ *   - `tick()`：计划心跳（AC1/AC2）——readConfig → readRunlog → decideTick → 按 kind
+ *     执行（none / 清残留 / 排首班 / runOnce）。**不抛出**：无人值守面（interval 回调）
+ *     异常一律记 error 事件走 onEvent 出口，不向上炸（cordis fiber 上抛行为不确定，
+ *     防御性内聚）；手动入口 runOnce/dryRun 照常抛（调用方在场，响亮优先）。
+ */
+export function createScheduler({ storageDir, snapshot, archiveSession, now = () => new Date(), onEvent = null }) {
+  if (typeof storageDir !== 'string' || storageDir === '') {
+    throw new Error('createScheduler：storageDir 必须是非空字符串（配置与运行记录读写目录），收到 ' + JSON.stringify(storageDir) + '。')
+  }
+  if (typeof snapshot !== 'function') {
+    throw new Error('createScheduler：snapshot 必须是函数（async () => ArchiveSnapshotView），收到 ' + typeof snapshot + '。')
+  }
+  if (typeof archiveSession !== 'function') {
+    throw new Error('createScheduler：archiveSession 必须是函数（async (sessionId) => void），收到 ' + typeof archiveSession + '。')
+  }
+  const mutex = createRunMutex()
+  let catchupDone = false // 本轮启动补跑窗口（AC2）：decideTick 决策面置位，最多消耗一次
+
+  const emit = (event) => {
+    if (typeof onEvent !== 'function') return
+    try {
+      onEvent(event)
+    } catch {
+      // 事件出口故障不阻断归档（logger 挂了不能连带归档挂）
+    }
+  }
+
+  /** 读配置；坏配置（problems 非空）返回 null 并带 event——默认关兜底由 gate 自然判停。 */
+  async function readConfigOrEmit() {
+    const { config, problems } = await readConfig(storageDir)
+    if (problems.length > 0) {
+      emit({ at: now().toISOString(), kind: 'error', detail: `config.json 校验问题（默认关兜底，不带半份配置跑）：${problems.join('；')}` })
+      return { config, problems }
+    }
+    return { config, problems }
+  }
+
+  /**
+   * 运行一轮并落账（gate 与互斥判定后调用；trigger ∈ TRIGGER_KINDS）。
+   * 落账失败照常抛（手动入口响亮；tick 内被捕获记 error）。
+   */
+  async function runCycle(trigger, config, at) {
+    const view = await snapshot()
+    const { report, outcome } = await runArchiveCycle(view, config, { archiveSession }, at)
+    const { runlog, problems } = await readRunlog(storageDir)
+    if (problems.length > 0) {
+      emit({ at: at.toISOString(), kind: 'error', detail: `runs.json 读取问题（已重置空继续落账）：${problems.join('；')}` })
+    }
+    let next = recordRun(runlog, config, outcome, at)
+    next = appendEvent(next, {
+      at: at.toISOString(),
+      kind: 'run',
+      trigger,
+      archived: outcome.archived,
+      skipped: outcome.skipped,
+      ...(outcome.ok ? {} : { error: outcome.error }),
+    })
+    await writeRunlog(storageDir, next)
+    return { started: true, trigger, outcome, report }
+  }
+
+  return {
+    /**
+     * 立即运行一轮（AC4 手动入口）。gate：停用拒绝（#195 口径——手动入口也是触发点）。
+     */
+    async runOnce(trigger = TRIGGER_KINDS.manual) {
+      if (!TRIGGER_KINDS[trigger]) {
+        throw new Error(`runOnce：trigger 必须是 ${Object.values(TRIGGER_KINDS).join(' / ')} 之一，收到 ${JSON.stringify(trigger)}。`)
+      }
+      const at = now()
+      const { config, problems } = await readConfigOrEmit()
+      if (problems.length > 0) return { started: false, reason: 'config-invalid', problems }
+      if (!config.enabled) {
+        emit({ at: at.toISOString(), kind: 'refused', detail: 'gate 判停：enabled=false（手动运行入口同样消费调度 gate）' })
+        return { started: false, reason: 'disabled' }
+      }
+      if (!mutex.tryBegin()) {
+        emit({ at: at.toISOString(), kind: 'refused', detail: `单实例互斥：已有归档任务实例在运行（AC3），本次 ${trigger} 触发被拒` })
+        return { started: false, reason: 'busy' }
+      }
+      try {
+        return await runCycle(trigger, config, at)
+      } finally {
+        mutex.end()
+      }
+    },
+
+    /**
+     * dry-run 预览（AC4）：调 #196 selectArchivePlan 计算将归档 N 个，不执行不落账。
+     */
+    async dryRun() {
+      const { config, problems } = await readConfigOrEmit()
+      if (problems.length > 0) return { ok: false, problems }
+      const view = await snapshot()
+      const plan = selectArchivePlan(view, config, now())
+      return { ok: true, count: plan.toArchive.length, plan }
+    },
+
+    /**
+     * 计划心跳（interval 回调消费）：决策 → 执行。不抛出（无人值守面，异常记事件）。
+     */
+    async tick() {
+      try {
+        const at = now()
+        const { config, problems } = await readConfigOrEmit()
+        if (problems.length > 0) return // 默认关兜底：gate 自然判停，本轮不动
+        const { runlog, problems: runlogProblems } = await readRunlog(storageDir)
+        const decision = decideTick(config, runlog, { now: at, catchupDone })
+        if (runlogProblems.length > 0) {
+          emit({ at: at.toISOString(), kind: 'error', detail: `runs.json 读取问题（已重置空，排班将重建）：${runlogProblems.join('；')}` })
+        }
+        if (decision.kind === TICK_ACTIONS.none) return
+        if (decision.kind === TICK_ACTIONS.clearNextRun) {
+          await writeRunlog(storageDir, { ...runlog, nextRun: null })
+          emit({ at: at.toISOString(), kind: 'schedule-clear', detail: '停用态残留 nextRun 已清盘（回读面一致）' })
+          return
+        }
+        if (decision.kind === TICK_ACTIONS.initSchedule) {
+          await writeRunlog(storageDir, { ...runlog, nextRun: decision.nextRun })
+          emit({ at: at.toISOString(), kind: 'schedule-init', detail: `排定首班 nextRun=${decision.nextRun}` })
+          return
+        }
+        // kind === run：catchupDone 决策面已置位（decideTick 产出），先更新状态再执行——
+        // 互斥拒绝也不回滚窗口（补跑上限按「判到」计，见 decideTick 注释）。
+        catchupDone = decision.catchupDone
+        const result = await this.runOnce(decision.trigger)
+        if (!result.started && result.reason === 'busy') {
+          emit({ at: at.toISOString(), kind: 'refused', detail: `tick 触发（${decision.trigger}）被单实例互斥拒绝（AC3）——不落账不重试，下一 tick 按新状态重判` })
+        }
+      } catch (error) {
+        emit({ at: new Date().toISOString(), kind: 'error', detail: `tick 异常（已捕获，下一 tick 继续）：${String(error?.message ?? error).slice(0, 500)}` })
+      }
+    },
+  }
+}
+
+// ── cordis 插件注册面（AC1 骨架 + #197 子票 C 计划触发接线）────────────────────
+// 配置与运行记录的读写、调度 gate、归档选择与执行、计划与触发的导出纯面见上方各段，
+// 单测双向钉于 tests/verify-session-archive.mjs（A 段）/ verify-session-archive-plan.mjs
+// （B 段）/ verify-session-archive-schedule.mjs（C 段，判据核心 = CHECKS 数组；tests/
+// session-archive-*.spec.ts 为 vitest 薄入口，#180 双入口同款）。
+// mount 接线：ctx.interval（cordis-plugin-timer mixin，随 fiber 释放自动清——timer 是
+// fiber effect，插件停载即清，无需手动 dispose）注册 60s tick；gate 判定在 tick 内
+// （effectiveSchedule/decideTick 消费 config——停用立即停，AC4 语义面）。
 // 行 config `storageDir`
 // 是部署/测试注入缝（挂具经 DSH_HOME 临时目录隔离，与本缝等价可互换）。
 
@@ -779,7 +1211,33 @@ export function apply(ctx, config = {}) {
       `session-archive 行 config.storageDir 必须是绝对路径（部署/测试注入缝；缺省 <DSH_HOME>/storages/session-archive），收到 ${JSON.stringify(cfg.storageDir)}。`,
     )
   }
-  // 无副作用声明（v1）：挂载即 started（loader 的挂载审计锚），任何实际工作都在
-  // 消费面（子票 C 计划触发/手动运行入口）首次调用读写函数时惰性发生。
-  void ctx
+  // 计划触发接线（#197 子票 C）：调度器依赖真实 ctx 面——快照从 workspaceRegistry +
+  // sessionQuery 合成（synthesizeSnapshot），归档动作绑 registry.archiveSession（单参，
+  // #196 E1 形态）。timer tick（60s）由 cordis-plugin-timer mixin 注册，随 fiber 释放
+  // 自动清（vendor/timer/src/index.ts 在场：interval 是 fiber effect）；停用语义在
+  // tick 内的 gate/decideTick 判定面（AC4「立即停止后续计划运行」），不靠定时器拆除。
+  // 挂载即 started（loader 审计锚）但零写盘副作用不变——首次 tick 才可能惰性读写盘
+  // （enabled=false 时 tick 为 none，连目录都不建）。
+  const scheduler = createScheduler({
+    storageDir: cfg.storageDir,
+    snapshot: () => synthesizeSnapshot(ctx),
+    archiveSession: (sessionId) => {
+      const registry = ctx.get('workspaceRegistry')
+      if (registry === undefined) {
+        throw new Error('session-archive：workspaceRegistry 服务缺席（ctx.get 返回 undefined）——归档动作面不可用，响亮失败不静默跳过。')
+      }
+      return registry.archiveSession(sessionId)
+    },
+    onEvent: (event) => {
+      try {
+        ctx.logger?.warn(`session-archive: ${event.kind}${event.detail ? ` ${event.detail}` : ''}`)
+      } catch {
+        // 日志面缺席/故障不阻断触发面
+      }
+    },
+  })
+  ctx.interval(() => {
+    // tick 自身不抛出（createScheduler 内聚捕获）；void 掉 promise 防 unhandled rejection
+    void scheduler.tick()
+  }, TICK_MS)
 }

@@ -75,7 +75,12 @@ stat('轮3(.rs调用后) ', await render())
 stat('轮4(无新调用)  ', await render())
 
 await handle.dispose()
-// #77：本用例无失败判据（只统计输出、末尾不 process.exit），故只做成功清理；
-// 失败/抛错路径由收尾上方的进程级兜底响亮报出 `tmp kept: <path>`（不再静默留场）。
+// #77：本用例无失败判据（只统计输出），故只做成功清理；失败/抛错路径由收尾上方的
+// 进程级兜底响亮报出 `tmp kept: <path>`（不再静默留场）。
+// #197：挂具 boot 栈补挂了 timer 服务（session-archive 行的 ctx.interval 依赖其 mixin
+// accessor）——timer 的 interval 是常驻 fiber effect，`handle.dispose()` 只拆 agent
+// 不拆 preset 行 fiber，事件循环不再自然清空，进程会挂起不退出。故末尾显式
+// process.exit(0)（verify-lang-asm 的 process.exit 先例同款；失败路径不走到这里）。
 tmpSettled = true
 await rm(root, { recursive: true, force: true })
+process.exit(0)

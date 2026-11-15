@@ -132,3 +132,9 @@ try {
 } finally {
   await rm(tmp, { recursive: true, force: true })
 }
+// #197：挂具 boot 栈补挂 timer 服务后（session-archive 行的 ctx.interval 依赖其 mixin
+// accessor），该行真的激活并注册 setInterval(60s)——timer 是常驻 fiber effect 且 Node
+// setInterval 无 unref，主流程结束后事件循环不清空、进程挂起不退出（此前 timer 缺席时
+// 该行 waiting-for 不激活、无 interval，进程自然退出——形态变化如实记录）。显式退出：
+// 失败路径 assert 抛错进 unhandled 非零退，不走这里（verify-lang-asm 先例同款）。
+process.exit(0)

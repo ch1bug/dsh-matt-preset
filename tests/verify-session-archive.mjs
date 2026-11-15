@@ -16,7 +16,8 @@
  * 覆盖段(与 spec 薄入口同序):D=默认值 / N=配置校验(双向:合法放行+非法拒绝点名)/
  * F=配置读写与持久化 / L=运行记录面 / G=开关切换与调度 gate(AC4)+frequency 变更刷新
  * (复审批注③)/ T=下次运行计算(本地时区边界)/ P=插件骨架接线(含行 config 未知键
- * 白名单,复审批注②)。
+ * 白名单,复审批注②;#197 起 P1 另钉 timer tick 注册形态——apply 挂载即注册 60s
+ * interval,mockCtx 桩在场)。
  *
  * 双向钉(AC5「单侧改必红」):实现侧改必红(D 默认值逐字段/D2 白名单集合相等/T 固定
  * after 断言具体日时刻/G 开关语义)+ 期望侧改必红(N 非法值必须被拒)。扰动真红记录:
@@ -35,6 +36,7 @@ import {
   DEFAULTS,
   FREQUENCY_KINDS,
   RETENTION_CHOICES,
+  TICK_MS,
   WEEKDAY_NAMES,
   appendEvent,
   apply,
@@ -54,6 +56,21 @@ import {
 
 /** 非空洞下界:判据面误删(重构漏迁/循环被截)时快集响亮红而不是静默缩水。 */
 export const MIN_CHECKS = 29
+
+/** apply 挂载面 mock ctx:interval 桩记录注册形态(#197 子票 C 接线后 apply 在挂载时
+ *  注册 60s tick——cordis-plugin-timer 的 ctx.mixin 面);get 桩返回 undefined(服务缺席,
+ *  挂载本身不消费——快照合成/归档动作都在触发时惰性取)。 */
+function mockCtx() {
+  const intervals = []
+  return {
+    intervals,
+    interval(callback, delay) {
+      intervals.push({ callback, delay })
+      return () => {}
+    },
+    get: () => undefined,
+  }
+}
 
 /** 判据面唯一事实源:每项 run() 抛错=红。需要盘面的用例自建自删临时目录。 */
 export const CHECKS = [
@@ -446,18 +463,23 @@ export const CHECKS = [
   // ── 段 P:插件骨架接线(AC1:行 config 注入缝双向——合法放行 / 非法响亮拒绝)──
   {
     id: 'P1',
-    name: 'apply 合法 storageDir 放行(绝对路径注入缝;骨架 apply 无运行时副作用)',
+    name: 'apply 合法 storageDir 放行(绝对路径注入缝)+ timer tick 注册(#197:60s interval 挂 cordis-plugin-timer)',
     run: () => {
-      assert.doesNotThrow(() => apply({}, { storageDir: join(tmpdir(), 'session-archive-anywhere') }))
-      assert.doesNotThrow(() => apply({})) // 缺省 = <DSH_HOME>/storages/session-archive
+      const ctx = mockCtx()
+      assert.doesNotThrow(() => apply(ctx, { storageDir: join(tmpdir(), 'session-archive-anywhere') }))
+      assert.strictEqual(ctx.intervals.length, 1)
+      assert.strictEqual(ctx.intervals[0].delay, TICK_MS)
+      const ctxBare = mockCtx()
+      assert.doesNotThrow(() => apply(ctxBare)) // 缺省 = <DSH_HOME>/storages/session-archive
+      assert.strictEqual(ctxBare.intervals.length, 1)
     },
   },
   {
     id: 'P2',
     name: 'apply 非法 storageDir 响亮拒绝(相对路径/非串——挂载审计防线不静默)',
     run: () => {
-      assert.throws(() => apply({}, { storageDir: 'relative/dir' }), /storageDir/)
-      assert.throws(() => apply({}, { storageDir: 42 }), /storageDir/)
+      assert.throws(() => apply(mockCtx(), { storageDir: 'relative/dir' }), /storageDir/)
+      assert.throws(() => apply(mockCtx(), { storageDir: 42 }), /storageDir/)
     },
   },
   {
@@ -480,10 +502,10 @@ export const CHECKS = [
     id: 'P4',
     name: 'apply 行 config 未知键响亮拒绝(拼错键不再静默吞——复审批注②,与 normalizeConfig 同哲学)',
     run: () => {
-      assert.throws(() => apply({}, { storageDir: join(tmpdir(), 'x'), typo: 1 }), /typo/)
-      assert.throws(() => apply({}, { storage_dir: join(tmpdir(), 'x') }), /storage_dir/)
+      assert.throws(() => apply(mockCtx(), { storageDir: join(tmpdir(), 'x'), typo: 1 }), /typo/)
+      assert.throws(() => apply(mockCtx(), { storage_dir: join(tmpdir(), 'x') }), /storage_dir/)
       // 对照:合法单键仍放行(白名单双向的两半)
-      assert.doesNotThrow(() => apply({}, { storageDir: join(tmpdir(), 'x') }))
+      assert.doesNotThrow(() => apply(mockCtx(), { storageDir: join(tmpdir(), 'x') }))
     },
   },
 ]

@@ -154,6 +154,14 @@ export async function bootHarness(presets = [], dataRoot) {
   await ctx.plugin(TokenMeter)
   await ctx.plugin(SessionProjection)
   await ctx.plugin(AgentPresetRegistry, { default: 'standard' })
+  // timer 服务（#197 子票 C）：session-archive 行的 apply 用 ctx.interval 注册 60s
+  // 计划 tick——mixin 访问依赖 timer 插件注册的 accessor（vendor/timer 的
+  // `ctx.mixin('timer', […])`，fiber effect）。harness boot 栈此前无 timer，inert stub
+  // 循环把 timer stub 成空对象也不带 mixin → 挂载报 `cannot get property "interval"
+  // without inject`（verify-lang-asm 实测）。补挂真 timer 插件（default export =
+  // TimerService，宿主生产栈同款），使行级 inject: ['timer'] 与 mixin 访问同形于生产。
+  const TimerServiceMod = await import('@deepseek-ai/cordis-plugin-timer')
+  await ctx.plugin(TimerServiceMod.default ?? TimerServiceMod)
   if (dataRoot !== undefined) {
     await ctx.plugin(Storage)
     await ctx.plugin(StorageJsonPlugin, { root: join(dataRoot, 'storages') })
