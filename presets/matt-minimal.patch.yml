@@ -451,3 +451,17 @@
           - id: handoff-tool
             name: dsh-matt-preset/handoff-tool.mjs
 
+          # session-archive(内置插件,随 preset 分发;#185 拆票,子票 A=#195):standing-mount
+          # 会话归档维护插件——缓解宿主会话列表膨胀(上游 1096 形态)。拆票分工:本票=骨架与配置
+          # 面(配置 schema/读写/运行记录面/调度 gate,导出纯函数面,单测 tests/session-archive.
+          # spec.ts);归档执行=子票 B,计划触发(cordis-plugin-timer 直调 workspace registry,接在
+          # session-archive.mjs 的 effectiveSchedule gate 上)=子票 C,seed 验证=子票 D。
+          # 配置与运行记录 = <DSH_HOME>/storages/session-archive/ 下两个机器本地 JSON(config.json
+          # / runs.json),文件形态重启保持;默认关闭(enabled:false,首装无文件=全默认),挂载零
+          # 副作用(apply 不建目录不写文件,首次写盘才建)。行 config 仅认 storageDir(绝对路径,
+          # 部署/测试注入缝;业务配置不在行 config——运行时改行走文件面,行 config 改动要换代重挂)。
+          # 边界:不装 dsh-schedule(D3/ADR-0001:26 先例——会话级提醒服务,冷会话不投递);不恢复
+          # scheduled-jobs.mjs 技能同步任务(ADR-0001 退役口径,#4);不承诺 DSH 设置页 UI(上游另立)。
+          - id: session-archive
+            name: dsh-matt-preset/session-archive.mjs
+

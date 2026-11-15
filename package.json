@@ -74,6 +74,8 @@
     "./workflow-wrapup-card.mjs/icon": "./plugin-meta/workflow-wrapup-card/icon.svg",
     "./ps7-reminder.mjs/locale/*.json": "./plugin-meta/ps7-reminder/locale/*.json",
     "./ps7-reminder.mjs/icon": "./plugin-meta/ps7-reminder/icon.svg",
+    "./session-archive.mjs/locale/*.json": "./plugin-meta/session-archive/locale/*.json",
+    "./session-archive.mjs/icon": "./plugin-meta/session-archive/icon.svg",
     "./*": "./*",
     "./package.json": "./package.json"
   },

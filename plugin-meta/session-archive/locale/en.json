@@ -1,0 +1,1 @@
+{ "meta": { "title": "Session Archive Maintenance", "description": "Standing-mount maintenance plugin that archives old sessions on a weekly / semimonthly / monthly plan, easing host session-list bloat (upstream 1096 shape). Disabled by default; config and run records live under DSH_HOME's storages/session-archive/ and survive restarts." } }

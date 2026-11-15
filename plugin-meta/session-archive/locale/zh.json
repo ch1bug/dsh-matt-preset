@@ -1,0 +1,1 @@
+{ "meta": { "title": "会话归档维护", "description": "standing-mount 会话归档维护插件：按每周/半月/每月计划归档旧会话，缓解会话列表膨胀（上游 1096 形态）。默认关闭；配置与运行记录落在 DSH_HOME 的 storages/session-archive/ 下，重启保持。" } }
