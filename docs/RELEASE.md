@@ -21,7 +21,7 @@ bump），next 跟 alpha；next 版本不进 latest 升级路径。
 npm version <official>-r<N>   # 写 package.json
 git tag dsh-v<official>-r<N>
 git push --tags               # push 属外部操作，走批末/human 门
-npm pack                      # 产物即安装源；npm publish 由 human 拍板（package.json 仍 private）
+npm pack                      # 产物即安装源；npm publish 走 npm registry（package.json 已摘 private，#193）；dist-tag 照 host 侧已拍款 = 默认 prerelease tag、不进 @latest；发布动作本身 = human 拍板（不可逆外部动作，D21）
 ```
 
 ## 安装 / 升级 / 回滚 / 卸载（copy-installer，bin/install.mjs；#41 起本节为安装事实源）
