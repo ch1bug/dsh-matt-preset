@@ -1,5 +1,5 @@
 /**
- * verify-precommit-hook.mjs — acceptance for `.githooks/pre-commit` (H1–H6).
+ * verify-precommit-hook.mjs — acceptance for `.githooks/pre-commit` + `.githooks/commit-msg` (H1–H12).
  *
  * Why: the hook is this repo's only gate (no CI), and it runs
  * `scripts/verify-all.mjs` against the WORKING TREE while `git commit` records
@@ -47,10 +47,34 @@
  *      (no silent fallback, no stuck commit). The fake nodes are sh scripts
  *      writing a DISTINGUISHABLE marker tag ('envfile-node' / 'processenv-node')
  *      — the JS stub writes 'ran', so the three cannot be confused.
+ *   H9–H12 (#192) the commit-msg privacy gate: the new hook `.githooks/commit-msg`
+ *      runs `scripts/privacy-scan.mjs --text-file "$1"` (the pre-publish text mode)
+ *      on the PROPOSED message, closing the timing gap measured twice in #190/#191 —
+ *      pre-commit runs BEFORE the message is written into COMMIT_EDITMSG, so the
+ *      repo scan's pending-message surface always saw the PREVIOUS commit's message
+ *      during a commit; a leaking commit message passed both faces and only went red
+ *      after landing (two amends on record). The fixture now also carries the REAL
+ *      privacy-scan.mjs next to the stub checker, so the guard tests the real
+ *      wiring (AC2: the hook only wires the criterion, never copies the scan
+ *      semantics — the criterion itself is pinned by tests/verify-privacy-scan.mjs).
+ *      H9 a message containing the RUNTIME homedir() string (the same source
+ *      privacy-scan's identityTokens() uses, so it must hit on this machine; no
+ *      literal lands in this file — same discipline as H5's runtime-built marker,
+ *      since this file is itself on the repo scan's tracked surface) → commit
+ *      refused with the redacted finding AND the remedy lines present. H10 a clean
+ *      message → commit lands and the scan's clean line is present (works under
+ *      both denylist states: verify-all injects a temp DSH_HOME so the denylist is
+ *      absent and privacy-scan prints its loud-skip lines — the assertion pins only
+ *      the 'clean' face, which both environments print). H11 an EMPTY message file
+ *      (`git commit -F <empty>`) → refused: privacy-scan exits 2 (loud input
+ *      failure, D47) and the hook must NOT read that as a pass. H12 SKIP_HOOKS=1 →
+ *      the documented escape hatch also bypasses commit-msg (the gate stays behind
+ *      the same authorized hatch as pre-commit; the amend self-red scenario stays a
+ *      designed-in case).
  */
 import { mkdtemp, mkdir, writeFile, copyFile, rm, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -102,6 +126,11 @@ try {
   await mkdir(join(root, '.githooks'), { recursive: true })
   await mkdir(join(root, 'scripts'), { recursive: true })
   await copyFile(join(REPO, '.githooks', 'pre-commit'), join(root, '.githooks', 'pre-commit'))
+  // #192: the commit-msg privacy gate travels WITH the real hook, and the REAL
+  // privacy-scan.mjs goes next to the stub checker — H9–H12 test the actual wiring
+  // (hook → node → scan), not a copied criterion.
+  await copyFile(join(REPO, '.githooks', 'commit-msg'), join(root, '.githooks', 'commit-msg'))
+  await copyFile(join(REPO, 'scripts', 'privacy-scan.mjs'), join(root, 'scripts', 'privacy-scan.mjs'))
   // The stub checker records WHAT IT SAW. Its git reads run in a NESTED fixture
   // repo (below) — that is the #158 shape: suites spawn git inside their OWN
   // repos, and a leaked GIT_INDEX_FILE points those reads at the HOST's temp
@@ -279,7 +308,10 @@ try {
   await envLocalSet('/dsh-verify120/no-such-node')
   await rm(marker, { force: true })
   const h8b = run(['commit', '-m', 'h8b'])
-  const h8bout = tail(h8b)
+  // 完整输出而非 tail(-4)：#192 起 commit-msg 钩子在每次提交上都会追加自己的几行
+  // （坏键警告 + scan 输出），把 pre-commit 的「不可执行」警告挤出 tail 窗口——
+  // 断言语义不变（警告仍在完整输出的 pre-commit 段），只放宽取窗。
+  const h8bout = `${h8b.stdout ?? ''}${h8b.stderr ?? ''}`
   if (h8b.status === 0 && existsSync(marker) && h8bout.includes('不可执行')) {
     ok('H8b. 键指到不可用路径 → 响亮说明后按 PATH 探测继续（不静默回退、不卡提交）')
   } else {
@@ -313,6 +345,65 @@ try {
   // 给 H7R 一个自洽的起跑树,别让它的红来自这里而不是泄漏本身。
   run(['add', '-A'])
 
+  // H9–H12 (#192): commit-msg privacy gate —— 双向钉（判据走真件，见头注释 H9–H12 段）。
+  // H9: 拟提交信息含本机身份串（**运行时** homedir()，与 privacy-scan 的 identityTokens()
+  // 同源同机必命中；字面串不进本文件源码——本文件就在真仓扫的 tracked 面上，H5 同纪律）
+  // → commit-msg 阻断提交，打码命中行与**两行改法指引**（占位符形态 + 行内 pii-allow，
+  // 复审 R1 补钉：只钉「提交被阻断」时指引三行被删 H9 仍绿——指引是 AC1 的另一半）。
+  await diverge('ninth\n', 'ninth\n')
+  const homeLeak = join(homedir(), 'dsh-precommit-probe-leak')
+  const h9 = run(['commit', '-m', `H9 probe reading ${homeLeak} for the gate check`])
+  const h9out = `${h9.stdout ?? ''}${h9.stderr ?? ''}`
+  if (h9.status !== 0 && h9out.includes('✗ privacy-scan --text') && h9out.includes('提交被阻断')
+    && h9out.includes('改法（#190/#191 收口配方）') && h9out.includes('pii-allow')) {
+    ok('H9. leaking message → commit refused by commit-msg, redacted finding + remedy named (#192)')
+  } else {
+    bad('H9. commit-msg privacy gate did not block the leaking message',
+      `exit=${h9.status} | ${tail(h9)}`)
+  }
+
+  // H10: 干净信息 → 钩子放行，提交落，clean 行在场（denylist 在/缺席两环境同形——
+  // 只钉 'clean' 面，SKIP (loud) 行不进断言）。
+  await diverge('tenth\n', 'tenth\n')
+  await rm(marker, { force: true })
+  const h10 = run(['commit', '-m', 'H10 clean message for the privacy gate'])
+  const h10out = `${h10.stdout ?? ''}${h10.stderr ?? ''}`
+  if (h10.status === 0 && h10out.includes('✓ privacy-scan --text: clean') && existsSync(marker)) {
+    ok('H10. clean message → commit lands, privacy-scan clean line present (hook ran)')
+  } else {
+    bad('H10. commit-msg gate blocked a clean message',
+      `exit=${h10.status} | ${tail(h10)}`)
+  }
+
+  // H11: 空信息文件（git commit -F）→ privacy-scan exit 2（输入空缺响亮失败，D47）
+  // → 钩子阻断而不是当"通过"。git 在 message 判空之前跑 commit-msg 钩子（本夹具实测）。
+  await diverge('eleventh\n', 'eleventh\n')
+  await writeFile(join(root, 'empty-msg.txt'), '')
+  const h11 = run(['commit', '-F', join(root, 'empty-msg.txt')])
+  const h11out = `${h11.stdout ?? ''}${h11.stderr ?? ''}`
+  // 「Aborting commit due to empty commit message」只在钩子**放行**后才会出现（git 才走到
+  // 自己的空 message 判定）。负断言钉住「是钩子拦的，不是 git 判空兜底拦的」——否则把
+  // exit 2 改成放行的扰动里，git abort 会替门背书、用例变空洞（本会话 P3 扰动实测过这个洞）。
+  if (h11.status !== 0 && h11out.includes('privacy-scan exit 2') && h11out.includes('未能核对')
+    && !h11out.includes('Aborting commit due to empty commit message')) {
+    ok('H11. empty message → privacy-scan exit 2 surfaced, hook refuses (D47: no silent pass)')
+  } else {
+    bad('H11. empty-message input failure was not refused loudly',
+      `exit=${h11.status} | ${tail(h11)}`)
+  }
+
+  // H12: SKIP_HOOKS=1 是同一扇授权逃生门（对 commit-msg 同样生效——语义钉住：门留在
+  // 既有逃生门后面，amend 自指红场景 = 设计内；扫描真跑则 --text-file 必在输出里）。
+  await diverge('twelfth\n', 'twelfth\n')
+  const h12 = run(['commit', '-m', 'H12 skipped by hatch'], { ...process.env, SKIP_HOOKS: '1' })
+  const h12out = `${h12.stdout ?? ''}${h12.stderr ?? ''}`
+  if (h12.status === 0 && h12out.includes('commit-msg: SKIP_HOOKS set') && !h12out.includes('--text-file')) {
+    ok('H12. SKIP_HOOKS=1 bypasses commit-msg too (same authorized hatch, semantics unchanged)')
+  } else {
+    bad('H12. SKIP_HOOKS semantics changed for commit-msg',
+      `exit=${h12.status} | ${tail(h12)}`)
+  }
+
   // H7R(非空洞翻转):把 unset 行从 **fixture 内的钩子副本**摘掉(真钩子不动),
   // 同样的 pathspec 提交必须复现 #158:临时 index 泄漏进 stub 环境、index 引用的
   // blob 不在本仓对象库、提交被拒。若摘行后这里仍绿(或泄漏没发生),说明 H7
@@ -341,6 +432,6 @@ try {
   await rm(out, { recursive: true, force: true })
 }
 
-console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H8) ===')
+console.log('\n=== PRE-COMMIT HOOK VERIFY (H1–H12) ===')
 console.log(results.join('\n'))
 process.exit(results.some(r => r.startsWith('  ✗')) ? 1 : 0)

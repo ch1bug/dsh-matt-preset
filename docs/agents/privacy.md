@@ -131,6 +131,16 @@ python -m git_filter_repo --force \
   验收 = `tests/verify-privacy-scan.mjs`（F1–F18b：夹具红/绿两面 + 真实仓常驻行），
   随 `node scripts/verify-all.mjs` 进 pre-commit；确属误报才在该行内联 `pii-allow` 并写理由
   （比整仓 `SKIP_HOOKS=1` 细一档，且例外留在 diff 里可 review）。
+  - **钩子接线：commit-msg 事前门（#192）**——「拟提交消息」从扫描面声明变机制：
+    `.githooks/commit-msg` 在 commit-msg 窗口对 git 传入的拟提交信息文件跑
+    `scripts/privacy-scan.mjs --text-file`（判据复用同一份，钩子只接线不复制语义）。
+    命中（exit 1）→ 阻断提交并输出改法指引（占位符 / 行内 `pii-allow`——#190/#191
+    收口配方）；输入空缺（exit 2）→ 同样阻断（D47：不静默放行）。时序背景：pre-commit
+    先于 COMMIT_EDITMSG 写入运行，仓扫的 pending-message 面在那个窗口看到的还是
+    **上一次**提交的信息——#190/#191 两次「提交后 privacy-scan 红、amend 收口」即此盲区。
+    `SKIP_HOOKS=1` 语义不变（同一扇授权逃生门）；amend 自指红 = 设计内，配方：
+    占位符化后 `--no-verify` amend + 快集复跑自证。守卫 = `tests/verify-precommit-hook.mjs`
+    H9–H12。
   - **② 的「本机安装布局」这一条（#107）为什么是"形状"而不是"词表"**：把 `Program Files`
     写进词表只能抓住标准根，而票面点名的四条里恰有两条是**同一台机器的自定义安装根**
     （`Other_Program_Files`、`Cadence`）——按词表追就是 D15 记的"无收敛军备竞赛"。 <!-- pii-allow: 判据自指——#107 形状vs词表论证的示例字面量，非本机串 -->

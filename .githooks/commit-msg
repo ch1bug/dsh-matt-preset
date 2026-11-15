@@ -1,0 +1,85 @@
+#!/bin/sh
+# .githooks/commit-msg —— 拟提交信息的 privacy 事前门（#192）。
+#
+# 时序盲区（#190/#191 两连击实测，2026-11-15）：pre-commit 先于 COMMIT_EDITMSG 写入运行
+# —— verify-all 里的 privacy-scan 仓扫虽把「拟提交消息」（COMMIT_EDITMSG）列进扫描面
+# （scripts/privacy-scan.mjs scanRepo 的 pending-message 面），但那个窗口里该文件还是
+# **上一次**提交的旧内容，本次信息要到提交后才进扫描面。于是「提交信息含个人 / 本机
+# 环境串」双面皆净地漏过门禁：#190、#191 两次都是提交后 privacy-scan 红、amend 占位符化
+# 收口。本钩子在 commit-msg 窗口对 **$1**（git 传入的拟提交信息文件）跑事前模式，把窗口
+# 补上——「拟提交消息」从扫描面声明变成机制。
+#
+# 判据复用（票面 AC2）：本文件只**接线**——命中判据、整行打码、SKIP (loud) 形态全部复用
+# `node scripts/privacy-scan.mjs --text-file "$1"`（与仓扫同一份 scanText / identityTokens /
+# denylistTokens；scripts/privacy-scan.mjs 头注「守卫不得手抄被测语义」口径）。本文件不含
+# 任何命中形态的副本。
+#
+# exit 约定（privacy-scan 事前模式：0 = 净 / 1 = 有命中 / 2 = 输入空缺或用法错误）：
+#   0 → 放行；
+#   1 → 阻断并输出改法指引（占位符形态 / 行内 pii-allow——#190/#191 收口配方）；
+#   2 → **同样阻断**并响亮说明（D47：事前模式的调用方拿 exit 0 当「内容门通过」，
+#       输入没核对成不得静默放行——空信息 / 文件缺席不是"通过"）；
+#   其他非 0（门自身异常，如 node 崩溃）→ 一律阻断（fail closed）。命中与门故障同为
+#       exit 1 时，privacy-scan 的原始输出在场可分辨——本钩子不解析输出（那是复制被测
+#       语义），按更保守的一侧处置。
+#
+# 环境缺位的两条响亮路径（与 pre-commit 同形，#120/#158 既有语义）：
+#   · SKIP_HOOKS=1 —— 授权逃生门，语义不变（对本钩子同样生效；amend 自指红场景 =
+#     设计内，配方：占位符化后 `--no-verify` amend + 快集复跑自证）；
+#   · 找不到 node —— 响亮说明后放行（本钩子无法核对，与 pre-commit「verify-all 响亮
+#     跳过」同判；修复指令同 pre-commit）。
+[ -n "$SKIP_HOOKS" ] && { echo "commit-msg: SKIP_HOOKS set — 跳过 privacy-scan（拟提交信息未核对）"; exit 0; }
+
+# 判据脚本缺席 = 门失效：fail closed（缺席必响亮，D47；scripts/privacy-scan.mjs 是
+# tracked 文件，缺席说明检出不完整，不是常态）。
+if [ ! -f "scripts/privacy-scan.mjs" ]; then
+  echo "commit-msg: scripts/privacy-scan.mjs 缺失 —— privacy 门无法核对拟提交信息，阻断提交"
+  echo "  修复：恢复该文件（git checkout -- scripts/privacy-scan.mjs）；确要绕过则 SKIP_HOOKS=1 并明确知道自己在跳什么"
+  exit 1
+fi
+
+# 找 node：与 pre-commit 同一顺序（DSH_MATT_NODE 进程环境 → 仓根 .env.local → PATH →
+# msys 自有位置）。#120 口径 B：字面安装路径一律不写死（msys 标准位是生态标准面，
+# 不是某台机器的身份）；缺输入响亮（D47）。
+env_file_get() {
+  [ -f .env.local ] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" .env.local | head -n 1 | tr -d '\r'
+}
+NODE=""
+if [ -n "${DSH_MATT_NODE:-}" ]; then
+  NODE="$DSH_MATT_NODE"
+else
+  NODE=$(env_file_get DSH_MATT_NODE)
+fi
+if [ -n "$NODE" ] && [ ! -x "$NODE" ]; then
+  echo "commit-msg: DSH_MATT_NODE=$NODE 不可执行 —— 修正进程环境 / .env.local 里的该键；本轮先按 PATH 探测继续"
+  NODE=""
+fi
+[ -n "$NODE" ] || NODE=$(command -v node 2>/dev/null)
+for c in "/ucrt64/bin/node.exe" "/usr/bin/node"; do
+  [ -n "$NODE" ] && break
+  [ -x "$c" ] && NODE="$c"
+done
+if [ -z "$NODE" ]; then
+  echo "commit-msg: 找不到 node —— 跳过 privacy-scan（拟提交信息未核对，未经验证）"
+  echo "  修复（任一）：把 node 加进 PATH；或设 DSH_MATT_NODE=<node 可执行文件路径>（进程环境或仓根 .env.local，键说明见 .env.example）"
+  exit 0
+fi
+
+echo "commit-msg: privacy-scan --text-file（拟提交信息事前扫描，#192）"
+"$NODE" scripts/privacy-scan.mjs --text-file "$1"
+SCAN=$?
+if [ "$SCAN" -eq 0 ]; then
+  exit 0
+fi
+if [ "$SCAN" -eq 1 ]; then
+  echo "commit-msg: 拟提交信息命中个人 / 本机环境串 —— 提交被阻断（#192 事前门；打码读数见上）"
+  echo '  改法（#190/#191 收口配方）：改占位符（~ / $HOME / %USERPROFILE% / <repo> / <user> / <DSH_HOME>）；'
+  echo '  确属必需时在该行内联 pii-allow 并写明理由（比 SKIP_HOOKS=1 细一档，例外留在提交信息里可 review）。'
+  echo "  流程与 amend 自指场景配方见 docs/agents/privacy.md §6。"
+  exit 1
+fi
+# 2 = 输入空缺 / 用法错误；其余 = 门自身异常。一律阻断，不静默放行（D47）。
+echo "commit-msg: privacy-scan exit $SCAN —— 拟提交信息未能核对（输入空缺 / 用法 / 门自身异常），阻断提交"
+echo "  原始报错见上方 privacy-scan 输出；流程文档 docs/agents/privacy.md。"
+exit 1
