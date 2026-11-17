@@ -1,7 +1,7 @@
 # CONTEXT — Matt 工作流模式 · 定时任务设计
 
 单一语境：Matt 工作流模式（`~/.dsh/.agent-presets/matt/`）的配套工具设计。本文是术语表，不含实现细节；已定决策见 `docs/adr/`。
-决策索引每条一行（D1–D57）：叙事细节看被指的 ADR 与 [docs/observations.md](docs/observations.md)（无 ADR 决策的详档 + 观察记录档案；#70 迁出，归档不再更新）。
+决策索引每条一行（D1–D58）：叙事细节看被指的 ADR 与 [docs/observations.md](docs/observations.md)（无 ADR 决策的详档 + 观察记录档案；#70 迁出，归档不再更新）。
 
 ## 术语
 
@@ -40,12 +40,13 @@
 - cron 守护进程运行中；DSH 内 bash 可联网（github.com 可达）。
 - `cordis-plugin-timer`（`ctx.timeout/interval/debounce/throttle`，随 fiber 释放）可用于插件内定时。
 - 提醒/定时三分事实（0.2.1，#90 复核）：**服务层**——`dsh-schedule` + `ui-schedule` 由出货 `web-app` bundle 内建提供；**出货面**——`tool-schedule` 行由 `standard` / `ptc` / `cordis` 各自声明（`minimal` 不声明）；**本仓面**——本仓四档 preset 目前都未声明该行，matt 会话拿不到 `schedule_*` 工具（#117 拍板不回补：方向 b 有意接受该缺口，理由登记于官方 roster 快照 `tests/fixtures/official-presets-roster-v1.json` 的 `registeredDiff`）。
+- 会话自动归档（#185 拆票链 #195–#198，2026-11-17）：本仓面 = standing-mount 维护插件 `session-archive`（**默认关**，不走 `tool-schedule` 行；三频率排班 + per-workspace 保底 10 的显示层归档，缓解宿主会话列表膨胀——1096 形态）——决策与边界见 D58 / [ADR-0020](docs/adr/0020-session-archive-v1.md)。
 - 宿主组成（base/web.cordis.yml）不可改：任何新能力只能进 preset 层。
 
 - `npm install --prefix ~/.dsh` 会按 ~/.dsh/package.json 重建 node_modules——曾误删 cron-parser/luxon（2026-08-19，装 yaml 时）。现 ~/.dsh/package.json 固定 cron-parser/luxon/yaml 三个依赖；装新依赖务必显式列全或先读 package.json。
 - **DSH 测试/升级通道分工（human 指令，2026-10-01）**：日常测试一律用**源代码检出 + 网页端**（`pnpm run dev:web` / 现有 web URL）；**桌面端（安装版）只用于稳定后的版本升级**——开发中的改动不得先行装上桌面端。任何"装新版本试试"的动作先问自己走的是哪条通道。
 
-## 决策索引（D1–D57）
+## 决策索引（D1–D58）
 
 > 每条一行：**Dn（日期，来源）** — 一句决策 → 指针。有 ADR 的决策以 ADR 为权威叙述；无 ADR 的决策细节与**全部决策行的原文快照**（含历次修订注记）在 [docs/observations.md](docs/observations.md) 决策详档节（#70 迁出，归档不再更新）。
 
@@ -106,6 +107,7 @@
 - **D55（2026-11-01，#58 落地）** — batch-mode 规则块组件化（workflow components）：`@@ batch-mode` 节物理抽为 workflow-component-batch.txt + `COMPONENTS` 注册表（组件关 = 注入零 batch 节；组件开 = 与冻结基线逐字节等价、基线零重取；未知组件名响亮抛；profile 同 id 覆盖压过组件默认文本） → [ADR-0016](docs/adr/0016-workflow-components.md)
 - **D56（2026-11-06 拍板，#179 入册）** — 注意力经济学作为工作流优化目标轴：门 3 内部改三层分级（L0 自决 / L1 攒批 / L2 立即问，四类恒 L2：D21 外部动作、recovery STOP-and-ask、隐私面、范围扩张/AC 改写/triage 三选一）+ 批末收口卡与委派完成卡双形态（action-cards 缺席时降级为正文收口段、降级显式）；实施分两波 → [ADR-0017](docs/adr/0017-attention-economy.md)
 - **D57（2026-10-20 grill 拍板，2026-11-14 裁决维持，#53 落地）** — PM 组合层基座依赖反转：三层划分维持（forge project = 组合层永存 / DSH 任务板 = 可选执行层 / batch-state.md = 批协议层只管批生命周期不担 PM 职责）；优先级 = 票面 `P0` 标签（#142 单档例外轴，project 侧当红旗列，不另设字段）；L1（依赖关系图，吃原生 blocked-by 边 + frontier.mjs 现算）立即 / L0（看板+里程碑）延后（真出现跨仓 roadmap 需求再开板，前置 = `gh auth refresh -s project`）/ L2、L3 待议；三档降级梯度只钉口径不造载体（不建板、不新建 docs/tickets/、不升格 batch-state.md） → [ADR-0019](docs/adr/0019-pm-layer-on-forge-project.md)
+- **D58（2026-11-17，#185 拆票链 #195–#198 落地）** — 会话归档 v1 = preset standing-mount 维护插件 `session-archive`（缓解宿主会话列表膨胀 1096 形态，**运营缓解非根因修复**）：载体拍板 = cordis-plugin-timer 只当 60s ticker（「tick+gate 可承载任意频率」载体判定不升级上报；三频率语义全在 `computeNextRun`/`effectiveSchedule` 纯函数面）；选择算法 = per-workspace 分组 + 「无 workspace」虚拟组各自保底 10 + 保留期 14/30/60/90 默认 30 + 排除面 pinned/live/subagent/active + cap 护栏组级独立（默认关、示例 900）；**默认关**挂载零副作用、显示层归档不删会话/不自动取消归档/不自动清 pinned、补跑最多一次（错过不补多批）、单实例互斥；v1 无 UI 触发面（模块导出面）；**不装 dsh-schedule**（ADR-0001 先例：会话级提醒冷会话不投递）、**不恢复 scheduled-jobs.mjs 技能同步任务**（#4 退役口径）、不承诺 DSH 设置页 UI、不修上游前端列表分页（缺口留档待实机证据另立上游票）；1096 量级 = seed 夹具判据（合计口径 8 组分布全链路 992/24 对账、全链路毫秒级）+ 实机窗口操作清单备妥（真机前端复现不在 agent 环境） → [ADR-0020](docs/adr/0020-session-archive-v1.md)
 
 ## 观察记录与历史（迁出指针）
 

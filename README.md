@@ -57,6 +57,10 @@ npx --allow-git=all github:ch1bug/dsh-matt-preset install   # 默认挂到 profi
 > 定时任务：`scheduled-jobs.mjs` 已退役（#4，ADR-0001）。0.2.1 起提醒/定时服务已内建出货，
 > 但本仓 preset 未声明 `tool-schedule` 行、`schedule_*` 工具不可用——三分事实（服务层/出货面/
 > 本仓面，唯一全文）见 [CONTEXT.md](CONTEXT.md)「已核实的环境事实」（补行归 #117）。
+> 会话自动归档（#185）不走该行：standing-mount 维护插件 `session-archive` 随 preset 分发
+> （**默认关**，挂载零副作用；三频率排班 + per-workspace 保底 10 的显示层归档，缓解宿主
+> 会话列表膨胀）——决策与边界见 [CONTEXT.md](CONTEXT.md) D58 与
+> [ADR-0020](docs/adr/0020-session-archive-v1.md)。
 
 ## 沙箱批跑（sandcastle × DSH headless，opt-in）
 
@@ -128,7 +132,7 @@ dsh-matt-preset/
 ├── sandcastle/                   # 沙箱批跑（opt-in）：模板 + 接入文档
 │   ├── README.md
 │   └── templates/                # Dockerfile / dsh.ts adapter / audit-ticket / run-ticket / night-run / lib / worker-context
-├── CONTEXT.md                    # 术语表 + 决策（D1–D57）
+├── CONTEXT.md                    # 术语表 + 决策（D1–D58）
 ├── AGENTS.md                     # steering 入口（导航指针）
 ├── docs/adr/                     # 架构决策记录
 ├── docs/agents/                  # issue-tracker / triage-labels / domain 约定
