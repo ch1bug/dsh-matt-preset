@@ -12,7 +12,7 @@
  *   import { anchorOf, anchorOfPackage } from './runtime-anchor.mjs'   // 纯函数
  *   node scripts/runtime-anchor.mjs                                   // 打印本仓锚（CLI，包装器用）
  *
- * CLI 失败**响亮**（不猜）：package.json 读不到、或 version 不是 `<official>-r<N>` / `-a<N>`
+ * CLI 失败**响亮**（不猜）：package.json 读不到、或 version 不是 `<official>-r<N>` / `-a<N>` / `-v<N>`
  * 形态 → stderr 一行 + exit 1。
  */
 import { readFileSync } from 'node:fs'
@@ -21,9 +21,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** `<official>-r<N>` / `<official>-a<N>` → `<official>`；形态不符返回 undefined。 */
+/** `<official>-r<N>` / `<official>-a<N>` / `<official>-v<N>` → `<official>`；形态不符返回 undefined。 */
 export function anchorOf(version) {
-  const m = /^(.+)-[ra]\d+$/.exec(String(version ?? ''))
+  const m = /^(.+)-[rav]\d+$/.exec(String(version ?? ''))
   return m === null ? undefined : m[1]
 }
 
@@ -41,7 +41,7 @@ if (isMain) {
   const anchor = anchorOfPackage()
   if (anchor === undefined) {
     console.error(
-      'runtime-anchor: 读不到 package.json 的 version，或版本不是 `<official>-r<N>` / `-a<N>` 形态 —— 无法派生宿主锚（ADR-0008）',
+      'runtime-anchor: 读不到 package.json 的 version，或版本不是 `<official>-r<N>` / `-a<N>` / `-v<N>` 形态 —— 无法派生宿主锚（ADR-0008）',
     )
     process.exit(1)
   }

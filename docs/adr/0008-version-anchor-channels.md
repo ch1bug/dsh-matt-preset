@@ -46,3 +46,8 @@ Status: accepted（2026-10-16，human 拍板，triage 会话落盘）
   故**无契约适配工作**——详见 [dev-environment §2](../dev-environment.md) 的漂移面注记。
   **另一条实测更正**：`docs/upgrade-guide/` 下**没有 rc 级 guide**（最新只到
   `v0.2.1-alpha.4`），rc 间取证须用 **release notes + compare API**。
+- **2026-11-15（npm 首发准备，形态族第三扩展）**：human 指定两包 npm 首发版本形态
+  **`0.2.2-rc.3-v1`**（`v<N>` = npm 首发通道）——family scheme 由 `-<r|a><N>` 扩展为
+  **`-<r|a|v><N>`**；`scripts/runtime-anchor.mjs` 单源派生正则同步 `[ra]` → `[rav]`
+  （锚派生语义不变：`0.2.2-rc.3-v1` → `0.2.2-rc.3`，全部消费者经单源继承）；
+  RELEASE.md 通道表 latest 行例同步。host 侧同步采用（host 无派生器，version 为纯标签）。

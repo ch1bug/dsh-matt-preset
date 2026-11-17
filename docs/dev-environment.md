@@ -483,7 +483,7 @@ pre-commit **不加**「索引含他人条目」检查：提交时刻钩子只�
 
 ## 2. 宿主锚点（ADR-0008）
 
-跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.2-rc.3-r1` ↔ 宿主 tag
+跟随 DSH 运行时 **rc 线**（latest 通道）：本仓 `0.2.2-rc.3-v1` ↔ 宿主 tag
 `dsh-v0.2.2-rc.3`。**浅克隆默认分支会落到 alpha 系**（实测 `dsh-v0.2.1-alpha.4`），
 与锚不符 —— 必须显式 checkout tag。
 
