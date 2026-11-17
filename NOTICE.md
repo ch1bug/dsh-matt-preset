@@ -16,3 +16,9 @@
 - 原始 DeepSeek 版权与 MIT 许可声明见上游仓库。
 
 术语与决策记录见 `CONTEXT.md` 与 `docs/adr/`。
+- `skills-fork/grilling/SKILL.md` — fork 自
+  [mattpocock/skills](https://github.com/mattpocock/skills) `skills/productivity/grilling/SKILL.md`
+  （MIT，Copyright 2026 Matt Pocock；批 DD #174 落地）——增补「决策前提实测」检查项；
+  fork 隔离机制见 `scripts/sync-skills.exclude`（FORK-DRIFT 警告保底）。
+- 借用/派生面**单一登记册**：`docs/vendored-registry.md`（lic 归属与上游同步策略的
+  逐模块登记——新增借用面先走确认通道再入册）。
